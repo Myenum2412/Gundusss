@@ -32,7 +32,7 @@ const data = {
       plan: "Enterprise",
     },
     {
-      name: "Acme Corp.",
+      name: "SOS Corp.",
       logo: (
         <WalletIcon
         />
