@@ -52,7 +52,8 @@ export default function Home() {
   }
 
   return (
-    <main className="container">
+    <main className="legacy">
+      <div className="container">
       <h1>Fees Manager</h1>
       <p>Next.js frontend → Fastify API → Postgres</p>
 
@@ -129,6 +130,7 @@ export default function Home() {
             </tbody>
           </table>
         )}
+      </div>
       </div>
     </main>
   );
