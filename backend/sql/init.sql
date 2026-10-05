@@ -12,3 +12,16 @@ INSERT INTO fees (student_name, amount, status, due_date) VALUES
   ('Diya Patel', 3200.50, 'paid', CURRENT_DATE - INTERVAL '2 days'),
   ('Kabir Singh', 1800.00, 'overdue', CURRENT_DATE - INTERVAL '5 days')
 ON CONFLICT DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Default login: admin@seedsofsuccess.com / Admin123!
+-- Hash generated with bcrypt (cost 10). Re-seeded at backend boot if missing.
+INSERT INTO users (email, password_hash) VALUES
+  ('admin@seedsofsuccess.com', '$2b$10$PvMlCmSPXftoAb1avFaFzez/AUaD9l.I0cqocMudWPTLW2zE77aeG')
+ON CONFLICT (email) DO NOTHING;

@@ -3,170 +3,93 @@
 import * as React from "react"
 
 import { NavMain } from "@/components/nav-main"
-import { NavProjects } from "@/components/nav-projects"
 import { NavUser } from "@/components/nav-user"
-import { TeamSwitcher } from "@/components/team-switcher"
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
-import { GalleryVerticalEndIcon, LayoutDashboardIcon, WalletIcon, UsersIcon, Settings2Icon, FrameIcon, PieChartIcon, MapIcon } from "lucide-react"
+import {
+  SproutIcon,
+  LayoutDashboardIcon,
+  WalletIcon,
+  GraduationCapIcon,
+  ClipboardListIcon,
+  ReceiptIcon,
+  CreditCardIcon,
+  MegaphoneIcon,
+  ChartColumnIcon,
+  SettingsIcon,
+} from "lucide-react"
 
-// This is sample data.
+// Sidebar menu for Seeds of Success fees app.
 const data = {
   user: {
     name: "shadcn",
     email: "m@example.com",
     avatar: "/avatars/shadcn.jpg",
   },
-  teams: [
-    {
-      name: "Gundusss Org",
-      logo: (
-        <GalleryVerticalEndIcon
-        />
-      ),
-      plan: "Enterprise",
-    },
-    {
-      name: "SOS Corp.",
-      logo: (
-        <WalletIcon
-        />
-      ),
-      plan: "Startup",
-    },
-    {
-      name: "Evil Corp.",
-      logo: (
-        <UsersIcon
-        />
-      ),
-      plan: "Free",
-    },
-  ],
   navMain: [
     {
-      title: "Org Menu",
+      title: "Dashboard",
       url: "/dashboard",
-      icon: (
-        <LayoutDashboardIcon
-        />
-      ),
+      icon: <LayoutDashboardIcon />,
       isActive: true,
+    },
+    {
+      title: "Fees",
+      url: "/dashboard/fees",
+      icon: <WalletIcon />,
+    },
+    {
+      title: "Students",
+      url: "#",
+      icon: <GraduationCapIcon />,
       items: [
         {
-          title: "Dashboard",
-          url: "/dashboard",
+          title: "All Students",
+          url: "/dashboard/students",
         },
         {
-          title: "All Fees",
-          url: "/",
-        },
-        {
-          title: "Members",
-          url: "#",
+          title: "Student Groups",
+          url: "/dashboard/students/groups",
         },
       ],
+    },
+    {
+      title: "Fee Structure",
+      url: "/dashboard/fee-structure",
+      icon: <ClipboardListIcon />,
+    },
+    {
+      title: "Receipts",
+      url: "/dashboard/receipts",
+      icon: <ReceiptIcon />,
     },
     {
       title: "Billing",
-      url: "#",
-      icon: (
-        <WalletIcon
-        />
-      ),
-      items: [
-        {
-          title: "Pending",
-          url: "/",
-        },
-        {
-          title: "Paid",
-          url: "/",
-        },
-        {
-          title: "Overdue",
-          url: "/",
-        },
-      ],
+      url: "/dashboard/billing",
+      icon: <CreditCardIcon />,
     },
     {
-      title: "Account",
-      url: "#",
-      icon: (
-        <UsersIcon
-        />
-      ),
-      items: [
-        {
-          title: "Login",
-          url: "/login",
-        },
-        {
-          title: "Sign up",
-          url: "/signup",
-        },
-        {
-          title: "Forgot password",
-          url: "/forgot-password",
-        },
-      ],
+      title: "Announcement",
+      url: "/dashboard/announcements",
+      icon: <MegaphoneIcon />,
+    },
+    {
+      title: "Reports",
+      url: "/dashboard/reports",
+      icon: <ChartColumnIcon />,
     },
     {
       title: "Settings",
-      url: "#",
-      icon: (
-        <Settings2Icon
-        />
-      ),
-      items: [
-        {
-          title: "General",
-          url: "#",
-        },
-        {
-          title: "Team",
-          url: "#",
-        },
-        {
-          title: "Billing",
-          url: "#",
-        },
-        {
-          title: "Limits",
-          url: "#",
-        },
-      ],
-    },
-  ],
-  projects: [
-    {
-      name: "Design Engineering",
-      url: "#",
-      icon: (
-        <FrameIcon
-        />
-      ),
-    },
-    {
-      name: "Sales & Marketing",
-      url: "#",
-      icon: (
-        <PieChartIcon
-        />
-      ),
-    },
-    {
-      name: "Travel",
-      url: "#",
-      icon: (
-        <MapIcon
-        />
-      ),
+      url: "/dashboard/settings",
+      icon: <SettingsIcon />,
     },
   ],
 }
@@ -175,11 +98,22 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
-        <TeamSwitcher teams={data.teams} />
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton size="lg">
+              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                <SproutIcon className="size-4" />
+              </div>
+              <div className="grid flex-1 text-left text-sm leading-tight">
+                <span className="truncate font-medium">seeds of success</span>
+                <span className="truncate text-xs">Fees Manager</span>
+              </div>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
         <NavMain items={data.navMain} />
-        <NavProjects projects={data.projects} />
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={data.user} />
