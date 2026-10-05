@@ -1,228 +1,438 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
+import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
+import { StatusBadge } from "@/components/status-badge"
+import { Button } from "@/components/ui/button"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { loadStudents, type StoredStudent } from "@/lib/students-store"
+import { loadReceipts, type StoredReceipt } from "@/lib/receipts-store"
+import { loadAnnouncements, type StoredAnnouncement } from "@/lib/announcements-store"
+import { getWaStatus, type WaState } from "@/lib/api"
+import { momTrend } from "@/lib/stat-trend"
+import Stats01 from "@/components/stats-01"
+import { RowActions } from "@/components/row-actions"
+import { DetailItem, DetailList } from "@/components/detail-list"
+import { LiveBadge } from "@/components/live-badge"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { isSyncing, sameJson } from "@/lib/live"
+import { useLiveReload } from "@/hooks/use-live-reload"
 import {
   ArrowRightIcon,
+  ArrowUpRightIcon,
   ClipboardListIcon,
-  GraduationCapIcon,
-  IndianRupeeIcon,
+  LayersIcon,
   MegaphoneIcon,
   PlusIcon,
   ReceiptIcon,
-  UsersIcon,
-  WalletIcon,
+  SettingsIcon,
 } from "lucide-react"
-import { DashboardShell } from "@/components/dashboard-shell"
-import { StatCard } from "@/components/stat-card"
-import { StatusBadge } from "@/components/status-badge"
-import { Button } from "@/components/ui/button"
-import { loadStudents } from "@/lib/students-store"
-import { loadGroups } from "@/lib/groups-store"
-import { loadReceipts } from "@/lib/receipts-store"
-import { loadAnnouncements } from "@/lib/announcements-store"
 
 function inr(n: number) {
-  if (!Number.isFinite(n)) return "₹0"
-  return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
+  return `₹ ${n.toLocaleString("en-IN")}`
 }
 
 export default function Page() {
-  const [counts, setCounts] = useState({
-    students: 0,
-    groups: 0,
-    receipts: 0,
-    collected: 0,
-    announcements: 0,
-  })
-  const [recentReceipts, setRecentReceipts] = useState<
-    { id: string; name: string; amount: string; status: string }[]
-  >([])
-  const [recentStudents, setRecentStudents] = useState<
-    { name: string; id: string; detail: string; status: string }[]
-  >([])
+  const [students, setStudents] = useState<StoredStudent[]>([])
+  const [receipts, setReceipts] = useState<StoredReceipt[]>([])
+  const [announcements, setAnnouncements] = useState<StoredAnnouncement[]>([])
+  const [wa, setWa] = useState<WaState | null>(null)
+  const [viewReceipt, setViewReceipt] = useState<StoredReceipt | null>(null)
 
-  useEffect(() => {
-    const students = loadStudents()
-    const groups = loadGroups()
-    const receipts = loadReceipts()
-    const announcements = loadAnnouncements()
-    const collected = receipts.reduce((sum, r) => {
-      const v = parseFloat(String(r.amount))
-      return sum + (Number.isFinite(v) ? v : 0)
-    }, 0)
-    setCounts({
-      students: students.length,
-      groups: groups.length,
-      receipts: receipts.length,
-      collected,
-      announcements: announcements.length,
-    })
-    setRecentReceipts(
-      [...receipts].slice(-5).reverse().map((r) => ({
-        id: r.receiptId,
-        name: `${r.studentName} (${r.studentId})`,
-        amount: String(r.amount),
-        status: r.status,
-      }))
-    )
-    setRecentStudents(
-      [...students].slice(-5).reverse().map((s) => ({
-        name: s.studentName,
-        id: s.studentId,
-        detail: `${s.group ?? "—"} · ${s.course ?? "—"}`,
-        status: s.status ?? "Active",
-      }))
+  const reloadOverview = useCallback(() => {
+    if (isSyncing()) return
+    Promise.all([loadStudents(), loadReceipts(), loadAnnouncements()]).then(
+      ([s, r, a]) => {
+        if (isSyncing()) return
+        setStudents((prev) => (sameJson(prev, s) ? prev : s))
+        setReceipts((prev) => (sameJson(prev, r) ? prev : r))
+        setAnnouncements((prev) => (sameJson(prev, a) ? prev : a))
+      }
     )
   }, [])
 
-  return (
-    <DashboardShell
-      crumbs={[{ label: "Dashboard" }]}
-      title="Good morning — here's your fee overview"
-      description="Track students, collections, and outreach at a glance. Every workflow below opens the same pages you already use."
-      action={
-        <>
-          <Button variant="outline" render={<Link href="/dashboard/students" />}>
-            <UsersIcon data-icon="inline-start" />
-            Students
-          </Button>
-          <Button render={<Link href="/dashboard/receipts" />}>
-            <PlusIcon data-icon="inline-start" />
-            New receipt
-          </Button>
-        </>
-      }
-    >
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          icon={<GraduationCapIcon />}
-          label="Students"
-          value={String(counts.students)}
-          hint={`${counts.groups} groups configured`}
-        />
-        <StatCard
-          icon={<IndianRupeeIcon />}
-          label="Collected"
-          value={inr(counts.collected)}
-          hint={`${counts.receipts} receipts recorded`}
-        />
-        <StatCard
-          icon={<ReceiptIcon />}
-          label="Receipts"
-          value={String(counts.receipts)}
-          hint="Auto-numbered RCP series"
-        />
-        <StatCard
-          icon={<MegaphoneIcon />}
-          label="Announcements"
-          value={String(counts.announcements)}
-          hint="WhatsApp broadcast log"
-        />
-      </div>
+  useEffect(() => {
+    reloadOverview()
+    getWaStatus().then(setWa).catch(() => setWa(null))
+  }, [reloadOverview])
 
-      <div className="grid gap-4 lg:grid-cols-5">
-        <div className="card-elevated overflow-hidden lg:col-span-3">
-          <div className="flex items-center justify-between border-b border-border/70 px-5 py-4">
+  useLiveReload(reloadOverview)
+
+  const collected = receipts.reduce((sum, r) => sum + (parseFloat(String(r.amount)) || 0), 0)
+  const waOk = wa?.status === "ready"
+
+  const stats = [
+    {
+      name: "Total students",
+      value: String(students.length),
+      ...momTrend(students.map((s) => ({ date: s.joiningDate }))),
+    },
+    {
+      name: "Fees collected",
+      value: inr(collected),
+      ...momTrend(receipts.map((r) => ({ date: r.paymentDate, amount: parseFloat(String(r.amount)) || 0 }))),
+    },
+    {
+      name: "Receipts issued",
+      value: String(receipts.length),
+      ...momTrend(receipts.map((r) => ({ date: r.paymentDate }))),
+    },
+    {
+      name: "Announcements",
+      value: String(announcements.length),
+      ...momTrend(announcements.map((a) => ({ date: a.createdAt }))),
+    },
+  ]
+
+  // Collections by month (last 6 months, from receipts page data)
+  const byMonth = (() => {
+    const map = new Map<string, number>()
+    for (const r of receipts) {
+      const key = (r.paymentDate || "").slice(0, 7)
+      if (!/^\d{4}-\d{2}$/.test(key)) continue
+      map.set(key, (map.get(key) ?? 0) + (parseFloat(String(r.amount)) || 0))
+    }
+    return [...map.entries()].sort().slice(-6)
+  })()
+  const maxMonth = Math.max(1, ...byMonth.map(([, v]) => v))
+
+  // Collections by payment method (from receipts page data)
+  const byMethod = (() => {
+    const map = new Map<string, { count: number; total: number }>()
+    for (const r of receipts) {
+      const m = r.method || "Other"
+      const e = map.get(m) ?? { count: 0, total: 0 }
+      e.count += 1
+      e.total += parseFloat(String(r.amount)) || 0
+      map.set(m, e)
+    }
+    return [...map.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 5)
+  })()
+  const maxMethod = Math.max(1, ...byMethod.map(([, v]) => v.total))
+
+  const recentReceipts = receipts.slice(-6).reverse()
+  const recentStudents = students.slice(-5).reverse()
+  const recentAnnouncements = announcements.slice(-4).reverse()
+
+  const shortcuts = [
+    { title: "Fee Structure", desc: "Define fee heads and assign students", icon: ClipboardListIcon, href: "/dashboard/fee-structure" },
+    { title: "Student Groups", desc: "Bundle students by course and batch", icon: LayersIcon, href: "/dashboard/students/groups" },
+    { title: "Announcements", desc: "Message students on WhatsApp", icon: MegaphoneIcon, href: "/dashboard/announcements" },
+    { title: "Settings", desc: wa ? (waOk ? `WhatsApp connected (+${wa.connectedNumber ?? "?"})` : "WhatsApp not connected") : "WhatsApp and dropdown options", icon: SettingsIcon, href: "/dashboard/settings", badge: wa ? (waOk ? "Connected" : "Not connected") : undefined },
+  ]
+
+  return (
+    <DashboardShell trail={[{ label: "Dashboard" }]}>
+      <PageHeader
+        title="Overview"
+        description="Students, groups, fee structures, receipts, announcements, and WhatsApp — at a glance."
+        meta={<LiveBadge />}
+        actions={
+          <>
+            <Button variant="outline" render={<Link href="/dashboard/receipts" />}>
+              <ReceiptIcon />
+              New Receipt
+            </Button>
+            <Button render={<Link href="/dashboard/students" />}>
+              <PlusIcon />
+              Add Student
+            </Button>
+          </>
+        }
+      />
+
+      {/* Stat strip — stats-01 block, one stat per area */}
+      <Stats01 stats={stats} />
+
+      {/* Collections + methods */}
+      <div className="grid shrink-0 gap-3 lg:grid-cols-5">
+        <section className="rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:col-span-3">
+          <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold tracking-tight">Recent payments</h2>
-              <p className="text-xs text-muted-foreground">Latest receipts across all students</p>
+              <h2 className="text-[13px] font-semibold tracking-tight">Collections by month</h2>
+              <p className="text-xs text-muted-foreground">Summed from the Receipts page</p>
             </div>
-            <Button variant="ghost" size="sm" render={<Link href="/dashboard/receipts" />}>
-              View all <ArrowRightIcon />
+            <Button variant="outline" size="sm" render={<Link href="/dashboard/receipts" />}>
+              Receipts
+              <ArrowRightIcon />
             </Button>
           </div>
-          {recentReceipts.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
-              <div className="flex size-11 items-center justify-center rounded-2xl border bg-muted text-muted-foreground">
-                <WalletIcon className="size-5" />
-              </div>
-              <p className="text-sm font-medium">No payments yet</p>
-              <p className="max-w-xs text-xs text-muted-foreground">
-                Record your first payment — the receipt ID is generated automatically.
-              </p>
-              <Button size="sm" className="mt-1" render={<Link href="/dashboard/receipts" />}>
-                <PlusIcon data-icon="inline-start" /> New receipt
-              </Button>
-            </div>
+          {byMonth.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No dated receipts yet — record a payment to see monthly totals here.
+            </p>
           ) : (
-            <ul className="divide-y divide-border/70">
-              {recentReceipts.map((r) => (
-                <li key={r.id} className="flex items-center justify-between gap-3 px-5 py-3.5 transition-colors duration-150 hover:bg-muted/50">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{r.name}</p>
-                    <p className="text-xs text-muted-foreground tabular-nums">{r.id}</p>
+            <div className="mt-4 flex h-36 items-end gap-2">
+              {byMonth.map(([month, total]) => (
+                <div key={month} className="flex min-w-0 flex-1 flex-col items-center gap-1.5" title={`${month}: ${inr(total)}`}>
+                  <span className="text-[11px] font-medium tabular-nums text-muted-foreground">
+                    {total >= 1000 ? `${Math.round(total / 1000)}k` : total}
+                  </span>
+                  <div className="flex w-full flex-1 items-end rounded-lg bg-muted/60">
+                    <div
+                      className="w-full rounded-lg bg-primary"
+                      style={{ height: `${Math.max(6, (total / maxMonth) * 100)}%` }}
+                    />
                   </div>
-                  <div className="flex shrink-0 items-center gap-3">
-                    <span className="text-sm font-semibold tabular-nums">₹{r.amount}</span>
-                    <StatusBadge status={r.status} />
+                  <span className="text-[11px] text-muted-foreground">{month.slice(5)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:col-span-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-[13px] font-semibold tracking-tight">By payment method</h2>
+              <p className="text-xs text-muted-foreground">Top methods from Receipts</p>
+            </div>
+          </div>
+          {byMethod.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">No receipts yet.</p>
+          ) : (
+            <ul className="mt-4 flex flex-col gap-3">
+              {byMethod.map(([method, v]) => (
+                <li key={method}>
+                  <div className="flex items-center justify-between text-[13px]">
+                    <span className="font-medium">{method}</span>
+                    <span className="text-muted-foreground tabular-nums">
+                      {v.count} · {inr(v.total)}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+                    <div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(4, (v.total / maxMethod) * 100)}%` }} />
                   </div>
                 </li>
               ))}
             </ul>
           )}
-        </div>
+        </section>
+      </div>
 
-        <div className="card-elevated overflow-hidden lg:col-span-2">
-          <div className="flex items-center justify-between border-b border-border/70 px-5 py-4">
-            <div>
-              <h2 className="text-sm font-semibold tracking-tight">Newest students</h2>
-              <p className="text-xs text-muted-foreground">Recently enrolled</p>
+      {/* Recent receipts — full width table */}
+      <div className="data-table-surface">
+        <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
+          <div>
+            <h2 className="text-[13px] font-semibold tracking-tight">Recent receipts</h2>
+            <p className="text-xs text-muted-foreground">Latest payments across all students</p>
+          </div>
+          <Button variant="outline" size="sm" render={<Link href="/dashboard/receipts" />}>
+            View all
+            <ArrowRightIcon />
+          </Button>
+        </div>
+        <div className="data-table-scroll">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Receipt ID</TableHead>
+                <TableHead>Student</TableHead>
+                <TableHead>Amount (₹)</TableHead>
+                <TableHead>Method</TableHead>
+                <TableHead>Payment Date</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {recentReceipts.length === 0 ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={7} className="px-6 py-12 text-center">
+                    <p className="text-sm font-medium">No receipts yet</p>
+                    <p className="mx-auto mt-1 max-w-sm text-[13px] text-muted-foreground">
+                      Add students, then record a payment from the Receipts page. It will show up here.
+                    </p>
+                    <Button size="sm" className="mt-4" render={<Link href="/dashboard/receipts" />}>
+                      Go to Receipts
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                recentReceipts.map((r) => (
+                  <TableRow key={r.receiptId}>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{r.receiptId}</TableCell>
+                    <TableCell className="font-medium text-foreground">
+                      {r.studentName} <span className="font-mono text-xs font-normal text-muted-foreground">({r.studentId})</span>
+                    </TableCell>
+                    <TableCell className="tabular-nums">₹ {r.amount}</TableCell>
+                    <TableCell>{r.method}</TableCell>
+                    <TableCell className="tabular-nums">{r.paymentDate}</TableCell>
+                    <TableCell>
+                      <StatusBadge value={r.status} />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <RowActions
+                        onView={() => setViewReceipt(r)}
+                        viewLabel="View receipt"
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+
+      <Dialog
+        open={viewReceipt !== null}
+        onOpenChange={(v) => {
+          if (!v) setViewReceipt(null)
+        }}
+      >
+        <DialogContent className="p-0 sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-base font-semibold tracking-tight">
+              Receipt details
+            </DialogTitle>
+            <DialogDescription>
+              {viewReceipt?.receiptId} · {viewReceipt?.studentName}
+            </DialogDescription>
+          </DialogHeader>
+          {viewReceipt && (
+            <div className="px-6 py-5">
+              <DetailList>
+                <DetailItem label="Receipt ID">{viewReceipt.receiptId}</DetailItem>
+                <DetailItem label="Student">
+                  {viewReceipt.studentName} ({viewReceipt.studentId})
+                </DetailItem>
+                <DetailItem label="Amount">₹ {viewReceipt.amount}</DetailItem>
+                <DetailItem label="Payment Method">{viewReceipt.method || "—"}</DetailItem>
+                <DetailItem label="Payment Date">{viewReceipt.paymentDate || "—"}</DetailItem>
+                <DetailItem label="Status">
+                  <StatusBadge value={viewReceipt.status} />
+                </DetailItem>
+                <DetailItem label="Notes">{viewReceipt.notes || "—"}</DetailItem>
+              </DetailList>
+              <div className="mt-4 flex justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  render={<Link href="/dashboard/receipts" />}
+                >
+                  Manage receipts
+                  <ArrowRightIcon />
+                </Button>
+              </div>
             </div>
-            <Button variant="ghost" size="sm" render={<Link href="/dashboard/students" />}>
-              View all <ArrowRightIcon />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* People + messages + shortcuts */}
+      <div className="grid shrink-0 gap-3 lg:grid-cols-3">
+        <section className="rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+          <div className="flex items-center justify-between">
+            <h2 className="text-[13px] font-semibold tracking-tight">Newest students</h2>
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-muted-foreground" render={<Link href="/dashboard/students" />}>
+              View all
+              <ArrowRightIcon />
             </Button>
           </div>
           {recentStudents.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
-              <div className="flex size-11 items-center justify-center rounded-2xl border bg-muted text-muted-foreground">
-                <GraduationCapIcon className="size-5" />
-              </div>
-              <p className="text-sm font-medium">No students yet</p>
-              <p className="max-w-xs text-xs text-muted-foreground">
-                Add students to unlock groups, fee structures, and receipts.
-              </p>
-              <Button size="sm" className="mt-1" render={<Link href="/dashboard/students" />}>
-                <PlusIcon data-icon="inline-start" /> Add student
-              </Button>
-            </div>
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No students yet.{" "}
+              <Link href="/dashboard/students" className="font-medium text-foreground underline underline-offset-4">
+                Add one
+              </Link>
+              .
+            </p>
           ) : (
-            <ul className="divide-y divide-border/70">
+            <ul className="mt-2 divide-y divide-border/70">
               {recentStudents.map((s) => (
-                <li key={s.id} className="flex items-center justify-between gap-3 px-5 py-3.5 transition-colors duration-150 hover:bg-muted/50">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{s.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">{s.detail}</p>
+                <li key={s.studentId} className="flex items-center gap-3 py-2.5">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full border bg-muted/60 text-xs font-semibold text-muted-foreground">
+                    {s.studentName.charAt(0).toUpperCase()}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-medium">{s.studentName}</p>
+                    <p className="truncate font-mono text-[11px] text-muted-foreground">{s.studentId} · {s.course || s.group || "—"}</p>
                   </div>
-                  <StatusBadge status={s.status} />
+                  <StatusBadge value={s.status} />
                 </li>
               ))}
             </ul>
           )}
-        </div>
-      </div>
+        </section>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        {[
-          { icon: <ClipboardListIcon />, title: "Fee structures", desc: "Define heads, assign students", href: "/dashboard/fee-structure" },
-          { icon: <UsersIcon />, title: "Student groups", desc: "Batches, courses & schedules", href: "/dashboard/students/groups" },
-          { icon: <MegaphoneIcon />, title: "Announcements", desc: "Broadcast via WhatsApp", href: "/dashboard/announcements" },
-        ].map((c) => (
-          <Link
-            key={c.href}
-            href={c.href}
-            className="card-elevated card-elevated-hover group flex items-center gap-4 p-5"
-          >
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border bg-gradient-to-b from-muted to-muted/40 shadow-xs [&_svg]:size-[18px]">
-              {c.icon}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold tracking-tight">{c.title}</p>
-              <p className="truncate text-xs text-muted-foreground">{c.desc}</p>
-            </div>
-            <ArrowRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5" />
-          </Link>
-        ))}
+        <section className="rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+          <div className="flex items-center justify-between">
+            <h2 className="text-[13px] font-semibold tracking-tight">Latest announcements</h2>
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-muted-foreground" render={<Link href="/dashboard/announcements" />}>
+              View all
+              <ArrowRightIcon />
+            </Button>
+          </div>
+          {recentAnnouncements.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              Nothing sent yet.{" "}
+              <Link href="/dashboard/announcements" className="font-medium text-foreground underline underline-offset-4">
+                Compose one
+              </Link>
+              .
+            </p>
+          ) : (
+            <ul className="mt-2 divide-y divide-border/70">
+              {recentAnnouncements.map((a) => (
+                <li key={a.announcementId} className="py-2.5">
+                  <div className="flex items-center gap-2">
+                    <p className="min-w-0 flex-1 truncate text-[13px] font-medium">{a.title}</p>
+                    <StatusBadge value={a.status} />
+                  </div>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {a.sentCount}/{a.recipientIds.length} delivered · {new Date(a.createdAt).toLocaleDateString()}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+          <h2 className="text-[13px] font-semibold tracking-tight">Manage everything</h2>
+          <p className="text-xs text-muted-foreground">Jump to any section</p>
+          <ul className="mt-3 flex flex-col gap-1">
+            {shortcuts.map((c) => (
+              <li key={c.title}>
+                <Link
+                  href={c.href}
+                  className="app-transition group flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/70"
+                >
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-[10px] border bg-muted/60 text-muted-foreground">
+                    <c.icon className="size-4" strokeWidth={1.75} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2 text-[13px] font-medium">
+                      {c.title}
+                      {c.badge && (
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${c.badge === "Connected" ? "bg-emerald-50 text-emerald-700 ring-emerald-600/15" : "bg-muted text-muted-foreground ring-border"}`}>
+                          {c.badge}
+                        </span>
+                      )}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">{c.desc}</span>
+                  </span>
+                  <ArrowUpRightIcon className="size-4 shrink-0 text-muted-foreground/50 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-foreground" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
       </div>
     </DashboardShell>
   )

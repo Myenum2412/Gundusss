@@ -1,3 +1,6 @@
+import { getCollection, replaceCollection } from "./api";
+import { trackSync } from "./live";
+
 export interface StoredGroup {
   groupId: string;
   groupName: string;
@@ -13,7 +16,7 @@ export interface StoredGroup {
 
 const KEY = "student_groups";
 
-export function loadGroups(): StoredGroup[] {
+function loadLocal(): StoredGroup[] {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return [];
@@ -24,8 +27,28 @@ export function loadGroups(): StoredGroup[] {
   }
 }
 
-export function saveGroups(groups: StoredGroup[]) {
+function cacheLocal(groups: StoredGroup[]) {
   try {
     localStorage.setItem(KEY, JSON.stringify(groups));
   } catch {}
+}
+
+// Postgres-first; falls back to the local cache when the API is unreachable.
+export async function loadGroups(): Promise<StoredGroup[]> {
+  try {
+    const rows = await getCollection<StoredGroup>("student-groups");
+    cacheLocal(rows);
+    return rows;
+  } catch {
+    return loadLocal();
+  }
+}
+
+export async function saveGroups(groups: StoredGroup[]): Promise<void> {
+  cacheLocal(groups);
+  try {
+    await trackSync(replaceCollection("student-groups", groups));
+  } catch {
+    // Local cache already updated; will sync on the next successful save.
+  }
 }

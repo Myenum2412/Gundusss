@@ -1,55 +1,25 @@
-import * as React from "react"
-import { cn } from "@/lib/utils"
+import type { LucideIcon } from "lucide-react"
+import { InboxIcon } from "lucide-react"
+import { cn } from "cn"
 
 export function EmptyState({
-  icon,
+  icon: Icon = InboxIcon,
   title,
-  description,
-  action,
+  hint,
   className,
 }: {
-  icon: React.ReactNode
+  icon?: LucideIcon
   title: string
-  description: string
-  action?: React.ReactNode
+  hint: string
   className?: string
 }) {
   return (
-    <div
-      className={cn(
-        "flex flex-col items-center justify-center gap-3 px-6 py-12 text-center sm:py-14",
-        className
-      )}
-    >
-      <div className="flex size-12 items-center justify-center rounded-2xl border border-border bg-gradient-to-b from-muted to-muted/40 text-muted-foreground shadow-xs [&_svg]:size-5">
-        {icon}
+    <div className={cn("flex flex-col items-center justify-center gap-2 px-6 py-16 text-center", className)}>
+      <div className="flex size-11 items-center justify-center rounded-2xl border bg-muted/60 text-muted-foreground">
+        <Icon className="size-5" strokeWidth={1.75} />
       </div>
-      <div className="space-y-1">
-        <p className="text-sm font-semibold">{title}</p>
-        <p className="mx-auto max-w-sm text-sm text-muted-foreground">
-          {description}
-        </p>
-      </div>
-      {action && <div className="pt-1">{action}</div>}
-    </div>
-  )
-}
-
-export function TableCard({
-  children,
-  className,
-}: {
-  children: React.ReactNode
-  className?: string
-}) {
-  return (
-    <div
-      className={cn(
-        "card-elevated animate-enter overflow-hidden",
-        className
-      )}
-    >
-      {children}
+      <p className="mt-2 text-sm font-semibold text-foreground">{title}</p>
+      <p className="max-w-sm text-sm text-muted-foreground">{hint}</p>
     </div>
   )
 }

@@ -96,3 +96,39 @@ export async function sendWaMessage(input: {
   if (!res.ok) throw new Error(json.error ?? 'Failed to send message');
   return json.data;
 }
+
+// Generic collection sync used by the *-store modules (Postgres-backed,
+// with localStorage as a write-through cache / offline fallback).
+export async function getCollection<T>(name: string): Promise<T[]> {
+  const res = await fetch(`${BASE}/api/${name}`, { cache: 'no-store' });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error ?? `Failed to load ${name}`);
+  return (json.data ?? []) as T[];
+}
+
+export async function replaceCollection(name: string, items: unknown): Promise<void> {
+  const res = await fetch(`${BASE}/api/${name}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error ?? `Failed to save ${name}`);
+}
+
+export async function getDropdowns(): Promise<Record<string, string[]>> {
+  const res = await fetch(`${BASE}/api/dropdowns`, { cache: 'no-store' });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error ?? 'Failed to load dropdowns');
+  return (json.data ?? {}) as Record<string, string[]>;
+}
+
+export async function saveDropdownsApi(dropdowns: Record<string, string[]>): Promise<void> {
+  const res = await fetch(`${BASE}/api/dropdowns`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dropdowns }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error ?? 'Failed to save dropdowns');
+}

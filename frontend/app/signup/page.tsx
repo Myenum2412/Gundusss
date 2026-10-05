@@ -4,9 +4,10 @@ import { AuthShell } from "@/components/auth-shell"
 export default function SignupPage() {
   return (
     <AuthShell
-      eyebrow="Get started"
       title="Create your account"
-      subtitle="Set up your organization and start managing fees in minutes."
+      subtitle="Start managing fees for your school in minutes."
+      panelTitle="Onboard a whole school in an afternoon."
+      panelSubtitle="Import students, group them by batch, and send fee reminders on WhatsApp."
     >
       <AuthSignupForm />
     </AuthShell>

@@ -5,11 +5,7 @@ import { AuthShell } from "@/components/auth-shell"
 
 export default function LoginPage() {
   return (
-    <AuthShell
-      eyebrow="Welcome back"
-      title="Login to your account"
-      subtitle="Access students, receipts, structures, and WhatsApp outreach in one calm workspace."
-    >
+    <AuthShell title="Welcome back" subtitle="Sign in to manage students, fees, and receipts.">
       <LoginForm />
     </AuthShell>
   )

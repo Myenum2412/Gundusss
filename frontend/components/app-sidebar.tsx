@@ -13,25 +13,23 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  SidebarSeparator,
 } from "@/components/ui/sidebar"
 import {
   SproutIcon,
   LayoutDashboardIcon,
-  WalletIcon,
   GraduationCapIcon,
   ClipboardListIcon,
   ReceiptIcon,
-  CreditCardIcon,
   MegaphoneIcon,
-  ChartColumnIcon,
   SettingsIcon,
 } from "lucide-react"
 
 // Sidebar menu for Seeds of Success fees app.
 const data = {
   user: {
-    name: "shadcn",
-    email: "m@example.com",
+    name: "Admin",
+    email: "admin@seedsofsuccess.in",
     avatar: "/avatars/shadcn.jpg",
   },
   navMain: [
@@ -39,12 +37,6 @@ const data = {
       title: "Dashboard",
       url: "/dashboard",
       icon: <LayoutDashboardIcon />,
-      isActive: true,
-    },
-    {
-      title: "Fees",
-      url: "/dashboard/fees",
-      icon: <WalletIcon />,
     },
     {
       title: "Students",
@@ -72,20 +64,12 @@ const data = {
       icon: <ReceiptIcon />,
     },
     {
-      title: "Billing",
-      url: "/dashboard/billing",
-      icon: <CreditCardIcon />,
-    },
-    {
       title: "Announcement",
       url: "/dashboard/announcements",
       icon: <MegaphoneIcon />,
     },
-    {
-      title: "Reports",
-      url: "/dashboard/reports",
-      icon: <ChartColumnIcon />,
-    },
+  ],
+  navBottom: [
     {
       title: "Settings",
       url: "/dashboard/settings",
@@ -97,25 +81,30 @@ const data = {
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   return (
     <Sidebar collapsible="icon" {...props}>
-      <SidebarHeader className="pb-1">
+      <SidebarHeader className="px-3 pt-3">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" className="rounded-2xl transition-colors duration-200 hover:bg-sidebar-accent">
-              <div className="flex aspect-square size-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-primary to-indigo-700 text-primary-foreground shadow-md shadow-primary/25">
-                <SproutIcon className="size-4.5" />
+            <SidebarMenuButton size="lg" className="rounded-xl hover:bg-sidebar-accent">
+              <div className="flex aspect-square size-8 items-center justify-center rounded-[10px] bg-primary text-primary-foreground shadow-sm">
+                <SproutIcon className="size-4" />
               </div>
-              <div className="grid flex-1 text-left leading-tight">
-                <span className="truncate text-[13.5px] font-semibold tracking-tight">Seeds of Success</span>
-                <span className="truncate text-[11.5px] text-muted-foreground">Fees Manager</span>
+              <div className="grid flex-1 text-left text-sm leading-tight">
+                <span className="truncate text-[13px] font-semibold tracking-tight">Seeds of Success</span>
+                <span className="truncate text-[11px] text-muted-foreground">Fees Manager</span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
-      <SidebarContent className="gap-1 px-2">
+      <SidebarSeparator className="my-1" />
+      <SidebarContent className="flex flex-col gap-2 px-2">
         <NavMain items={data.navMain} />
+        <div className="mt-auto">
+          <SidebarSeparator className="mx-0 mb-2" />
+          <NavMain items={data.navBottom} label={null} />
+        </div>
       </SidebarContent>
-      <SidebarFooter className="border-t border-sidebar-border/80 p-2">
+      <SidebarFooter className="border-t border-sidebar-border p-2">
         <NavUser user={data.user} />
       </SidebarFooter>
       <SidebarRail />

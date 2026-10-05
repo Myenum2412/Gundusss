@@ -3,11 +3,7 @@ import { AuthShell } from "@/components/auth-shell"
 
 export default function ForgotPasswordPage() {
   return (
-    <AuthShell
-      eyebrow="Recovery"
-      title="Forgot your password?"
-      subtitle="Enter your account email and we'll send you a secure reset link."
-    >
+    <AuthShell title="Reset password" subtitle="Enter your email and we'll send you a reset link.">
       <AuthForgotForm />
     </AuthShell>
   )

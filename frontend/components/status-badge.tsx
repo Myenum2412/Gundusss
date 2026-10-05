@@ -1,60 +1,35 @@
-import { cn } from "@/lib/utils"
+"use client"
 
-const styles: Record<string, string> = {
-  active:
-    "bg-emerald-500/10 text-emerald-700 ring-emerald-600/20 dark:text-emerald-300 dark:ring-emerald-400/20",
-  paid:
-    "bg-emerald-500/10 text-emerald-700 ring-emerald-600/20 dark:text-emerald-300 dark:ring-emerald-400/20",
-  sent:
-    "bg-emerald-500/10 text-emerald-700 ring-emerald-600/20 dark:text-emerald-300 dark:ring-emerald-400/20",
-  connected:
-    "bg-emerald-500/10 text-emerald-700 ring-emerald-600/20 dark:text-emerald-300 dark:ring-emerald-400/20",
-  ready:
-    "bg-emerald-500/10 text-emerald-700 ring-emerald-600/20 dark:text-emerald-300 dark:ring-emerald-400/20",
-  pending:
-    "bg-amber-500/10 text-amber-800 ring-amber-600/25 dark:text-amber-300 dark:ring-amber-400/25",
-  partial:
-    "bg-amber-500/10 text-amber-800 ring-amber-600/25 dark:text-amber-300 dark:ring-amber-400/25",
-  starting:
-    "bg-amber-500/10 text-amber-800 ring-amber-600/25 dark:text-amber-300 dark:ring-amber-400/25",
-  qr: "bg-sky-500/10 text-sky-700 ring-sky-600/25 dark:text-sky-300 dark:ring-sky-400/25",
-  overdue:
-    "bg-rose-500/10 text-rose-700 ring-rose-600/25 dark:text-rose-300 dark:ring-rose-400/25",
-  failed:
-    "bg-rose-500/10 text-rose-700 ring-rose-600/25 dark:text-rose-300 dark:ring-rose-400/25",
-  error:
-    "bg-rose-500/10 text-rose-700 ring-rose-600/25 dark:text-rose-300 dark:ring-rose-400/25",
-  cancelled:
-    "bg-rose-500/10 text-rose-700 ring-rose-600/25 dark:text-rose-300 dark:ring-rose-400/25",
-  inactive:
-    "bg-zinc-500/10 text-zinc-600 ring-zinc-500/25 dark:text-zinc-300 dark:ring-zinc-400/25",
-  disconnected:
-    "bg-zinc-500/10 text-zinc-600 ring-zinc-500/25 dark:text-zinc-300 dark:ring-zinc-400/25",
-  idle:
-    "bg-zinc-500/10 text-zinc-600 ring-zinc-500/25 dark:text-zinc-300 dark:ring-zinc-400/25",
+import { cn } from "cn"
+
+const tones: Record<string, string> = {
+  green: "bg-emerald-50 text-emerald-700 ring-emerald-600/15 dark:bg-emerald-500/10 dark:text-emerald-400",
+  amber: "bg-amber-50 text-amber-800 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-400",
+  red: "bg-red-50 text-red-700 ring-red-600/15 dark:bg-red-500/10 dark:text-red-400",
+  blue: "bg-sky-50 text-sky-700 ring-sky-600/15 dark:bg-sky-500/10 dark:text-sky-400",
+  neutral: "bg-muted text-muted-foreground ring-border",
 }
 
-export function StatusBadge({
-  status,
-  className,
-}: {
-  status: string
-  className?: string
-}) {
-  const key = status.trim().toLowerCase().replace(/\s+/g, "")
-  const tone =
-    styles[key] ??
-    "bg-primary/8 text-primary ring-primary/20 dark:text-primary-foreground"
+function toneFor(value: string): string {
+  const v = value.toLowerCase()
+  if (["paid", "active", "sent", "connected", "ready"].includes(v)) return tones.green
+  if (["pending", "partial", "starting", "qr"].includes(v)) return tones.amber
+  if (["overdue", "failed", "error", "disconnected", "inactive"].includes(v)) return tones.red
+  if (["sent", "announcement"].includes(v)) return tones.blue
+  return tones.neutral
+}
+
+export function StatusBadge({ value, className }: { value: string; className?: string }) {
   return (
     <span
       className={cn(
-        "inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset",
-        tone,
+        "inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset",
+        toneFor(value),
         className
       )}
     >
       <span className="size-1.5 rounded-full bg-current" aria-hidden />
-      {status}
+      {value}
     </span>
   )
 }

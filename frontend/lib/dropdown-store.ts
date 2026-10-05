@@ -1,3 +1,6 @@
+import { getDropdowns, saveDropdownsApi } from "./api";
+import { trackSync } from "./live";
+
 export type DropdownKey =
   | "gender"
   | "classGroup"
@@ -44,7 +47,7 @@ export type DropdownMap = Record<DropdownKey, string[]>;
 
 const KEY = "dropdown_options";
 
-export function loadDropdowns(): DropdownMap {
+function loadLocal(): DropdownMap {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...DEFAULTS };
@@ -61,8 +64,40 @@ export function loadDropdowns(): DropdownMap {
   }
 }
 
-export function saveDropdowns(d: DropdownMap) {
+function cacheLocal(d: DropdownMap) {
   try {
     localStorage.setItem(KEY, JSON.stringify(d));
   } catch {}
+}
+
+// Postgres-first; falls back to defaults/local cache when unreachable.
+export async function loadDropdowns(): Promise<DropdownMap> {
+  try {
+    const remote = await getDropdowns();
+    const merged = { ...DEFAULTS };
+    for (const k of DROPDOWN_KEYS) {
+      if (Array.isArray(remote[k]) && remote[k].length > 0) {
+        merged[k] = remote[k];
+      }
+    }
+    cacheLocal(merged);
+    return merged;
+  } catch {
+    return loadLocal();
+  }
+}
+
+export async function saveDropdowns(d: DropdownMap): Promise<void> {
+  cacheLocal(d);
+  try {
+    await trackSync(saveDropdownsApi(d));
+  } catch {
+    // Local cache already updated; will sync on the next successful save.
+  }
+}
+
+// Synchronous read of the last-known cache (for render paths that cannot
+// suspend on the async Postgres load). The async loader refreshes it.
+export function loadDropdownsSync(): DropdownMap {
+  return loadLocal();
 }

@@ -2,7 +2,6 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Loader2Icon } from "lucide-react"
 import { cn } from "cn"
 
 import { Button } from "@/components/ui/button"
@@ -42,16 +41,16 @@ export function LoginForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className={cn("flex flex-col gap-5", className)} {...props}>
+    <form onSubmit={onSubmit} className={cn("flex flex-col gap-4", className)} {...props}>
       <FieldGroup className="gap-4">
         <Field>
           <FieldLabel htmlFor="email">Email</FieldLabel>
           <Input
             id="email"
             type="email"
-            placeholder="m@example.com"
-            autoComplete="email"
+            placeholder="you@school.org"
             required
+            autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
@@ -61,38 +60,34 @@ export function LoginForm({
             <FieldLabel htmlFor="password">Password</FieldLabel>
             <a
               href="/forgot-password"
-              className="ml-auto text-[13px] font-medium text-primary underline-offset-4 hover:underline"
+              className="ml-auto text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             >
-              Forgot your password?
+              Forgot password?
             </a>
           </div>
           <Input
             id="password"
             type="password"
-            autoComplete="current-password"
-            placeholder="Enter your password"
+            placeholder="••••••••"
             required
+            autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
         </Field>
         {error && (
-          <p role="alert" className="rounded-xl border border-destructive/25 bg-destructive/8 px-3.5 py-2.5 text-[13px] leading-relaxed text-destructive">{error}</p>
+          <p className="rounded-[10px] border border-destructive/20 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">
+            {error}
+          </p>
         )}
-        <Field className="pt-1">
-          <Button type="submit" size="lg" className="w-full" disabled={pending}>
-            {pending ? (
-              <>
-                <Loader2Icon data-icon="inline-start" className="animate-spin" /> Logging in…
-              </>
-            ) : (
-              "Login"
-            )}
+        <Field>
+          <Button type="submit" disabled={pending} className="h-9.5 w-full rounded-[10px] font-medium">
+            {pending ? "Signing in…" : "Sign in"}
           </Button>
         </Field>
         <p className="text-center text-[13px] text-muted-foreground">
           Don&apos;t have an account?{" "}
-          <a href="/signup" className="font-medium text-primary underline-offset-4 hover:underline">
+          <a href="/signup" className="font-medium text-foreground underline-offset-4 hover:underline">
             Sign up
           </a>
         </p>
