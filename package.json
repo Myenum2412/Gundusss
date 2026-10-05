@@ -6,6 +6,7 @@
     "backend"
   ],
   "scripts": {
+    "dev": "(trap 'kill 0' INT; npm run dev:backend & npm run dev:frontend & wait)",
     "dev:backend": "npm run dev --workspace=backend",
     "dev:frontend": "npm run dev --workspace=frontend",
     "build": "npm run build --workspaces",
