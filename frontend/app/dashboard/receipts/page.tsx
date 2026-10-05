@@ -1,16 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { AppSidebar } from "@/components/app-sidebar"
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb"
-import { Button } from "@/components/ui/button"
+import { PlusIcon, ReceiptIcon, Trash2Icon } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -22,7 +13,7 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
+import { Button } from "@/components/ui/button"
 import {
   Table,
   TableBody,
@@ -31,12 +22,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar"
+import { DashboardShell } from "@/components/dashboard-shell"
+import { StatusBadge } from "@/components/status-badge"
+import { EmptyState, TableCard } from "@/components/empty-state"
 import { loadStudents, type StoredStudent } from "@/lib/students-store"
+import {
+  loadDropdowns,
+  type DropdownMap,
+} from "@/lib/dropdown-store"
 import {
   loadReceipts,
   saveReceipts,
@@ -44,10 +37,10 @@ import {
 } from "@/lib/receipts-store"
 
 const selectClassName =
-  "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
+  "h-10 w-full min-w-0 rounded-xl border border-input bg-card px-3 py-2 text-sm shadow-xs transition-all duration-200 outline-none hover:border-ring/40 focus-visible:border-ring focus-visible:ring-4 focus-visible:ring-ring/20 dark:bg-input/30"
 
 const textareaClassName =
-  "min-h-20 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-base transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
+  "min-h-20 w-full min-w-0 rounded-xl border border-input bg-card px-3 py-2.5 text-sm shadow-xs transition-all duration-200 outline-none placeholder:text-muted-foreground hover:border-ring/40 focus-visible:border-ring focus-visible:ring-4 focus-visible:ring-ring/20 dark:bg-input/30"
 
 const initialForm = {
   studentId: "",
@@ -71,6 +64,7 @@ export default function ReceiptsPage() {
   const [availableStudents, setAvailableStudents] = useState<StoredStudent[]>(
     []
   )
+  const [dropdowns, setDropdowns] = useState<DropdownMap | null>(null)
 
   useEffect(() => {
     const stored = loadReceipts()
@@ -90,7 +84,10 @@ export default function ReceiptsPage() {
   }, [receipts, hydrated])
 
   useEffect(() => {
-    if (open) setAvailableStudents(loadStudents())
+    if (open) {
+      setAvailableStudents(loadStudents())
+      setDropdowns(loadDropdowns())
+    }
   }, [open])
 
   function set(key: keyof typeof initialForm) {
@@ -135,209 +132,198 @@ export default function ReceiptsPage() {
   }
 
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-          <div className="flex items-center gap-2 px-4">
-            <SidebarTrigger className="-ml-1" />
-            <Separator
-              orientation="vertical"
-              className="mr-2 data-vertical:h-4 data-vertical:self-auto"
-            />
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="/dashboard">Dashboard</BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator className="hidden md:block" />
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Receipts</BreadcrumbPage>
-                </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
-          </div>
-        </header>
+    <DashboardShell
+      crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Receipts" }]}
+      title="Receipts"
+      description={`${receipts.length} payments recorded · receipt IDs auto-generate in RCP sequence with student-linked details.`}
+      action={
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger render={<Button />}>
+            <PlusIcon data-icon="inline-start" /> New Receipt
+          </DialogTrigger>
+          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>New Receipt</DialogTitle>
+              <DialogDescription>
+                Fill in payment details. Receipt ID is auto-generated.
+              </DialogDescription>
+            </DialogHeader>
 
-        <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold">Receipts</h1>
-              <p className="text-sm text-muted-foreground">
-                Record fee payments. Click New Receipt to open the form popup.
-              </p>
-            </div>
-            <Dialog open={open} onOpenChange={setOpen}>
-              <DialogTrigger render={<Button />}>New Receipt</DialogTrigger>
-              <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-                <DialogHeader>
-                  <DialogTitle>New Receipt</DialogTitle>
-                  <DialogDescription>
-                    Fill in payment details. Receipt ID is auto-generated.
-                  </DialogDescription>
-                </DialogHeader>
+            <form onSubmit={onSubmit} className="flex flex-col gap-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field className="md:col-span-2">
+                  <FieldLabel htmlFor="studentId">Student</FieldLabel>
+                  <select
+                    id="studentId"
+                    className={selectClassName}
+                    value={form.studentId}
+                    onChange={set("studentId")}
+                    required
+                  >
+                    <option value="" disabled>
+                      Select student
+                    </option>
+                    {availableStudents.map((s) => (
+                      <option key={s.studentId} value={s.studentId}>
+                        {s.studentName} ({s.studentId})
+                      </option>
+                    ))}
+                  </select>
+                  {availableStudents.length === 0 && (
+                    <p className="rounded-xl border border-dashed border-border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
+                      No students found. Add students first on the Students
+                      page.
+                    </p>
+                  )}
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="amount">Amount (₹)</FieldLabel>
+                  <Input
+                    id="amount"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="₹ Enter amount"
+                    value={form.amount}
+                    onChange={set("amount")}
+                    required
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="method">Payment Method</FieldLabel>
+                  <select
+                    id="method"
+                    className={selectClassName}
+                    value={form.method}
+                    onChange={set("method")}
+                    required
+                  >
+                    {(dropdowns?.paymentMethod ?? []).map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="paymentDate">
+                    Payment Date
+                  </FieldLabel>
+                  <Input
+                    id="paymentDate"
+                    type="date"
+                    value={form.paymentDate}
+                    onChange={set("paymentDate")}
+                    required
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="status">Status</FieldLabel>
+                  <select
+                    id="status"
+                    className={selectClassName}
+                    value={form.status}
+                    onChange={set("status")}
+                    required
+                  >
+                    {(dropdowns?.receiptStatus ?? []).map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field className="md:col-span-2">
+                  <FieldLabel htmlFor="notes">Notes</FieldLabel>
+                  <textarea
+                    id="notes"
+                    className={textareaClassName}
+                    placeholder="Optional payment notes"
+                    value={form.notes}
+                    onChange={set("notes")}
+                    rows={3}
+                  />
+                </Field>
+              </div>
 
-                <form onSubmit={onSubmit} className="flex flex-col gap-6">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <Field className="md:col-span-2">
-                      <FieldLabel htmlFor="studentId">Student</FieldLabel>
-                      <select
-                        id="studentId"
-                        className={selectClassName}
-                        value={form.studentId}
-                        onChange={set("studentId")}
-                        required
-                      >
-                        <option value="" disabled>
-                          Select student
-                        </option>
-                        {availableStudents.map((s) => (
-                          <option key={s.studentId} value={s.studentId}>
-                            {s.studentName} ({s.studentId})
-                          </option>
-                        ))}
-                      </select>
-                      {availableStudents.length === 0 && (
-                        <p className="text-xs text-muted-foreground">
-                          No students found. Add students first on the Students
-                          page.
-                        </p>
-                      )}
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="amount">Amount (₹)</FieldLabel>
-                      <Input
-                        id="amount"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="₹ Enter amount"
-                        value={form.amount}
-                        onChange={set("amount")}
-                        required
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="method">Payment Method</FieldLabel>
-                      <select
-                        id="method"
-                        className={selectClassName}
-                        value={form.method}
-                        onChange={set("method")}
-                        required
-                      >
-                        <option value="Cash">Cash</option>
-                        <option value="UPI">UPI</option>
-                        <option value="Bank Transfer">Bank Transfer</option>
-                      </select>
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="paymentDate">
-                        Payment Date
-                      </FieldLabel>
-                      <Input
-                        id="paymentDate"
-                        type="date"
-                        value={form.paymentDate}
-                        onChange={set("paymentDate")}
-                        required
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="status">Status</FieldLabel>
-                      <select
-                        id="status"
-                        className={selectClassName}
-                        value={form.status}
-                        onChange={set("status")}
-                        required
-                      >
-                        <option value="Paid">Paid</option>
-                        <option value="Pending">Pending</option>
-                        <option value="Cancelled">Cancelled</option>
-                      </select>
-                    </Field>
-                    <Field className="md:col-span-2">
-                      <FieldLabel htmlFor="notes">Notes</FieldLabel>
-                      <textarea
-                        id="notes"
-                        className={textareaClassName}
-                        placeholder="Optional payment notes"
-                        value={form.notes}
-                        onChange={set("notes")}
-                        rows={3}
-                      />
-                    </Field>
-                  </div>
-
-                  <DialogFooter>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={onCancel}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit">Save Receipt</Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      }
+    >
+      <TableCard>
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-muted/40">
+              <TableHead className="w-12">Sno</TableHead>
+              <TableHead>Receipt ID</TableHead>
+              <TableHead>Student</TableHead>
+              <TableHead>Amount (₹)</TableHead>
+              <TableHead>Method</TableHead>
+              <TableHead>Payment Date</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {receipts.length === 0 ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={8} className="p-0">
+                  <EmptyState
+                    icon={<ReceiptIcon />}
+                    title="No receipts yet"
+                    description="Record fee payments with student, method, and date — IDs generate automatically."
+                    action={
+                      <Button size="sm" onClick={() => setOpen(true)}>
+                        <PlusIcon data-icon="inline-start" /> New Receipt
+                      </Button>
+                    }
+                  />
+                </TableCell>
+              </TableRow>
+            ) : (
+              receipts.map((r, i) => (
+                <TableRow key={`${r.receiptId}-${i}`}>
+                  <TableCell className="text-muted-foreground">{i + 1}</TableCell>
+                  <TableCell>
+                    <span className="rounded-md bg-muted px-2 py-0.5 font-mono text-xs">{r.receiptId}</span>
+                  </TableCell>
+                  <TableCell className="font-medium" title={r.studentId}>
+                    {r.studentName}{" "}
+                    <span className="font-normal text-muted-foreground">({r.studentId})</span>
+                  </TableCell>
+                  <TableCell className="font-semibold tabular-nums">₹ {r.amount}</TableCell>
+                  <TableCell>{r.method}</TableCell>
+                  <TableCell className="tabular-nums">{r.paymentDate}</TableCell>
+                  <TableCell>
+                    <StatusBadge status={r.status} />
+                  </TableCell>
+                  <TableCell className="text-right">
                     <Button
-                      type="button"
-                      variant="outline"
-                      onClick={onCancel}
+                      variant="ghost"
+                      size="sm"
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={() => onDelete(i)}
                     >
-                      Cancel
+                      <Trash2Icon data-icon="inline-start" /> Delete
                     </Button>
-                    <Button type="submit">Save Receipt</Button>
-                  </DialogFooter>
-                </form>
-              </DialogContent>
-            </Dialog>
-          </div>
-
-          <div className="overflow-x-auto rounded-xl border bg-card text-card-foreground">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Sno</TableHead>
-                  <TableHead>Receipt ID</TableHead>
-                  <TableHead>Student</TableHead>
-                  <TableHead>Amount (₹)</TableHead>
-                  <TableHead>Method</TableHead>
-                  <TableHead>Payment Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {receipts.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={8}
-                      className="py-10 text-center text-muted-foreground"
-                    >
-                      No receipts yet — click New Receipt.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  receipts.map((r, i) => (
-                    <TableRow key={`${r.receiptId}-${i}`}>
-                      <TableCell>{i + 1}</TableCell>
-                      <TableCell>{r.receiptId}</TableCell>
-                      <TableCell className="font-medium" title={r.studentId}>
-                        {r.studentName} ({r.studentId})
-                      </TableCell>
-                      <TableCell>₹ {r.amount}</TableCell>
-                      <TableCell>{r.method}</TableCell>
-                      <TableCell>{r.paymentDate}</TableCell>
-                      <TableCell>{r.status}</TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => onDelete(i)}
-                        >
-                          Delete
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-      </SidebarInset>
-    </SidebarProvider>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </TableCard>
+    </DashboardShell>
   )
 }

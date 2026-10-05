@@ -10,48 +10,39 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { GalleryVerticalEndIcon } from "lucide-react"
 
 export function AuthForgotForm({
   className,
   ...props
 }: React.ComponentProps<"div">) {
   return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
+    <div className={cn("flex flex-col gap-5", className)} {...props}>
       <form>
-        <FieldGroup>
-          <div className="flex flex-col items-center gap-2 text-center">
-            <a
-              href="/"
-              className="flex flex-col items-center gap-2 font-medium"
-            >
-              <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                <GalleryVerticalEndIcon className="size-4" />
-              </div>
-              <span className="sr-only">Gundusss</span>
-            </a>
-            <h1 className="text-xl font-bold">Forgot your password?</h1>
-            <FieldDescription>
-              Enter your email below and we&apos;ll send you a reset link.
-            </FieldDescription>
-          </div>
+        <FieldGroup className="gap-4">
           <Field>
             <FieldLabel htmlFor="email">Email</FieldLabel>
             <Input
               id="email"
               type="email"
               placeholder="m@example.com"
+              autoComplete="email"
               required
             />
+            <FieldDescription>
+              Enter your email below and we&apos;ll send you a reset link.
+            </FieldDescription>
           </Field>
-          <Field>
-            <Button type="submit">Send reset link</Button>
+          <Field className="pt-1">
+            <Button type="submit" size="lg" className="w-full">Send reset link</Button>
           </Field>
         </FieldGroup>
       </form>
-      <FieldDescription className="px-6 text-center">
-        Remembered your password? <a href="/login">Back to login</a>
-      </FieldDescription>
+      <p className="text-center text-[13px] text-muted-foreground">
+        Remembered your password?{" "}
+        <a href="/login" className="font-medium text-primary underline-offset-4 hover:underline">
+          Back to login
+        </a>
+      </p>
     </div>
   )
 }

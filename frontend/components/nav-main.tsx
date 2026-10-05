@@ -32,9 +32,11 @@ export function NavMain({
   }[]
 }) {
   return (
-    <SidebarGroup>
-      <SidebarGroupLabel>Menu</SidebarGroupLabel>
-      <SidebarMenu>
+    <SidebarGroup className="px-0 py-2">
+      <SidebarGroupLabel className="px-2 text-[10.5px] font-semibold tracking-[0.08em] text-muted-foreground/80 uppercase">
+        Menu
+      </SidebarGroupLabel>
+      <SidebarMenu className="gap-0.5">
         {items.map((item) =>
           item.items?.length ? (
             <Collapsible
@@ -48,10 +50,10 @@ export function NavMain({
               >
                 {item.icon}
                 <span>{item.title}</span>
-                <ChevronRightIcon className="ml-auto transition-transform duration-200 group-data-open/collapsible:rotate-90" />
+                <ChevronRightIcon className="ml-auto size-3.5 text-muted-foreground transition-transform duration-200 group-data-open/collapsible:rotate-90" />
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <SidebarMenuSub>
+                <SidebarMenuSub className="ml-4 border-l border-sidebar-border pl-1">
                   {item.items?.map((subItem) => (
                     <SidebarMenuSubItem key={subItem.title}>
                       <SidebarMenuSubButton render={<a href={subItem.url} />}>

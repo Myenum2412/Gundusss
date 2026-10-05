@@ -97,25 +97,25 @@ const data = {
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   return (
     <Sidebar collapsible="icon" {...props}>
-      <SidebarHeader>
+      <SidebarHeader className="pb-1">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg">
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                <SproutIcon className="size-4" />
+            <SidebarMenuButton size="lg" className="rounded-2xl transition-colors duration-200 hover:bg-sidebar-accent">
+              <div className="flex aspect-square size-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-primary to-indigo-700 text-primary-foreground shadow-md shadow-primary/25">
+                <SproutIcon className="size-4.5" />
               </div>
-              <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">seeds of success</span>
-                <span className="truncate text-xs">Fees Manager</span>
+              <div className="grid flex-1 text-left leading-tight">
+                <span className="truncate text-[13.5px] font-semibold tracking-tight">Seeds of Success</span>
+                <span className="truncate text-[11.5px] text-muted-foreground">Fees Manager</span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent className="gap-1 px-2">
         <NavMain items={data.navMain} />
       </SidebarContent>
-      <SidebarFooter>
+      <SidebarFooter className="border-t border-sidebar-border/80 p-2">
         <NavUser user={data.user} />
       </SidebarFooter>
       <SidebarRail />

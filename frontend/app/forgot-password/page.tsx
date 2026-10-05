@@ -1,11 +1,14 @@
 import { AuthForgotForm } from "@/components/auth-forgot-form"
+import { AuthShell } from "@/components/auth-shell"
 
 export default function ForgotPasswordPage() {
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-background p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <AuthForgotForm />
-      </div>
-    </div>
+    <AuthShell
+      eyebrow="Recovery"
+      title="Forgot your password?"
+      subtitle="Enter your account email and we'll send you a secure reset link."
+    >
+      <AuthForgotForm />
+    </AuthShell>
   )
 }
