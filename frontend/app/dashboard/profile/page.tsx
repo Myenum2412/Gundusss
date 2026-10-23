@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
 import { LiveBadge } from "@/components/live-badge"
 import ProfileBlock from "@/components/blocks/profile-1"
+import BusinessProfileForm from "@/components/business-profile-form"
 import { loadStudents } from "@/lib/students-store"
 import { loadGroups } from "@/lib/groups-store"
 import { loadFeeStructures } from "@/lib/fee-structures-store"
@@ -152,6 +153,7 @@ export default function ProfilePage() {
         optionCount={counts.options}
         onSignOut={onSignOut}
       />
+      <BusinessProfileForm />
     </DashboardShell>
   )
 }

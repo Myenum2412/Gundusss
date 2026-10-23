@@ -12,14 +12,45 @@ const tones: Record<string, string> = {
 
 function toneFor(value: string): string {
   const v = value.toLowerCase()
-  if (["paid", "active", "sent", "connected", "ready"].includes(v)) return tones.green
-  if (["pending", "partial", "starting", "qr"].includes(v)) return tones.amber
-  if (["overdue", "failed", "error", "disconnected", "inactive"].includes(v)) return tones.red
-  if (["sent", "announcement"].includes(v)) return tones.blue
+  if (["paid", "active", "sent", "connected", "ready", "success", "settled"].includes(v)) return tones.green
+  if (
+    [
+      "pending",
+      "partial",
+      "starting",
+      "qr",
+      "initiated",
+      "created",
+      "queued",
+      "processing",
+      "awaiting_cash",
+      "cod_placed",
+    ].includes(v)
+  ) {
+    return tones.amber
+  }
+  if (
+    [
+      "overdue",
+      "failed",
+      "error",
+      "disconnected",
+      "inactive",
+      "expired",
+      "cancelled",
+      "canceled",
+      "suspicious",
+      "blocked",
+    ].includes(v)
+  ) {
+    return tones.red
+  }
+  if (["refunded", "announcement", "cod"].includes(v)) return tones.blue
   return tones.neutral
 }
 
 export function StatusBadge({ value, className }: { value: string; className?: string }) {
+  const label = value === "CANCELED" ? "CANCELLED" : value
   return (
     <span
       className={cn(
@@ -29,7 +60,7 @@ export function StatusBadge({ value, className }: { value: string; className?: s
       )}
     >
       <span className="size-1.5 rounded-full bg-current" aria-hidden />
-      {value}
+      {label}
     </span>
   )
 }

@@ -4,12 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "pglite-server --db=./.pgdata --port=5433 --max-connections=10 --include-database-url --run \"node --watch --import tsx src/server.ts\"",
+    "dev:pg": "tsx watch src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js",
+    "prestart": "node scripts/prestart.mjs",
+    "start": "pglite-server --db=./.pgdata --port=5433 --max-connections=10 --include-database-url --run \"node dist/server.js\"",
+    "start:app": "node dist/server.js",
     "db:migrate": "psql $DATABASE_URL -f ./sql/init.sql"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.11",
+    "@electric-sql/pglite-socket": "^0.2.14",
     "@fastify/cors": "^10.0.1",
     "bcryptjs": "^3.0.3",
     "fastify": "^5.2.0",

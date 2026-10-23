@@ -4,4 +4,7 @@ dist
 .env
 .env.local
 postgres-data
+.pgdata
+backend/.pgdata
 .wwebjs_auth
+backend/.pgdata.corrupt-*

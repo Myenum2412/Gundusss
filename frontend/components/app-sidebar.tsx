@@ -21,6 +21,7 @@ import {
   GraduationCapIcon,
   ClipboardListIcon,
   ReceiptIcon,
+  CreditCardIcon,
   MegaphoneIcon,
   SettingsIcon,
 } from "lucide-react"
@@ -62,6 +63,11 @@ const data = {
       title: "Receipts",
       url: "/dashboard/receipts",
       icon: <ReceiptIcon />,
+    },
+    {
+      title: "Payments",
+      url: "/dashboard/payments",
+      icon: <CreditCardIcon />,
     },
     {
       title: "Announcement",

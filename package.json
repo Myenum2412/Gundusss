@@ -9,6 +9,9 @@
     "dev": "(trap 'kill 0' INT; npm run dev:backend & npm run dev:frontend & wait)",
     "dev:backend": "npm run dev --workspace=backend",
     "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:gateway": "npm --prefix payment-gateway run dev",
+    "gateway:webhook": "npm --prefix payment-gateway run configure:fees-webhook",
+    "gateway:install": "npm --prefix payment-gateway install",
     "build": "npm run build --workspaces",
     "db:up": "docker compose up -d postgres"
   }

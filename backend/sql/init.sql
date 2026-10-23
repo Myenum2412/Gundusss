@@ -98,3 +98,59 @@ CREATE TABLE IF NOT EXISTS dropdown_options (
   list_key TEXT PRIMARY KEY,
   options TEXT[] NOT NULL DEFAULT '{}'
 );
+
+-- YOUPI PG payment sessions. One row per checkout; the signed webhook keeps
+-- status/UTR current and links the auto-created receipt.
+CREATE TABLE IF NOT EXISTS payment_orders (
+  order_id VARCHAR(64) PRIMARY KEY,
+  payment_id VARCHAR(64),
+  student_id TEXT NOT NULL DEFAULT '',
+  student_name TEXT NOT NULL DEFAULT '',
+  fee_id INTEGER,
+  amount TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'INITIATED',
+  gateway_status TEXT NOT NULL DEFAULT '',
+  method TEXT NOT NULL DEFAULT '',
+  utr TEXT NOT NULL DEFAULT '',
+  checkout_url TEXT NOT NULL DEFAULT '',
+  receipt_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS receipt_id TEXT;
+ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS gateway_status TEXT NOT NULL DEFAULT '';
+ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS method TEXT NOT NULL DEFAULT '';
+
+-- Append-only lifecycle log for the payment status badge and History timeline.
+CREATE TABLE IF NOT EXISTS payment_events (
+  id BIGSERIAL PRIMARY KEY,
+  order_id VARCHAR(64) NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  gateway_status VARCHAR(32) NOT NULL DEFAULT '',
+  method VARCHAR(32) NOT NULL DEFAULT '',
+  source VARCHAR(32) NOT NULL DEFAULT '',
+  message TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS payment_events_order_idx
+  ON payment_events (order_id, created_at);
+
+-- Merchant UPI profile used by the payment setup card and checkout preview.
+-- The uploaded QR is stored locally; YOUPI PG still issues the amount-specific
+-- dynamic QR at checkout so bank observations can verify the transfer.
+CREATE TABLE IF NOT EXISTS payment_settings (
+  id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  upi_id TEXT NOT NULL DEFAULT '',
+  payee_name TEXT NOT NULL DEFAULT '',
+  qr_code_data_url TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Google Business Profile information shown on the Profile page. Stored as a
+-- single JSON document so new fields can be added without a migration.
+CREATE TABLE IF NOT EXISTS business_profiles (
+  id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  data JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

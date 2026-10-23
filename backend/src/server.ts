@@ -1,16 +1,74 @@
+import './env.js';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import bcrypt from 'bcryptjs';
+import { Readable } from 'node:stream';
 import { pool } from './db.js';
 import { feeRoutes } from './routes/fees.js';
 import { authRoutes } from './routes/auth.js';
 import { whatsappRoutes } from './routes/whatsapp.js';
 import { collectionsRoutes } from './routes/collections.js';
+import { paymentRoutes } from './routes/payments.js';
+import { paymentSettingsRoutes } from './routes/payment-settings.js';
+import { businessProfileRoutes } from './routes/business-profile.js';
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    // Raw request bytes, captured before JSON parsing so webhook HMAC
+    // signatures can be verified over the exact payload the gateway signed.
+    rawBody?: Buffer;
+  }
+}
 
 const app = Fastify({ logger: true });
 
+app.addHook('preParsing', async (request, _reply, payload) => {
+  const chunks: Buffer[] = [];
+  for await (const chunk of payload) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  const raw = Buffer.concat(chunks);
+  request.rawBody = raw;
+  return Readable.from(raw);
+});
+
+const configuredOrigins = (process.env.FRONTEND_URL ?? 'http://localhost:3000')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+// The app is commonly opened through localhost, 127.0.0.1, or a LAN address.
+// Browsers send that page origin on every API request, so all local variants
+// must pass CORS even though the backend itself always runs on port 4000.
+function isLocalOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const host = url.hostname;
+    return (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '::1' ||
+      host === '[::1]' ||
+      host.endsWith('.localhost') ||
+      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
+
 await app.register(cors, {
-  origin: (process.env.FRONTEND_URL ?? 'http://localhost:3000').split(','),
+  origin: (origin, callback) => {
+    // No Origin header means a same-origin or non-browser request.
+    if (!origin) return callback(null, true);
+    if (configuredOrigins.includes(origin) || isLocalOrigin(origin)) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  },
 });
 
 app.get('/api/health', async () => ({
@@ -22,6 +80,9 @@ await app.register(feeRoutes);
 await app.register(authRoutes);
 await app.register(whatsappRoutes);
 await app.register(collectionsRoutes);
+await app.register(paymentRoutes);
+await app.register(paymentSettingsRoutes);
+await app.register(businessProfileRoutes);
 
 const SEED_EMAIL = 'admin@seedsofsuccess.com';
 const SEED_PASSWORD = 'Admin123!';
@@ -103,9 +164,52 @@ async function ensureSchema() {
       status TEXT NOT NULL DEFAULT 'Sent',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS payment_orders (
+      order_id VARCHAR(64) PRIMARY KEY,
+      payment_id VARCHAR(64),
+      student_id TEXT NOT NULL DEFAULT '',
+      student_name TEXT NOT NULL DEFAULT '',
+      fee_id INTEGER,
+      amount TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'INITIATED',
+      gateway_status TEXT NOT NULL DEFAULT '',
+      method TEXT NOT NULL DEFAULT '',
+      utr TEXT NOT NULL DEFAULT '',
+      checkout_url TEXT NOT NULL DEFAULT '',
+      receipt_id TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS receipt_id TEXT;
+    ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS gateway_status TEXT NOT NULL DEFAULT '';
+    ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS method TEXT NOT NULL DEFAULT '';
+    CREATE TABLE IF NOT EXISTS payment_events (
+      id BIGSERIAL PRIMARY KEY,
+      order_id VARCHAR(64) NOT NULL,
+      status VARCHAR(32) NOT NULL,
+      gateway_status VARCHAR(32) NOT NULL DEFAULT '',
+      method VARCHAR(32) NOT NULL DEFAULT '',
+      source VARCHAR(32) NOT NULL DEFAULT '',
+      message TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS payment_events_order_idx
+      ON payment_events (order_id, created_at);
+    CREATE TABLE IF NOT EXISTS payment_settings (
+      id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      upi_id TEXT NOT NULL DEFAULT '',
+      payee_name TEXT NOT NULL DEFAULT '',
+      qr_code_data_url TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS dropdown_options (
       list_key TEXT PRIMARY KEY,
       options TEXT[] NOT NULL DEFAULT '{}'
+    );
+    CREATE TABLE IF NOT EXISTS business_profiles (
+      id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
 

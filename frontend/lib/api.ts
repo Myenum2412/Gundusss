@@ -1,3 +1,5 @@
+import { API_BASE } from './api-base';
+
 export interface Fee {
   id: number;
   student_name: string;
@@ -7,7 +9,7 @@ export interface Fee {
   created_at: string;
 }
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+const BASE = API_BASE;
 
 export async function getFees(): Promise<Fee[]> {
   const res = await fetch(`${BASE}/api/fees`, { cache: 'no-store' });
