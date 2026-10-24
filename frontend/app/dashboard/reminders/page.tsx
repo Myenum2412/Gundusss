@@ -410,24 +410,6 @@ export default function RemindersPage() {
                 </Field>
               </div>
 
-              <div className="rounded-xl border bg-muted/40 p-3 text-[11px] space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-foreground">Target Trigger Webhook:</span>
-                  <a
-                    href="https://cron-job.org/en/"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-primary hover:underline inline-flex items-center gap-1"
-                  >
-                    <span>Open cron-job.org Console</span>
-                    <ExternalLinkIcon className="size-3" />
-                  </a>
-                </div>
-                <code className="block font-mono text-[10px] text-muted-foreground break-all">
-                  https://myfees.myenum.in/api/reminders/cron/monthly
-                </code>
-              </div>
-
               {can("settings:manage") && (
                 <div className="flex items-center justify-end gap-2 pt-2">
                   <Button

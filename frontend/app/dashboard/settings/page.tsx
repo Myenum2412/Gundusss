@@ -528,13 +528,13 @@ export default function SettingsPage() {
             </div>
 
             <div className="rounded-2xl border bg-card p-4 space-y-3">
-              <span className="text-xs font-semibold text-foreground">Target Webhook Endpoint</span>
+              <span className="text-xs font-semibold text-foreground">Automated Notification Status</span>
               <p className="text-xs text-muted-foreground">
-                cron-job.org triggers this secure webhook monthly to resolve all student dues and deliver WhatsApp notices.
+                Automated monthly WhatsApp fee reminders are configured to dispatch directly to enrolled students on their monthly cycle.
               </p>
-              <code className="block rounded-lg bg-muted p-2 font-mono text-[11px] text-foreground break-all">
-                https://myfees.myenum.in/api/reminders/cron/monthly
-              </code>
+              <div className="rounded-xl border bg-muted/40 p-2.5 text-xs text-muted-foreground">
+                Status: <strong className="text-emerald-600">Active & Automated via Cloud Scheduler</strong>
+              </div>
             </div>
           </div>
         </section>
