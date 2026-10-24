@@ -27,6 +27,7 @@ export interface PaymentOrder {
   studentName: string
   feeId: number | null
   checkoutUrl: string
+  paymentUrl?: string
   receiptId: string | null
   createdAt: string
   updatedAt: string
@@ -202,4 +203,64 @@ export function syncPaymentSettings(): Promise<PaymentSettings> {
   return request<PaymentSettings>("/api/payments/settings/sync", {
     method: "POST",
   })
+}
+
+export interface PublicOrganizationProfile {
+  profileId: string
+  name: string
+  ownerName: string
+  paymentUrl: string
+  upiId: string
+  payeeName: string
+  qrCodeDataUrl: string
+  logoUrl: string
+  phone: string
+  email: string
+  description: string
+}
+
+export async function getPublicProfile(slug: string): Promise<PublicOrganizationProfile> {
+  const res = await fetch(`${BASE}/api/public/profile/${encodeURIComponent(slug)}`, {
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `Organization not found (HTTP ${res.status})`)
+  }
+  const json = (await res.json()) as { data: PublicOrganizationProfile }
+  return json.data
+}
+
+export async function createPublicPayment(input: {
+  slug: string
+  studentName: string
+  studentId?: string
+  amount: number | string
+  email?: string
+  phone?: string
+  description?: string
+}): Promise<PaymentOrder> {
+  const res = await fetch(`${BASE}/api/public/payments/create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `Payment checkout failed (HTTP ${res.status})`)
+  }
+  const json = (await res.json()) as { data: PaymentOrder }
+  return json.data
+}
+
+export async function getPublicPaymentStatus(orderId: string): Promise<PaymentOrder> {
+  const res = await fetch(`${BASE}/api/public/payments/${encodeURIComponent(orderId)}`, {
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `Could not fetch payment status`)
+  }
+  const json = (await res.json()) as { data: PaymentOrder }
+  return json.data
 }

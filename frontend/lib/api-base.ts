@@ -13,12 +13,19 @@ function resolveApiBase(): string {
   if (typeof window === "undefined") return "http://127.0.0.1:4000"
 
   const pageHost = window.location.hostname
-  const apiHost =
-    pageHost === "localhost" || pageHost === "::1" || pageHost === "[::1]"
-      ? "127.0.0.1"
-      : pageHost
+  const isLocal =
+    pageHost === "localhost" ||
+    pageHost === "127.0.0.1" ||
+    pageHost === "::1" ||
+    pageHost === "[::1]"
 
-  return `${window.location.protocol}//${apiHost}:4000`
+  if (isLocal) {
+    return `${window.location.protocol}//127.0.0.1:4000`
+  }
+
+  // On production / custom domains (e.g., https://myfees.myenum.in), use same-origin
+  // requests so Next.js rewrites proxy to the backend without CORS or mixed-content errors.
+  return ""
 }
 
 export const API_BASE = resolveApiBase()

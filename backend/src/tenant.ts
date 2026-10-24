@@ -31,8 +31,18 @@ export function normalizeProfileId(value: string): string {
   return value.trim();
 }
 
-export function paymentUrlFor(profileId: string): string {
-  return `${PAYMENT_BASE_URL}/${encodeURIComponent(profileId)}`;
+export function slugifyCompanyName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+export function paymentUrlFor(profileId: string, companyName?: string): string {
+  const companySlug = companyName ? slugifyCompanyName(companyName) : '';
+  const segment = companySlug || encodeURIComponent(profileId);
+  return `${PAYMENT_BASE_URL}/${segment}`;
 }
 
 export function profilePrefix(profileId: string): string {

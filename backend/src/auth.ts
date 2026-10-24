@@ -160,6 +160,8 @@ function isPublicRoute(method: string, path: string): boolean {
   if (path === '/api/auth/logout') return true;
   // The payment gateway authenticates with an HMAC signature, not a user token.
   if (path === '/api/payments/webhook') return true;
+  // Public payment page endpoints for students/parents
+  if (path.startsWith('/api/public/')) return true;
   return false;
 }
 

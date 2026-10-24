@@ -25,7 +25,9 @@ import {
 } from "@/lib/payments"
 import {
   BanknoteIcon,
+  CheckIcon,
   CircleCheckIcon,
+  CopyIcon,
   CreditCardIcon,
   ExternalLinkIcon,
   Loader2Icon,
@@ -143,6 +145,7 @@ export function PayWithGateway({
   const [method, setMethod] = useState<PaymentMethod>("UPI")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [copiedUrl, setCopiedUrl] = useState(false)
   const notified = useRef(false)
 
   // Form mode state (used on the Payments page).
@@ -530,15 +533,41 @@ export function PayWithGateway({
                             : "Waiting for UPI confirmation…"}
                         </span>
                         {!isCounter && (
-                          <a
-                            href={order.checkoutUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-4 hover:underline"
-                          >
-                            Open in new tab
-                            <ExternalLinkIcon className="size-3.5" />
-                          </a>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="xs"
+                              onClick={async () => {
+                                const url = order.paymentUrl || order.checkoutUrl
+                                if (!url) return
+                                try {
+                                  await navigator.clipboard.writeText(url)
+                                  setCopiedUrl(true)
+                                  window.setTimeout(() => setCopiedUrl(false), 2000)
+                                } catch {
+                                  // ignore
+                                }
+                              }}
+                              className="h-6 gap-1 px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                            >
+                              {copiedUrl ? (
+                                <CheckIcon className="size-3 text-emerald-600" />
+                              ) : (
+                                <CopyIcon className="size-3" />
+                              )}
+                              <span>{copiedUrl ? "Copied" : "Copy URL"}</span>
+                            </Button>
+                            <a
+                              href={order.paymentUrl || order.checkoutUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-4 hover:underline"
+                            >
+                              Open in new tab
+                              <ExternalLinkIcon className="size-3.5" />
+                            </a>
+                          </div>
                         )}
                       </div>
                       <div className="flex items-center justify-between gap-3">

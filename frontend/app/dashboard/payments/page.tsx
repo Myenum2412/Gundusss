@@ -10,7 +10,7 @@ import { PayWithGateway } from "@/components/pay-with-gateway"
 import { PaymentSetup } from "@/components/payment-setup"
 import { PaymentTimeline } from "@/components/payment-timeline"
 import Stats01 from "@/components/stats-01"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { useLiveReload } from "@/hooks/use-live-reload"
 import {
   Table,
@@ -31,8 +31,10 @@ import {
   BanknoteIcon,
   CheckIcon,
   Clock3Icon,
+  CopyIcon,
   CreditCardIcon,
   ExternalLinkIcon,
+  Link2Icon,
   Loader2Icon,
   QrCodeIcon,
   RefreshCwIcon,
@@ -113,7 +115,22 @@ function MethodCell({ method }: { method: string }) {
 }
 
 export default function PaymentsPage() {
-  const { can } = useAuth()
+  const { can, activeProfile, profile } = useAuth()
+  const companyName = activeProfile?.name || profile?.name || ""
+  const workspacePaymentUrl = useMemo(() => {
+    if (companyName) {
+      const slug = companyName
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+      if (slug) {
+        return `https://myfees.myenum.in/${encodeURIComponent(slug)}`
+      }
+    }
+    return activeProfile?.paymentUrl || profile?.paymentUrl || ""
+  }, [companyName, activeProfile?.paymentUrl, profile?.paymentUrl])
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [orders, setOrders] = useState<PaymentOrder[]>([])
   const [hydrated, setHydrated] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -121,6 +138,18 @@ export default function PaymentsPage() {
   const [timelineOrder, setTimelineOrder] = useState<PaymentOrder | null>(null)
   const [actionId, setActionId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+
+  const copyToClipboard = useCallback(async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedKey(key)
+      window.setTimeout(() => {
+        setCopiedKey((curr) => (curr === key ? null : curr))
+      }, 2000)
+    } catch {
+      // Ignore clipboard write errors
+    }
+  }, [])
 
   const reload = useCallback(() => {
     listPayments()
@@ -256,6 +285,62 @@ export default function PaymentsPage() {
         }
       />
 
+      {workspacePaymentUrl ? (
+        <div className="flex flex-col gap-3 rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3 sm:items-center">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Link2Icon className="size-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Workspace Public Payment URL
+                </span>
+                <span className="inline-flex items-center rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/20">
+                  Online
+                </span>
+              </div>
+              <p className="mt-0.5 truncate font-mono text-sm font-medium text-foreground">
+                {workspacePaymentUrl}
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Share this link with students and parents to collect fees online directly.
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 self-start sm:self-auto">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void copyToClipboard(workspacePaymentUrl, "workspace-payment-url")}
+              className="gap-1.5"
+            >
+              {copiedKey === "workspace-payment-url" ? (
+                <>
+                  <CheckIcon className="size-3.5 text-emerald-600" />
+                  <span>Copied!</span>
+                </>
+              ) : (
+                <>
+                  <CopyIcon className="size-3.5" />
+                  <span>Copy URL</span>
+                </>
+              )}
+            </Button>
+            <a
+              href={workspacePaymentUrl}
+              target="_blank"
+              rel="noreferrer"
+              className={buttonVariants({ variant: "default", size: "sm", className: "gap-1.5" })}
+            >
+              <span>Visit Link</span>
+              <ExternalLinkIcon className="size-3.5" />
+            </a>
+          </div>
+        </div>
+      ) : null}
+
       {can("settings:manage") && <PaymentSetup onSaved={reload} />}
 
       <Stats01 stats={stats} />
@@ -341,6 +426,7 @@ export default function PaymentsPage() {
                 <TableHead>Amount (₹)</TableHead>
                 <TableHead>Method</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Payment URL</TableHead>
                 <TableHead>UTR</TableHead>
                 <TableHead>Receipt</TableHead>
                 <TableHead>Created</TableHead>
@@ -350,7 +436,7 @@ export default function PaymentsPage() {
             <TableBody>
               {!hydrated ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={10} className="p-0">
+                  <TableCell colSpan={11} className="p-0">
                     <EmptyState
                       icon={QrCodeIcon}
                       title="Loading payments…"
@@ -360,7 +446,7 @@ export default function PaymentsPage() {
                 </TableRow>
               ) : orders.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={10} className="p-0">
+                  <TableCell colSpan={11} className="p-0">
                     <EmptyState
                       icon={QrCodeIcon}
                       title="No payments yet"
@@ -370,7 +456,7 @@ export default function PaymentsPage() {
                 </TableRow>
               ) : filteredOrders.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={10} className="p-0">
+                  <TableCell colSpan={11} className="p-0">
                     <EmptyState
                       icon={QrCodeIcon}
                       title="No payments match this filter"
@@ -382,6 +468,8 @@ export default function PaymentsPage() {
                 filteredOrders.map((order, index) => {
                   const busy = actionId === order.orderId
                   const counter = isCounterMethod(order.method)
+                  const paymentUrl = order.paymentUrl || order.checkoutUrl || ""
+                  const isCopied = copiedKey === order.orderId
 
                   return (
                     <TableRow key={order.orderId}>
@@ -423,6 +511,40 @@ export default function PaymentsPage() {
                             </span>
                           ) : null}
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        {paymentUrl ? (
+                          <div className="flex items-center gap-1.5">
+                            <a
+                              href={paymentUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={paymentUrl}
+                              className="inline-flex max-w-[130px] items-center gap-1 truncate font-mono text-xs text-primary underline-offset-4 hover:underline"
+                            >
+                              <span className="truncate">{paymentUrl}</span>
+                              <ExternalLinkIcon className="size-3 shrink-0" />
+                            </a>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={() => void copyToClipboard(paymentUrl, order.orderId)}
+                              title={isCopied ? "Copied" : "Copy payment URL"}
+                              className="text-muted-foreground hover:text-foreground"
+                            >
+                              {isCopied ? (
+                                <CheckIcon className="size-3 text-emerald-600" />
+                              ) : (
+                                <CopyIcon className="size-3" />
+                              )}
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            {counter ? "Counter pass" : "—"}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">
                         {order.utr || "—"}
@@ -469,11 +591,11 @@ export default function PaymentsPage() {
                             <Clock3Icon />
                             History
                           </Button>
-                          {order.checkoutUrl &&
+                          {paymentUrl &&
                           !TERMINAL.has(order.status) &&
                           !counter ? (
                             <a
-                              href={order.checkoutUrl}
+                              href={paymentUrl}
                               target="_blank"
                               rel="noreferrer"
                               className="inline-flex h-7 items-center gap-1 rounded-[10px] px-2 text-[0.8rem] font-medium text-foreground underline-offset-4 hover:bg-muted hover:underline"

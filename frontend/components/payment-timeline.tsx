@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { cn } from "cn"
 import { StatusBadge } from "@/components/status-badge"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
@@ -18,7 +18,14 @@ import {
   type PaymentEvent,
   type PaymentOrder,
 } from "@/lib/payments"
-import { Loader2Icon, RefreshCwIcon, TriangleAlertIcon } from "lucide-react"
+import {
+  CheckIcon,
+  CopyIcon,
+  ExternalLinkIcon,
+  Loader2Icon,
+  RefreshCwIcon,
+  TriangleAlertIcon,
+} from "lucide-react"
 
 const SOURCE_LABELS: Record<string, string> = {
   create: "Order created",
@@ -75,6 +82,17 @@ export function PaymentTimeline({
   const [events, setEvents] = useState<PaymentEvent[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const copyUrl = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Ignore clipboard error
+    }
+  }
 
   useEffect(() => {
     if (!open || !order) return
@@ -137,6 +155,53 @@ export function PaymentTimeline({
         </DialogHeader>
 
         <div className="max-h-[62vh] overflow-y-auto px-6 py-5">
+          {order && (order.paymentUrl || order.checkoutUrl) ? (
+            <div className="mb-5 flex flex-col gap-2 rounded-xl border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 flex-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Payment URL
+                </span>
+                <p className="truncate font-mono text-xs font-medium text-foreground">
+                  {order.paymentUrl || order.checkoutUrl}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={() => void copyUrl(order.paymentUrl || order.checkoutUrl)}
+                  className="gap-1"
+                >
+                  {copied ? (
+                    <>
+                      <CheckIcon className="size-3 text-emerald-600" />
+                      <span>Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <CopyIcon className="size-3" />
+                      <span>Copy</span>
+                    </>
+                  )}
+                </Button>
+                <a
+                  href={order.paymentUrl || order.checkoutUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={buttonVariants({
+                    variant: "ghost",
+                    size: "xs",
+                    className: "gap-1",
+                  })}
+                >
+                  <span>Open</span>
+                  <ExternalLinkIcon className="size-3" />
+                </a>
+              </div>
+            </div>
+          ) : null}
+
           {loading && (
             <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
               <Loader2Icon className="size-4 animate-spin" />

@@ -17,6 +17,7 @@ import {
   isValidProfileId,
   paymentUrlFor,
   scopedEntityId,
+  slugifyCompanyName,
 } from './tenant.js';
 import {
   createUser,
@@ -106,6 +107,13 @@ export function slugify(value: string): string {
     .slice(0, 40);
 }
 
+function normalizeProfile(profile: ProfileRecord): ProfileRecord {
+  return {
+    ...profile,
+    paymentUrl: paymentUrlFor(profile.profileId, profile.name),
+  };
+}
+
 export async function getProfile(
   profileId: string
 ): Promise<ProfileRecord | null> {
@@ -113,16 +121,34 @@ export async function getProfile(
     PROFILES,
     profileId.trim()
   );
-  return record?.data ?? null;
+  return record ? normalizeProfile(record.data) : null;
 }
 
 export async function listProfiles(): Promise<ProfileRecord[]> {
   const rows = await listRecords<ProfileRecord>(PROFILES);
   return rows
-    .map((row) => row.data)
+    .map((row) => normalizeProfile(row.data))
     .sort((a, b) =>
       String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? ''))
     );
+}
+
+export async function findProfileBySlug(
+  slug: string
+): Promise<ProfileRecord | null> {
+  const clean = slug.trim().toLowerCase();
+  if (!clean) return null;
+
+  const direct = await getProfile(slug.trim());
+  if (direct) return direct;
+
+  const profiles = await listProfiles();
+  for (const p of profiles) {
+    if (p.profileId.toLowerCase() === clean) return p;
+    if (slugifyCompanyName(p.name) === clean) return p;
+    if (p.name.trim().toLowerCase() === clean) return p;
+  }
+  return null;
 }
 
 async function createProfile(input: {
@@ -148,7 +174,7 @@ async function createProfile(input: {
     name: input.name.trim() || profileId,
     ownerName: input.ownerName.trim(),
     ownerEmail: normalizeEmail(input.ownerEmail),
-    paymentUrl: paymentUrlFor(profileId),
+    paymentUrl: paymentUrlFor(profileId, input.name),
     createdAt: now,
     updatedAt: now,
   };
@@ -262,7 +288,7 @@ export async function ensureDeveloperAccount(): Promise<void> {
     ownerName: SUPER_ADMIN_NAME,
     ownerEmail: SUPER_ADMIN_EMAIL,
   });
-  const expectedPaymentUrl = paymentUrlFor(SUPER_PROFILE_ID);
+  const expectedPaymentUrl = paymentUrlFor(SUPER_PROFILE_ID, SUPER_ADMIN_NAME);
   if (!profile.paymentUrl || profile.paymentUrl !== expectedPaymentUrl) {
     await putRecord(PROFILES, SUPER_PROFILE_ID, {
       ...profile,
@@ -554,12 +580,13 @@ export interface SessionProfiles {
 
 function fallbackProfile(profileId: string, email: string): ProfileRecord {
   const now = nowIso();
+  const name = profileId === SUPER_PROFILE_ID ? SUPER_ADMIN_NAME : profileId;
   return {
     profileId,
-    name: profileId === SUPER_PROFILE_ID ? SUPER_ADMIN_NAME : profileId,
+    name,
     ownerName: '',
     ownerEmail: email,
-    paymentUrl: paymentUrlFor(profileId),
+    paymentUrl: paymentUrlFor(profileId, name),
     createdAt: now,
     updatedAt: now,
   };

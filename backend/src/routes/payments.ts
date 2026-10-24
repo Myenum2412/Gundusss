@@ -8,6 +8,7 @@ import {
   putRecord,
 } from '../appwrite.js';
 import {
+  findProfileBySlug,
   getProfile,
   resolveProfileId,
 } from '../profiles.js';
@@ -73,6 +74,7 @@ interface LocalOrder {
   studentName: string;
   feeId: number | null;
   checkoutUrl: string;
+  paymentUrl?: string;
   receiptId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -178,9 +180,15 @@ function normalizeStoredOrder(
   order: LocalOrder,
   profileId: string
 ): LocalOrder {
+  const paymentUrl =
+    order.paymentUrl ||
+    order.checkoutUrl ||
+    (order.paymentId ? `http://localhost:7000/checkout/${order.paymentId}` : '');
   return {
     ...order,
     profileId: (order.profileId ?? '').trim() || profileId,
+    checkoutUrl: order.checkoutUrl || paymentUrl,
+    paymentUrl,
   };
 }
 
@@ -465,6 +473,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     // Reusing an order id must not regress a settled/terminal local record if
     // the gateway returns the original session for the same idempotency key.
     const alreadyTerminal = existing ? TERMINAL_STATUSES.has(existing.status) : false;
+    const paymentUrl = json.checkoutUrl ?? (existing?.paymentUrl || existing?.checkoutUrl) ?? '';
     const order: LocalOrder = existing
       ? {
           ...existing,
@@ -473,7 +482,8 @@ export async function paymentRoutes(app: FastifyInstance) {
           status: alreadyTerminal ? existing.status : initialStatus,
           gatewayStatus: alreadyTerminal ? existing.gatewayStatus : initialStatus,
           method,
-          checkoutUrl: json.checkoutUrl ?? existing.checkoutUrl,
+          checkoutUrl: paymentUrl,
+          paymentUrl,
           updatedAt: timestamp,
         }
       : {
@@ -488,7 +498,8 @@ export async function paymentRoutes(app: FastifyInstance) {
           studentId: body.studentId ?? '',
           studentName,
           feeId: body.feeId ?? null,
-          checkoutUrl: json.checkoutUrl ?? '',
+          checkoutUrl: paymentUrl,
+          paymentUrl,
           receiptId: null,
           createdAt: timestamp,
           updatedAt: timestamp,
@@ -512,6 +523,7 @@ export async function paymentRoutes(app: FastifyInstance) {
         gatewayStatus: initialStatus,
         method,
         checkoutUrl: order.checkoutUrl,
+        paymentUrl: order.paymentUrl ?? order.checkoutUrl,
         amount: amountStr,
         currency: json.currency ?? 'INR',
       },
@@ -583,7 +595,13 @@ export async function paymentRoutes(app: FastifyInstance) {
       }
     }
 
-    return { data: { ...order, events: await readPaymentEvents(profileId, order.orderId) } };
+    return {
+      data: {
+        ...order,
+        paymentUrl: order.paymentUrl || order.checkoutUrl,
+        events: await readPaymentEvents(profileId, order.orderId),
+      },
+    };
   });
 
   // POST /api/payments/:id/counter-confirm — the cashier confirms a cash or
@@ -973,5 +991,212 @@ export async function paymentRoutes(app: FastifyInstance) {
     }
 
     return { received: true, event, orderId };
+  });
+
+  // GET /api/public/profile/:slug — read public workspace payment details for checkout page
+  app.get('/api/public/profile/:slug', async (req, reply) => {
+    const { slug } = req.params as { slug: string };
+    const profile = await findProfileBySlug(slug);
+    if (!profile) {
+      return reply.code(404).send({ error: 'Organization or payment page not found' });
+    }
+
+    const settingsRecord = await getRecord<{
+      upi_id?: string;
+      payee_name?: string;
+      qr_code_data_url?: string;
+    }>(APPWRITE_COLLECTIONS.paymentSettings, scopedEntityId(profile.profileId, '1'));
+
+    const bizRecord = await getRecord<{
+      profile?: {
+        media?: { logoUrl?: string; coverUrl?: string };
+        phone?: string;
+        email?: string;
+        description?: string;
+      };
+    }>(APPWRITE_COLLECTIONS.businessProfiles, scopedEntityId(profile.profileId, '1'));
+
+    const biz = bizRecord?.data?.profile;
+
+    return {
+      data: {
+        profileId: profile.profileId,
+        name: profile.name,
+        ownerName: profile.ownerName,
+        paymentUrl: profile.paymentUrl,
+        upiId: settingsRecord?.data?.upi_id ?? '',
+        payeeName: settingsRecord?.data?.payee_name ?? profile.name,
+        qrCodeDataUrl: settingsRecord?.data?.qr_code_data_url ?? '',
+        logoUrl: biz?.media?.logoUrl ?? '',
+        phone: biz?.phone ?? '',
+        email: biz?.email ?? profile.ownerEmail,
+        description: biz?.description ?? '',
+      },
+    };
+  });
+
+  // POST /api/public/payments/create — public checkout creation by student/parent
+  app.post('/api/public/payments/create', async (req, reply) => {
+    const body = (req.body ?? {}) as CreatePaymentBody & { slug?: string; profileId?: string };
+    const slug = (body.slug ?? body.profileId ?? '').trim();
+    if (!slug) {
+      return reply.code(400).send({ error: 'slug or profileId is required' });
+    }
+
+    const profile = await findProfileBySlug(slug);
+    if (!profile) {
+      return reply.code(404).send({ error: 'Organization not found' });
+    }
+
+    const profileId = profile.profileId;
+    const amount = Number(body.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return reply.code(400).send({ error: 'A valid positive amount is required' });
+    }
+
+    const studentName = (body.studentName ?? '').trim();
+    if (!studentName) {
+      return reply.code(400).send({ error: 'Student name is required' });
+    }
+
+    const method = normalizePaymentMethod(body.method) || 'UPI';
+    const orderId = body.orderId?.trim() || `FEE-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const amountStr = amount.toFixed(2);
+
+    const gatewayPayload = {
+      orderId,
+      amount: amountStr,
+      currency: 'INR',
+      method,
+      customer: {
+        name: studentName,
+        ...(body.email ? { email: body.email } : {}),
+        ...(body.phone ? { phoneNumber: body.phone } : {}),
+      },
+      description: body.description ?? `Fee payment for ${studentName} - ${profile.name}`,
+      metadata: {
+        profileId,
+        studentId: body.studentId ?? '',
+        studentName,
+        feeId: body.feeId ?? null,
+        source: 'fees-public-portal',
+      },
+    };
+
+    let upstream: Response;
+    try {
+      upstream = await fetch(`${YOUPI_API}/api/v1/payments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Merchant-Key': YOUPI_WEBHOOK_SECRET,
+        },
+        body: JSON.stringify(gatewayPayload),
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch {
+      return reply.code(502).send({
+        error: `Payment gateway unreachable. Is YOUPI PG running at ${YOUPI_API}?`,
+      });
+    }
+
+    const json = (await upstream.json().catch(() => ({}))) as UpstreamPayment;
+    if (!upstream.ok && !json.checkoutUrl) {
+      return reply.code(upstream.status || 502).send({
+        error: json.error ?? json.message ?? 'Payment gateway rejected the order',
+      });
+    }
+
+    const initialStatus = json.status ?? 'INITIATED';
+    const timestamp = nowIso();
+    const paymentUrl = json.checkoutUrl ?? (json.paymentId ? `http://localhost:7000/checkout/${json.paymentId}` : '');
+
+    const order: LocalOrder = {
+      profileId,
+      orderId,
+      paymentId: json.paymentId ?? null,
+      status: initialStatus,
+      gatewayStatus: initialStatus,
+      method,
+      utr: '',
+      amount: amountStr,
+      studentId: body.studentId ?? '',
+      studentName,
+      feeId: body.feeId ?? null,
+      checkoutUrl: paymentUrl,
+      paymentUrl,
+      receiptId: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    await saveLocalOrder(order);
+
+    await recordPaymentEvent(profileId, {
+      orderId,
+      status: initialStatus,
+      gatewayStatus: initialStatus,
+      method,
+      source: 'public-checkout',
+      message: `Online UPI checkout initiated by ${studentName}.`,
+    });
+
+    return reply.code(upstream.ok ? 200 : 201).send({
+      data: {
+        orderId,
+        paymentId: json.paymentId,
+        status: initialStatus,
+        gatewayStatus: initialStatus,
+        method,
+        checkoutUrl: order.checkoutUrl,
+        paymentUrl: order.paymentUrl,
+        amount: amountStr,
+        currency: json.currency ?? 'INR',
+      },
+    });
+  });
+
+  // GET /api/public/payments/:id — public status poll for checkout page
+  app.get('/api/public/payments/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    let order = await findOrderAcrossProfiles(id);
+    if (!order) {
+      return reply.code(404).send({ error: 'Payment order not found' });
+    }
+
+    if (!TERMINAL_STATUSES.has(order.status)) {
+      const gateway = await fetchGatewayPayment(order.paymentId, order.orderId);
+      const gatewayStatus = (gateway?.internalStatus ?? gateway?.status ?? '').toUpperCase();
+      if (gatewayStatus && KNOWN_STATUSES.has(gatewayStatus)) {
+        const displayStatus =
+          gatewayStatus === 'SUCCESS' && !order.receiptId ? 'PROCESSING' : gatewayStatus;
+        if (displayStatus !== order.status || gatewayStatus !== order.gatewayStatus) {
+          order = {
+            ...order,
+            status: displayStatus,
+            gatewayStatus,
+            updatedAt: nowIso(),
+          };
+          await saveLocalOrder(order);
+        }
+      }
+    }
+
+    return {
+      data: {
+        orderId: order.orderId,
+        paymentId: order.paymentId,
+        status: order.status,
+        gatewayStatus: order.gatewayStatus,
+        method: order.method,
+        amount: order.amount,
+        studentName: order.studentName,
+        studentId: order.studentId,
+        utr: order.utr,
+        receiptId: order.receiptId,
+        checkoutUrl: order.paymentUrl || order.checkoutUrl,
+        paymentUrl: order.paymentUrl || order.checkoutUrl,
+        createdAt: order.createdAt,
+      },
+    };
   });
 }

@@ -1,6 +1,10 @@
+import dns from 'node:dns';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// Prefer IPv4 resolution to prevent connection timeouts on networks without IPv6 routes.
+dns.setDefaultResultOrder('ipv4first');
 
 // Load backend/.env before any other module (db.ts) reads process.env.
 // Works from both `src/` (tsx) and `dist/` (compiled output).
