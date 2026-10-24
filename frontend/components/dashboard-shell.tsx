@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/breadcrumb"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import { useAuth } from "@/components/auth-provider"
 import { cn } from "cn"
 
 export function DashboardShell({
@@ -24,6 +25,9 @@ export function DashboardShell({
   children: React.ReactNode
   contentClassName?: string
 }) {
+  const { can, user } = useAuth()
+  const canWrite = can("data:write")
+
   return (
     <>
       {/* Slim sticky header — Linear / Stripe style */}
@@ -51,7 +55,14 @@ export function DashboardShell({
             })}
           </BreadcrumbList>
         </Breadcrumb>
-        {actions && <div className="ml-auto flex items-center gap-2">{actions}</div>}
+        <div className="ml-auto flex items-center gap-2">
+          {!canWrite && (
+            <span className="rounded-full border bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+              {user.role === "viewer" ? "Read-only" : "No write access"}
+            </span>
+          )}
+          {actions && canWrite && <div className="flex items-center gap-2">{actions}</div>}
+        </div>
       </header>
 
       {/* Full width + full height content area. Tables flex to fill. */}
@@ -61,6 +72,7 @@ export function DashboardShell({
     </>
   )
 }
+
 
 export function PageHeader({
   title,
@@ -73,6 +85,7 @@ export function PageHeader({
   meta?: React.ReactNode
   actions?: React.ReactNode
 }) {
+  const { can } = useAuth()
   return (
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div className="min-w-0">
@@ -82,7 +95,9 @@ export function PageHeader({
         </div>
         <p className="mt-1 max-w-2xl text-[13px] text-muted-foreground">{description}</p>
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {actions && can("data:write") && (
+        <div className="flex shrink-0 items-center gap-2">{actions}</div>
+      )}
     </div>
   )
 }

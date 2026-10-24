@@ -2,6 +2,7 @@
 
 import { EllipsisIcon, EyeIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/components/auth-provider";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +25,17 @@ export function RowActions({
   editLabel?: string;
   deleteLabel?: string;
 }) {
+  const { can } = useAuth();
+  // Read-only roles can still open the details view, but editing/deleting is
+  // hidden (and rejected by the API regardless).
+  const canWrite = can("data:write");
+  const showEdit = canWrite && Boolean(onEdit);
+  const showDelete = canWrite && Boolean(onDelete);
+
+  if (!onView && !showEdit && !showDelete) {
+    return null;
+  }
+
   return (
     <div className="flex items-center justify-end">
       <DropdownMenu>
@@ -48,13 +60,13 @@ export function RowActions({
               {viewLabel}
             </DropdownMenuItem>
           )}
-          {onEdit && (
+          {showEdit && (
             <DropdownMenuItem onClick={onEdit}>
               <PencilIcon />
               {editLabel}
             </DropdownMenuItem>
           )}
-          {onDelete && (
+          {showDelete && (
             <DropdownMenuItem variant="destructive" onClick={onDelete}>
               <Trash2Icon />
               {deleteLabel}

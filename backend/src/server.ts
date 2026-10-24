@@ -1,20 +1,21 @@
 import './env.js';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
-import bcrypt from 'bcryptjs';
 import { Readable } from 'node:stream';
 import {
   APPWRITE_COLLECTIONS,
   assertAppwriteSetup,
   getAppwriteStatus,
-  getRecord,
   isAppwriteConfigured,
   listRecords,
   putRecord,
 } from './appwrite.js';
 import type { Fee } from './schemas.js';
+import { authGuard } from './auth.js';
+import { listUsers, saveUser } from './users.js';
 import { feeRoutes } from './routes/fees.js';
 import { authRoutes } from './routes/auth.js';
+import { userRoutes } from './routes/users.js';
 import { whatsappRoutes } from './routes/whatsapp.js';
 import { collectionsRoutes } from './routes/collections.js';
 import { paymentRoutes } from './routes/payments.js';
@@ -92,6 +93,11 @@ app.setErrorHandler((error, _request, reply) => {
   reply.code(status).send({ error: message });
 });
 
+// Authenticate and authorize every /api/* request before it reaches a route.
+// Public endpoints (login, first-run setup, health, payment webhook) are
+// allow-listed inside the guard.
+app.addHook('onRequest', authGuard);
+
 app.get('/api/health', async () => ({
   ok: true,
   time: new Date().toISOString(),
@@ -101,21 +107,12 @@ app.get('/api/appwrite/status', async () => ({ data: getAppwriteStatus() }));
 
 await app.register(feeRoutes);
 await app.register(authRoutes);
+await app.register(userRoutes);
 await app.register(whatsappRoutes);
 await app.register(collectionsRoutes);
 await app.register(paymentRoutes);
 await app.register(paymentSettingsRoutes);
 await app.register(businessProfileRoutes);
-
-const SEED_EMAIL = 'admin@seedsofsuccess.com';
-const SEED_PASSWORD = 'Admin123!';
-
-interface UserRecord {
-  id: number;
-  email: string;
-  password_hash: string;
-  created_at: string;
-}
 
 function isoDateInDays(days: number): string {
   const date = new Date();
@@ -126,18 +123,23 @@ function isoDateInDays(days: number): string {
 async function ensureAppwriteSeed(): Promise<void> {
   await assertAppwriteSetup();
 
-  const existingUser = await getRecord<UserRecord>(
-    APPWRITE_COLLECTIONS.users,
-    SEED_EMAIL
-  );
-  if (!existingUser) {
-    const hash = await bcrypt.hash(SEED_PASSWORD, 10);
-    await putRecord<UserRecord>(APPWRITE_COLLECTIONS.users, SEED_EMAIL, {
-      id: 1,
-      email: SEED_EMAIL,
-      password_hash: hash,
-      created_at: new Date().toISOString(),
-    });
+  // Backfill roles for accounts created before RBAC existed: the oldest account
+  // becomes the administrator (so nobody is locked out) and the rest become
+  // read-only until an admin assigns their real role.
+  const users = await listUsers();
+  let hasAdmin = users.some((user) => user.role === 'admin');
+  for (const user of users) {
+    if (!user.role) {
+      const role = hasAdmin ? 'viewer' : 'admin';
+      await saveUser({ ...user, role, updated_at: new Date().toISOString() });
+      console.log(`Backfilled ${user.email} as ${role}`);
+      if (role === 'admin') hasAdmin = true;
+    }
+  }
+  if (users.length === 0) {
+    console.log(
+      'No users exist yet. The first administrator can be created from /login.'
+    );
   }
 
   const fees = await listRecords<Fee>(APPWRITE_COLLECTIONS.fees);

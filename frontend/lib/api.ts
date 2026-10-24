@@ -1,4 +1,5 @@
-import { API_BASE } from './api-base';
+import { apiFetch, readData } from './api-base';
+import { canWriteStored } from './session';
 
 export interface Fee {
   id: number;
@@ -9,13 +10,9 @@ export interface Fee {
   created_at: string;
 }
 
-const BASE = API_BASE;
-
 export async function getFees(): Promise<Fee[]> {
-  const res = await fetch(`${BASE}/api/fees`, { cache: 'no-store' });
-  if (!res.ok) throw new Error('Failed to fetch fees');
-  const json = await res.json();
-  return json.data;
+  const res = await apiFetch('/api/fees');
+  return readData<Fee[]>(res);
 }
 
 export async function createFee(input: {
@@ -24,35 +21,20 @@ export async function createFee(input: {
   status: string;
   due_date: string;
 }): Promise<Fee> {
-  const res = await fetch(`${BASE}/api/fees`, {
+  const res = await apiFetch('/api/fees', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
-  if (!res.ok) throw new Error('Failed to create fee');
-  const json = await res.json();
-  return json.data;
+  return readData<Fee>(res);
 }
 
 export async function deleteFee(id: number): Promise<void> {
-  const res = await fetch(`${BASE}/api/fees/${id}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error('Failed to delete fee');
-}
-
-export interface AuthUser {
-  id: number;
-  email: string;
-}
-
-export async function login(input: { email: string; password: string }): Promise<AuthUser> {
-  const res = await fetch(`${BASE}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error ?? 'Login failed');
-  return json.data as AuthUser;
+  const res = await apiFetch(`/api/fees/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(json.error ?? 'Failed to delete fee');
+  }
 }
 
 export interface WaState {
@@ -64,11 +46,11 @@ export interface WaState {
 }
 
 async function waReq(path: string, init?: RequestInit): Promise<WaState> {
-  const res = await fetch(`${BASE}${path}`, {
-    cache: 'no-store',
-    ...init,
-  });
-  const json = await res.json().catch(() => ({}));
+  const res = await apiFetch(path, init);
+  const json = (await res.json().catch(() => ({}))) as {
+    data?: WaState;
+    error?: string;
+  };
   if (!res.ok) throw new Error(json.error ?? 'WhatsApp request failed');
   return json.data as WaState;
 }
@@ -89,48 +71,63 @@ export async function sendWaMessage(input: {
   to: string;
   message: string;
 }): Promise<{ id: string | null; to: string }> {
-  const res = await fetch(`${BASE}/api/whatsapp/send`, {
+  const res = await apiFetch('/api/whatsapp/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
-  const json = await res.json().catch(() => ({}));
+  const json = (await res.json().catch(() => ({}))) as {
+    data?: { id: string | null; to: string };
+    error?: string;
+  };
   if (!res.ok) throw new Error(json.error ?? 'Failed to send message');
-  return json.data;
+  return json.data as { id: string | null; to: string };
 }
 
-// Generic collection sync used by the *-store modules (Postgres-backed,
-// with localStorage as a write-through cache / offline fallback).
+// Generic collection sync used by the *-store modules (Appwrite-backed, with
+// localStorage as a write-through cache / offline fallback).
 export async function getCollection<T>(name: string): Promise<T[]> {
-  const res = await fetch(`${BASE}/api/${name}`, { cache: 'no-store' });
-  const json = await res.json().catch(() => ({}));
+  const res = await apiFetch(`/api/${name}`);
+  const json = (await res.json().catch(() => ({}))) as {
+    data?: T[];
+    error?: string;
+  };
   if (!res.ok) throw new Error(json.error ?? `Failed to load ${name}`);
   return (json.data ?? []) as T[];
 }
 
 export async function replaceCollection(name: string, items: unknown): Promise<void> {
-  const res = await fetch(`${BASE}/api/${name}`, {
+  if (!canWriteStored()) {
+    throw new Error('Your account is read-only.');
+  }
+  const res = await apiFetch(`/api/${name}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ items }),
   });
-  const json = await res.json().catch(() => ({}));
+  const json = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new Error(json.error ?? `Failed to save ${name}`);
 }
 
 export async function getDropdowns(): Promise<Record<string, string[]>> {
-  const res = await fetch(`${BASE}/api/dropdowns`, { cache: 'no-store' });
-  const json = await res.json().catch(() => ({}));
+  const res = await apiFetch('/api/dropdowns');
+  const json = (await res.json().catch(() => ({}))) as {
+    data?: Record<string, string[]>;
+    error?: string;
+  };
   if (!res.ok) throw new Error(json.error ?? 'Failed to load dropdowns');
   return (json.data ?? {}) as Record<string, string[]>;
 }
 
 export async function saveDropdownsApi(dropdowns: Record<string, string[]>): Promise<void> {
-  const res = await fetch(`${BASE}/api/dropdowns`, {
+  if (!canWriteStored()) {
+    throw new Error('Your account is read-only.');
+  }
+  const res = await apiFetch('/api/dropdowns', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dropdowns }),
   });
-  const json = await res.json().catch(() => ({}));
+  const json = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new Error(json.error ?? 'Failed to save dropdowns');
 }

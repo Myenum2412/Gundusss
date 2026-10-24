@@ -1,12 +1,9 @@
-"use client"
+import { cookies } from "next/headers"
+import { redirect } from "next/navigation"
 
-import { LoginForm } from "@/components/login-form"
-import { AuthShell } from "@/components/auth-shell"
+import { SESSION_COOKIE } from "@/lib/session-constants"
 
 export default function Home() {
-  return (
-    <AuthShell title="Welcome back" subtitle="Sign in to manage students, fees, and receipts.">
-      <LoginForm />
-    </AuthShell>
-  )
+  const session = cookies().get(SESSION_COOKIE)?.value
+  redirect(session ? "/dashboard" : "/login")
 }

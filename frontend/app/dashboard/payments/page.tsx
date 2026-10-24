@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
+import { useAuth } from "@/components/auth-provider"
 import { StatusBadge } from "@/components/status-badge"
 import { EmptyState } from "@/components/empty-state"
 import { LiveBadge } from "@/components/live-badge"
@@ -112,6 +113,7 @@ function MethodCell({ method }: { method: string }) {
 }
 
 export default function PaymentsPage() {
+  const { can } = useAuth()
   const [orders, setOrders] = useState<PaymentOrder[]>([])
   const [hydrated, setHydrated] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -254,7 +256,7 @@ export default function PaymentsPage() {
         }
       />
 
-      <PaymentSetup onSaved={reload} />
+      {can("settings:manage") && <PaymentSetup onSaved={reload} />}
 
       <Stats01 stats={stats} />
 
@@ -433,7 +435,7 @@ export default function PaymentsPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex flex-wrap items-center justify-end gap-1">
-                          {counter && !TERMINAL.has(order.status) && (
+                          {can("data:write") && counter && !TERMINAL.has(order.status) && (
                             <>
                               <Button
                                 size="sm"

@@ -4,6 +4,7 @@ import * as React from "react"
 
 import { NavMain } from "@/components/nav-main"
 import { NavUser } from "@/components/nav-user"
+import { useAuth } from "@/components/auth-provider"
 import {
   Sidebar,
   SidebarContent,
@@ -24,25 +25,33 @@ import {
   CreditCardIcon,
   MegaphoneIcon,
   SettingsIcon,
+  UsersIcon,
 } from "lucide-react"
+import type { Permission } from "@/lib/session"
 
-// Sidebar menu for Seeds of Success fees app.
-const data = {
-  user: {
-    name: "Admin",
-    email: "admin@seedsofsuccess.in",
-    avatar: "/avatars/shadcn.jpg",
-  },
+interface NavItem {
+  title: string
+  url: string
+  icon?: React.ReactNode
+  permission: Permission
+  items?: { title: string; url: string; permission?: Permission }[]
+}
+
+// Sidebar menu for Seeds of Success fees app. Items are filtered by the signed
+// in user's role so a viewer never sees admin-only destinations.
+const navigation: { navMain: NavItem[]; navBottom: NavItem[] } = {
   navMain: [
     {
       title: "Dashboard",
       url: "/dashboard",
       icon: <LayoutDashboardIcon />,
+      permission: "data:read",
     },
     {
       title: "Students",
       url: "#",
       icon: <GraduationCapIcon />,
+      permission: "data:read",
       items: [
         {
           title: "All Students",
@@ -58,33 +67,59 @@ const data = {
       title: "Fee Structure",
       url: "/dashboard/fee-structure",
       icon: <ClipboardListIcon />,
+      permission: "data:read",
     },
     {
       title: "Receipts",
       url: "/dashboard/receipts",
       icon: <ReceiptIcon />,
+      permission: "data:read",
     },
     {
       title: "Payments",
       url: "/dashboard/payments",
       icon: <CreditCardIcon />,
+      permission: "data:read",
     },
     {
       title: "Announcement",
       url: "/dashboard/announcements",
       icon: <MegaphoneIcon />,
+      permission: "data:read",
     },
   ],
   navBottom: [
     {
+      title: "Users",
+      url: "/dashboard/users",
+      icon: <UsersIcon />,
+      permission: "users:manage",
+    },
+    {
       title: "Settings",
       url: "/dashboard/settings",
       icon: <SettingsIcon />,
+      permission: "settings:manage",
     },
   ],
 }
 
+function forNav(items: NavItem[], can: (permission: Permission) => boolean) {
+  return items
+    .filter((item) => can(item.permission))
+    .map(({ title, url, icon, items: subItems }) => ({
+      title,
+      url,
+      icon,
+      items: subItems,
+    }))
+}
+
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const { user, can } = useAuth()
+  const navMain = forNav(navigation.navMain, can)
+  const navBottom = forNav(navigation.navBottom, can)
+
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader className="px-3 pt-3">
@@ -104,14 +139,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarSeparator className="my-1" />
       <SidebarContent className="flex flex-col gap-2 px-2">
-        <NavMain items={data.navMain} />
-        <div className="mt-auto">
-          <SidebarSeparator className="mx-0 mb-2" />
-          <NavMain items={data.navBottom} label={null} />
-        </div>
+        <NavMain items={navMain} />
+        {navBottom.length > 0 && (
+          <div className="mt-auto">
+            <SidebarSeparator className="mx-0 mb-2" />
+            <NavMain items={navBottom} label={null} />
+          </div>
+        )}
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border p-2">
-        <NavUser user={data.user} />
+        <NavUser user={user} />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

@@ -91,6 +91,7 @@ export default function ProfileBlock({
   announcements,
   system,
   optionCount,
+  canManageSettings = true,
   onSignOut,
 }: {
   user: ProfileUser
@@ -99,6 +100,7 @@ export default function ProfileBlock({
   announcements: ProfileAnnouncement[]
   system: ProfileSystem
   optionCount: number
+  canManageSettings?: boolean
   onSignOut: () => void
 }) {
   return (
@@ -128,9 +130,11 @@ export default function ProfileBlock({
               </div>
             </div>
             <div className="flex items-center gap-2 pb-1">
-              <Button variant="outline" size="sm" render={<Link href="/dashboard/settings" />}>
-                Settings
-              </Button>
+              {canManageSettings && (
+                <Button variant="outline" size="sm" render={<Link href="/dashboard/settings" />}>
+                  Settings
+                </Button>
+              )}
               <Button size="sm" onClick={onSignOut}>
                 Sign out
               </Button>
@@ -139,7 +143,7 @@ export default function ProfileBlock({
 
           <p className="mt-4 max-w-3xl text-sm/relaxed text-foreground/80">
             {user.workspace} · Fees Manager — enrolments, groups, fee
-            structures, receipts, and announcements, stored in Postgres and
+            structures, receipts, and announcements, stored in Appwrite and
             synced live across every page.
           </p>
 
@@ -257,10 +261,15 @@ export default function ProfileBlock({
               <Separator className="my-4" />
               <p className="text-xs text-muted-foreground">
                 {optionCount} dropdown options configured across 8 lists · Forms
-                pick up changes live ·{" "}
-                <Link href="/dashboard/settings" className="font-medium text-foreground underline underline-offset-4">
-                  Manage in Settings
-                </Link>
+                pick up changes live
+                {canManageSettings && (
+                  <>
+                    {" · "}
+                    <Link href="/dashboard/settings" className="font-medium text-foreground underline underline-offset-4">
+                      Manage in Settings
+                    </Link>
+                  </>
+                )}
               </p>
             </TabsContent>
           </Tabs>

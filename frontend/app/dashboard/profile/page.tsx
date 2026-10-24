@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
 import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
 import { LiveBadge } from "@/components/live-badge"
 import ProfileBlock from "@/components/blocks/profile-1"
@@ -16,13 +15,13 @@ import { getWaStatus } from "@/lib/api"
 import { API_BASE } from "@/lib/api-base"
 import { isSyncing } from "@/lib/live"
 import { useLiveReload } from "@/hooks/use-live-reload"
-import type { AuthUser } from "@/lib/api"
+import { useAuth } from "@/components/auth-provider"
+import { ROLE_LABELS } from "@/lib/session"
 
 const API_URL = API_BASE
 
 export default function ProfilePage() {
-  const router = useRouter()
-  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const { user: authUser, signOut, can } = useAuth()
   const [counts, setCounts] = useState({
     students: 0,
     groups: 0,
@@ -99,23 +98,14 @@ export default function ProfilePage() {
   }, [])
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("auth_user")
-      if (raw) setAuthUser(JSON.parse(raw) as AuthUser)
-    } catch {}
     reloadProfile()
   }, [reloadProfile])
 
   useLiveReload(reloadProfile)
 
-  function onSignOut() {
-    try {
-      localStorage.removeItem("auth_user")
-    } catch {}
-    router.push("/login")
+  async function onSignOut() {
+    await signOut()
   }
-
-  const email = authUser?.email ?? "admin@seedsofsuccess.in"
 
   return (
     <DashboardShell trail={[{ label: "Dashboard", href: "/dashboard" }, { label: "Profile" }]}>
@@ -126,11 +116,11 @@ export default function ProfilePage() {
       />
       <ProfileBlock
         user={{
-          name: "Admin",
-          email,
-          role: "Admin",
+          name: authUser.name,
+          email: authUser.email,
+          role: ROLE_LABELS[authUser.role],
           workspace: "Seeds of Success",
-          userId: String(authUser?.id ?? 1),
+          userId: String(authUser.id),
         }}
         stats={[
           { label: "Students", value: String(counts.students) },
@@ -152,9 +142,10 @@ export default function ProfilePage() {
           whatsapp,
         }}
         optionCount={counts.options}
+        canManageSettings={can("settings:manage")}
         onSignOut={onSignOut}
       />
-      <BusinessProfileForm />
+      {can("settings:manage") && <BusinessProfileForm />}
     </DashboardShell>
   )
 }

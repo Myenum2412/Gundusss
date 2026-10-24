@@ -14,6 +14,8 @@ services:
       APPWRITE_PROJECT_ID: ${APPWRITE_PROJECT_ID:-6adaf4be003ae5c9e622}
       APPWRITE_API_KEY: ${APPWRITE_API_KEY:?Set APPWRITE_API_KEY before starting Compose}
       APPWRITE_DATABASE_ID: ${APPWRITE_DATABASE_ID:-fees}
+      AUTH_SECRET: ${AUTH_SECRET:-}
+      AUTH_TOKEN_TTL_HOURS: ${AUTH_TOKEN_TTL_HOURS:-12}
       # YOUPI PG runs on the host in the default local setup.
       YOUPI_PAYMENT_API_URL: ${YOUPI_PAYMENT_API_URL:-http://host.docker.internal:6100}
       YOUPI_WEBHOOK_SECRET: ${YOUPI_WEBHOOK_SECRET:-}

@@ -1,4 +1,4 @@
-import { API_BASE } from "./api-base"
+import { apiFetch } from "./api-base"
 
 export type Weekday =
   | "monday"
@@ -312,9 +312,7 @@ export interface LoadedBusinessProfile {
 
 export async function loadBusinessProfile(): Promise<LoadedBusinessProfile> {
   try {
-    const res = await fetch(`${API_BASE}/api/business-profile`, {
-      cache: "no-store",
-    })
+    const res = await apiFetch("/api/business-profile")
     if (!res.ok) throw new Error("Failed to load business profile")
     const json = await res.json()
     const raw = json?.data?.profile
@@ -345,7 +343,7 @@ export async function saveBusinessProfile(
   // Always keep a local copy, so a temporary backend outage never loses edits.
   cacheLocal(profile)
   try {
-    const res = await fetch(`${API_BASE}/api/business-profile`, {
+    const res = await apiFetch("/api/business-profile", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ profile }),

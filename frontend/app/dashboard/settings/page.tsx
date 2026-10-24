@@ -2,12 +2,19 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
+import { useAuth } from "@/components/auth-provider"
 import { StatusBadge } from "@/components/status-badge"
 import Stats01 from "@/components/stats-01"
 import { LiveBadge } from "@/components/live-badge"
 import { isSyncing, sameJson } from "@/lib/live"
 import { useLiveReload } from "@/hooks/use-live-reload"
 import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import {
@@ -25,7 +32,7 @@ import {
   type DropdownKey,
   type DropdownMap,
 } from "@/lib/dropdown-store"
-import { CheckCircle2Icon, PlugIcon, SendIcon } from "lucide-react"
+import { CheckCircle2Icon, PlugIcon, SendIcon, ShieldAlertIcon } from "lucide-react"
 
 const waLabel: Record<WaState["status"], string> = {
   idle: "Not started",
@@ -37,6 +44,7 @@ const waLabel: Record<WaState["status"], string> = {
 }
 
 export default function SettingsPage() {
+  const { can } = useAuth()
   const [wa, setWa] = useState<WaState | null>(null)
   const [waError, setWaError] = useState("")
   const [to, setTo] = useState("")
@@ -148,6 +156,25 @@ export default function SettingsPage() {
       setSendError(err?.message ?? "Failed to send")
       setSendState("idle")
     }
+  }
+
+  if (!can("settings:manage")) {
+    return (
+      <DashboardShell trail={[{ label: "Dashboard", href: "/dashboard" }, { label: "Settings" }]}>
+        <Card className="mx-auto mt-10 max-w-md">
+          <CardHeader className="items-center text-center">
+            <div className="flex size-10 items-center justify-center rounded-full bg-muted">
+              <ShieldAlertIcon className="size-5 text-muted-foreground" />
+            </div>
+            <CardTitle>Settings are restricted</CardTitle>
+            <CardDescription>
+              Your role does not include workspace settings. Ask an
+              administrator if you need access.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </DashboardShell>
+    )
   }
 
   return (

@@ -278,9 +278,26 @@ key.
    curl http://localhost:4000/api/appwrite/status
    ```
 
-The backend creates the default admin user, demo fees, and dropdown options only
-when the corresponding Appwrite tables are empty. The default login remains
-`admin@seedsofsuccess.com` / `Admin123!`.
+The backend seeds demo fees and dropdown options only when their tables are
+empty. It does **not** create a default user: on a fresh install, open
+`http://localhost:3000/login` and create the first administrator from the
+first-run setup form. Additional accounts are created by an administrator on
+**Dashboard → Users**.
+
+Sessions are signed with `AUTH_SECRET` (add a long random value to
+`backend/.env`; if unset the Appwrite API key is used as a fallback). Every
+`/api/*` route except health, login, setup, logout, and the payment webhook
+requires `Authorization: Bearer <token>`.
+
+### Roles
+
+| Role | Access |
+| --- | --- |
+| Administrator | Everything, including users and settings |
+| Accountant | Students, fees, receipts, payments, announcements, and settings |
+| Viewer | Read-only access to records |
+
+Role changes apply without a re-login (user lookups are cached for 30 seconds).
 
 ## Docker (frontend + backend)
 
@@ -300,6 +317,12 @@ docker compose up --build
 ## API
 
 - `GET /api/health`
+- `GET /api/auth/setup` (public; whether first-run setup is needed)
+- `POST /api/auth/setup` `{ name, email, password }` (public; only while no users exist)
+- `POST /api/auth/login` `{ email, password }` → `{ token, user, permissions }`
+- `GET /api/auth/me` (requires a session token)
+- `POST /api/auth/logout`
+- `GET /api/users`, `POST /api/users`, `PUT /api/users/:id`, `DELETE /api/users/:id` (admin only)
 - `GET /api/fees`
 - `GET /api/fees/:id`
 - `POST /api/fees` `{ student_name, amount, status, due_date: "YYYY-MM-DD" }`

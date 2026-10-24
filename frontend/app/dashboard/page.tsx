@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
+import { useAuth } from "@/components/auth-provider"
 import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -48,6 +49,7 @@ function inr(n: number) {
 }
 
 export default function Page() {
+  const { can } = useAuth()
   const [students, setStudents] = useState<StoredStudent[]>([])
   const [receipts, setReceipts] = useState<StoredReceipt[]>([])
   const [announcements, setAnnouncements] = useState<StoredAnnouncement[]>([])
@@ -135,7 +137,7 @@ export default function Page() {
     { title: "Student Groups", desc: "Bundle students by course and batch", icon: LayersIcon, href: "/dashboard/students/groups" },
     { title: "Announcements", desc: "Message students on WhatsApp", icon: MegaphoneIcon, href: "/dashboard/announcements" },
     { title: "Settings", desc: wa ? (waOk ? `WhatsApp connected (+${wa.connectedNumber ?? "?"})` : "WhatsApp not connected") : "WhatsApp and dropdown options", icon: SettingsIcon, href: "/dashboard/settings", badge: wa ? (waOk ? "Connected" : "Not connected") : undefined },
-  ]
+  ].filter((shortcut) => shortcut.href !== "/dashboard/settings" || can("settings:manage"))
 
   return (
     <DashboardShell trail={[{ label: "Dashboard" }]}>

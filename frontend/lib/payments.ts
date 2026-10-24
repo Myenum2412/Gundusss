@@ -1,4 +1,4 @@
-import { API_BASE } from "./api-base"
+import { API_BASE, apiFetch } from "./api-base"
 
 const BASE = API_BASE
 
@@ -99,10 +99,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response | undefined
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      res = await fetch(`${BASE}${path}`, {
-        cache: "no-store",
-        ...init,
-      })
+      res = await apiFetch(path, init)
       break
     } catch {
       if (attempt === attempts - 1) break
