@@ -6,6 +6,7 @@ import QRCode from "qrcode"
 import {
   getPublicProfile,
   createPublicPayment,
+  getPublicPaymentStatus,
   type PaymentOrder,
   type PublicOrganizationProfile,
   type PublicStudentOption,
@@ -247,45 +248,37 @@ export default function PublicPaymentPage() {
     }
   }
 
-  // Confirm Paid
-  const handleConfirmPaid = async () => {
-    setSubmitting(true)
-    try {
-      const created = await createPublicPayment({
-        slug,
-        studentName: activeStudent?.studentName || "Student",
-        studentId: activeStudent?.studentId || "STU-001",
-        amount: numAmount,
-        method: "UPI",
-      })
-      setOrder({
-        ...created,
-        status: "SUCCESS",
-        amount: fixedAmount,
-        studentName: activeStudent?.studentName || "Student",
-        studentId: activeStudent?.studentId || "STU-001",
-      })
-    } catch {
-      setOrder({
-        orderId: `ORD-${Date.now()}`,
-        paymentId: `UPI-${Date.now().toString().slice(-8)}`,
-        status: "SUCCESS",
-        gatewayStatus: "SETTLED",
-        method: "UPI",
-        utr: `UTR${Date.now().toString().slice(-10)}`,
-        amount: fixedAmount,
-        studentId: activeStudent?.studentId || "STU-001",
-        studentName: activeStudent?.studentName || "Student",
-        feeId: null,
-        checkoutUrl: upiUri,
-        receiptId: `REC-${Date.now().toString().slice(-6)}`,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      })
-    } finally {
-      setSubmitting(false)
+  // Strict payment status verification: ONLY allow completed status if the server/gateway
+  // explicitly verifies and confirms the order status as SUCCESS or COMPLETED.
+  const queryOrderId = (searchParams?.get("orderId") || "").trim()
+
+  useEffect(() => {
+    if (!queryOrderId) return
+    let active = true
+
+    const verifyServerPayment = async () => {
+      try {
+        const orderData = await getPublicPaymentStatus(queryOrderId)
+        if (!active) return
+        // STRICT: Without verified payment status, do NOT allow completed status!
+        if (
+          orderData &&
+          (orderData.status === "SUCCESS" || orderData.status === "COMPLETED")
+        ) {
+          setOrder(orderData)
+        }
+      } catch {
+        // Without verified payment status, do not set completed status
+      }
     }
-  }
+
+    verifyServerPayment()
+    const timer = setInterval(verifyServerPayment, 3500)
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [queryOrderId])
 
   // Loading state
   if (loadingProfile) {
@@ -376,9 +369,9 @@ export default function PublicPaymentPage() {
         </header>
 
         {/* =========================================================================
-            STATE 1: PAYMENT SUCCESS / RECEIPT
+            STATE 1: PAYMENT SUCCESS / RECEIPT (STRICT: ONLY ON VERIFIED PAYMENT STATUS)
            ========================================================================= */}
-        {order && order.status === "SUCCESS" ? (
+        {order && (order.status === "SUCCESS" || order.status === "COMPLETED") ? (
           <section className="rounded-3xl border bg-card p-6 shadow-md shadow-black/[0.04] sm:p-8 animate-in fade-in duration-300">
             <div className="flex flex-col items-center text-center">
               <div className="flex size-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 shadow-inner">
@@ -747,28 +740,6 @@ export default function PublicPaymentPage() {
                         <span className="font-semibold text-foreground">Paytm</span>
                       </Button>
                     </div>
-                  </div>
-
-                  {/* "I Have Paid" Button */}
-                  <div className="border-t pt-4 text-center">
-                    <p className="text-xs text-muted-foreground mb-2">
-                      Completed the UPI payment on your phone?
-                    </p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={handleConfirmPaid}
-                      disabled={submitting}
-                      className="gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 border-emerald-600/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
-                    >
-                      {submitting ? (
-                        <Loader2Icon className="size-3.5 animate-spin" />
-                      ) : (
-                        <CheckCircle2Icon className="size-3.5" />
-                      )}
-                      <span>I Have Paid · View Receipt</span>
-                    </Button>
                   </div>
                 </div>
               )}
