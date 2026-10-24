@@ -20,6 +20,7 @@ import {
   loadRemindersStatus,
   syncCronJob,
   triggerReminderNow,
+  clearReminderLogs,
   type RemindersStatusResponse,
   type ReminderRunLog,
 } from "@/lib/reminders-store"
@@ -139,13 +140,24 @@ export default function RemindersPage() {
     try {
       const res = await triggerReminderNow()
       setActionSuccess(
-        `Executed! Sent reminders to ${res.runLog.sentCount}/${res.runLog.totalStudents} student(s).`
+        res.runLog.details ||
+          `Executed! Sent reminders to ${res.runLog.sentCount}/${res.runLog.totalStudents} student(s).`
       )
       await refreshAll()
     } catch (err: any) {
       setActionError(err?.message || "Trigger execution failed")
     } finally {
       setTriggering(false)
+    }
+  }
+
+  const handleClearLogs = async () => {
+    if (!confirm("Are you sure you want to clear all reminder execution logs?")) return
+    try {
+      await clearReminderLogs()
+      await refreshAll()
+    } catch (err: any) {
+      setActionError(err?.message || "Failed to clear logs")
     }
   }
 
@@ -595,7 +607,20 @@ export default function RemindersPage() {
 
           {/* Execution History Table */}
           <div className="rounded-2xl border bg-card p-5 shadow-xs">
-            <h3 className="font-semibold text-sm">Cron Execution Logs</h3>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="font-semibold text-sm">Cron Execution Logs</h3>
+              {data?.settings?.logs && data.settings.logs.length > 0 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={handleClearLogs}
+                  className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  Clear Logs
+                </Button>
+              )}
+            </div>
             <p className="text-xs text-muted-foreground mb-3">
               Recent automated cron-job.org and manual reminder runs.
             </p>

@@ -7,5 +7,6 @@ postgres-data
 .pgdata
 backend/.pgdata
 .wwebjs_auth
+.wwebjs_cache
 backend/.pgdata.corrupt-*
 *.tsbuildinfo

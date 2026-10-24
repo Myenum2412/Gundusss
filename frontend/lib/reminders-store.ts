@@ -23,7 +23,7 @@ export interface ReminderRunLog {
   source: "cron-job.org" | "manual" | "scheduled"
   totalStudents: number
   sentCount: number
-  status: "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED"
+  status: "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED" | "QUEUED"
   details: string
   recipients: ReminderRecipient[]
 }
@@ -122,3 +122,15 @@ export async function deleteCronJob(jobId: number): Promise<boolean> {
   }
   return true
 }
+
+export async function clearReminderLogs(): Promise<boolean> {
+  const res = await apiFetch("/api/reminders/logs", {
+    method: "DELETE",
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.details || err.error || "Failed to clear logs")
+  }
+  return true
+}
+

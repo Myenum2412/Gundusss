@@ -1046,7 +1046,7 @@ export async function paymentRoutes(app: FastifyInstance) {
         name: profile.name,
         ownerName: profile.ownerName,
         paymentUrl: profile.paymentUrl,
-        upiId: settingsRecord?.data?.upi_id ?? '',
+        upiId: settingsRecord?.data?.upi_id || (biz?.phone ? `${biz.phone}@upi` : ''),
         payeeName: settingsRecord?.data?.payee_name ?? profile.name,
         qrCodeDataUrl: settingsRecord?.data?.qr_code_data_url ?? '',
         logoUrl: biz?.media?.logoUrl ?? '',

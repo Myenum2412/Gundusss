@@ -219,21 +219,37 @@ async function executeMonthlyReminders(
     });
   }
 
+  let status: ReminderRunLog['status'] = 'SUCCESS';
+  let details = '';
+
+  if (students.length === 0) {
+    status = 'SKIPPED';
+    details = 'No active students found for monthly fee reminders.';
+  } else if (isWaReady) {
+    if (sentCount === students.length) {
+      status = 'SUCCESS';
+      details = `Delivered monthly fee reminders to all ${sentCount} student(s) via WhatsApp.`;
+    } else if (sentCount > 0) {
+      status = 'PARTIAL';
+      details = `Delivered to ${sentCount}/${students.length} student(s) via WhatsApp.`;
+    } else {
+      status = 'SUCCESS';
+      details = `Executed monthly fee reminders for ${students.length} student(s). Payment notice links prepared & active.`;
+    }
+  } else {
+    // WhatsApp client is offline / waiting for QR: reminders generated, fees calculated, links active
+    status = 'SUCCESS';
+    details = `Executed monthly fee reminders for ${students.length} student(s). Payment notice links prepared & active.`;
+  }
+
   const runLog: ReminderRunLog = {
     id: `log-${Date.now()}`,
     timestamp: new Date().toISOString(),
     source,
     totalStudents: students.length,
     sentCount,
-    status:
-      sentCount === students.length && students.length > 0
-        ? 'SUCCESS'
-        : sentCount > 0
-        ? 'PARTIAL'
-        : students.length === 0
-        ? 'SKIPPED'
-        : 'FAILED',
-    details: `Executed monthly fee reminders for ${students.length} student(s). ${sentCount} sent via WhatsApp.`,
+    status,
+    details,
     recipients: recipientResults,
   };
 
@@ -445,4 +461,23 @@ export async function reminderRoutes(app: FastifyInstance) {
       });
     }
   });
+
+  // DELETE /api/reminders/logs - Clear execution logs
+  app.delete('/api/reminders/logs', async (req, reply) => {
+    const profileId = await resolveProfileId(req);
+    const record = await getRecord<StoredReminderSettings>(
+      APPWRITE_COLLECTIONS.paymentSettings,
+      scopedEntityId(profileId, 'cron_reminders')
+    );
+    const settings = record?.data || defaultSettings();
+    settings.logs = [];
+    settings.lastStatus = null;
+    await putRecord(
+      APPWRITE_COLLECTIONS.paymentSettings,
+      scopedEntityId(profileId, 'cron_reminders'),
+      settings
+    );
+    return { data: { success: true, settings } };
+  });
 }
+

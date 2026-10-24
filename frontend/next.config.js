@@ -4,7 +4,12 @@ const nextConfig = {
     const backend =
       process.env.BACKEND_INTERNAL_URL ||
       process.env.NEXT_PUBLIC_API_URL ||
-      "http://127.0.0.1:4000";
+      (process.env.VERCEL ? null : "http://127.0.0.1:4000");
+
+    if (!backend) {
+      return [];
+    }
+
     return [
       {
         source: "/api/:path*",
