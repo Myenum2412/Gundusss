@@ -24,80 +24,33 @@ export const DROPDOWN_LABELS: Record<DropdownKey, string> = {
 
 export const DROPDOWN_KEYS = Object.keys(DROPDOWN_LABELS) as DropdownKey[];
 
-const DEFAULTS: Record<DropdownKey, string[]> = {
-  gender: ["Male", "Female", "Other"],
-  classGroup: ["Class 1", "Class 2", "Class 3", "Group A", "Group B"],
-  course: ["Science", "Commerce", "Arts", "General"],
-  studentStatus: ["Active", "Inactive"],
-  feeFrequency: ["Monthly", "Quarterly", "Half-Yearly", "Yearly", "One-Time"],
-  feeType: [
-    "Tuition Fee",
-    "Admission Fee",
-    "Exam Fee",
-    "Transport Fee",
-    "Library Fee",
-    "Hostel Fee",
-    "Other",
-  ],
-  paymentMethod: ["Cash", "UPI", "Bank Transfer"],
-  receiptStatus: ["Paid", "Pending", "Cancelled"],
-};
-
 export type DropdownMap = Record<DropdownKey, string[]>;
 
-const KEY = "dropdown_options";
-
-function loadLocal(): DropdownMap {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return { ...DEFAULTS };
-    const parsed = JSON.parse(raw) as Partial<Record<DropdownKey, string[]>>;
-    const merged = { ...DEFAULTS };
-    for (const k of DROPDOWN_KEYS) {
-      if (Array.isArray(parsed[k]) && (parsed[k] as string[]).length > 0) {
-        merged[k] = parsed[k] as string[];
-      }
-    }
-    return merged;
-  } catch {
-    return { ...DEFAULTS };
-  }
+function emptyDropdowns(): DropdownMap {
+  return DROPDOWN_KEYS.reduce((acc, key) => {
+    acc[key] = [];
+    return acc;
+  }, {} as DropdownMap);
 }
 
-function cacheLocal(d: DropdownMap) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(d));
-  } catch {}
-}
-
-// Postgres-first; falls back to defaults/local cache when unreachable.
+// Appwrite (through the API) is the only source of truth. Options are
+// configured by an administrator in Settings — no built-in defaults are
+// injected in the browser.
 export async function loadDropdowns(): Promise<DropdownMap> {
-  try {
-    const remote = await getDropdowns();
-    const merged = { ...DEFAULTS };
-    for (const k of DROPDOWN_KEYS) {
-      if (Array.isArray(remote[k]) && remote[k].length > 0) {
-        merged[k] = remote[k];
-      }
+  const remote = await getDropdowns();
+  const merged = emptyDropdowns();
+  for (const key of DROPDOWN_KEYS) {
+    if (Array.isArray(remote[key])) {
+      merged[key] = remote[key];
     }
-    cacheLocal(merged);
-    return merged;
-  } catch {
-    return loadLocal();
   }
+  return merged;
 }
 
-export async function saveDropdowns(d: DropdownMap): Promise<void> {
-  cacheLocal(d);
+export async function saveDropdowns(dropdowns: DropdownMap): Promise<void> {
   try {
-    await trackSync(saveDropdownsApi(d));
-  } catch {
-    // Local cache already updated; will sync on the next successful save.
+    await trackSync(saveDropdownsApi(dropdowns));
+  } catch (error) {
+    console.error("Failed to save dropdown options", error);
   }
-}
-
-// Synchronous read of the last-known cache (for render paths that cannot
-// suspend on the async Postgres load). The async loader refreshes it.
-export function loadDropdownsSync(): DropdownMap {
-  return loadLocal();
 }

@@ -16,41 +16,16 @@ export interface StoredStudent {
   status: string;
 }
 
-const KEY = "students";
-
-function loadLocal(): StoredStudent[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as StoredStudent[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function cacheLocal(students: StoredStudent[]) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(students));
-  } catch {}
-}
-
-// Postgres-first; falls back to the local cache when the API is unreachable.
-export async function loadStudents(): Promise<StoredStudent[]> {
-  try {
-    const rows = await getCollection<StoredStudent>("students");
-    cacheLocal(rows);
-    return rows;
-  } catch {
-    return loadLocal();
-  }
+// Appwrite (through the API) is the only source of truth. Nothing is cached in
+// the browser, so a signed-in account can never read another account's copy.
+export function loadStudents(): Promise<StoredStudent[]> {
+  return getCollection<StoredStudent>("students");
 }
 
 export async function saveStudents(students: StoredStudent[]): Promise<void> {
-  cacheLocal(students);
   try {
     await trackSync(replaceCollection("students", students));
-  } catch {
-    // Local cache already updated; will sync on the next successful save.
+  } catch (error) {
+    console.error("Failed to save students", error);
   }
 }

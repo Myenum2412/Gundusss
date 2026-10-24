@@ -86,10 +86,14 @@ export default function StudentGroupsPage() {
         setNextId((n) => Math.max(n, max + 1))
       }
       setHydrated(true)
+    }).catch((error) => {
+      console.error("Failed to load student groups", error)
     })
     loadStudents().then((rows) => {
       if (isSyncing()) return
       setAllStudents((prev) => (sameJson(prev, rows) ? prev : rows))
+    }).catch((error) => {
+      console.error("Failed to load students", error)
     })
   }, [])
 
@@ -113,8 +117,12 @@ export default function StudentGroupsPage() {
 
   useEffect(() => {
     if (open) {
-      loadStudents().then(setAvailableStudents)
-      loadDropdowns().then(setDropdowns)
+      loadStudents()
+        .then(setAvailableStudents)
+        .catch((error) => console.error("Failed to load students", error))
+      loadDropdowns()
+        .then(setDropdowns)
+        .catch((error) => console.error("Failed to load dropdown options", error))
     }
   }, [open ])
 
@@ -139,7 +147,7 @@ export default function StudentGroupsPage() {
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // Persisted to Postgres via the save effect.
+    // Persisted to Appwrite via the save effect.
     if (editingIndex !== null) {
       const id = groups[editingIndex]?.groupId ?? nextGroupId(nextId)
       const updated: StudentGroup = { ...form, groupId: id }

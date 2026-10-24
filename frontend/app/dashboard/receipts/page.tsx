@@ -90,6 +90,8 @@ export default function ReceiptsPage() {
         setNextId((n) => Math.max(n, max + 1))
       }
       setHydrated(true)
+    }).catch((error) => {
+      console.error("Failed to load receipts", error)
     })
   }, [])
 
@@ -105,8 +107,12 @@ export default function ReceiptsPage() {
 
   useEffect(() => {
     if (open) {
-      loadStudents().then(setAvailableStudents)
-      loadDropdowns().then(setDropdowns)
+      loadStudents()
+        .then(setAvailableStudents)
+        .catch((error) => console.error("Failed to load students", error))
+      loadDropdowns()
+        .then(setDropdowns)
+        .catch((error) => console.error("Failed to load dropdown options", error))
     }
   }, [open])
 
@@ -122,7 +128,7 @@ export default function ReceiptsPage() {
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // Persisted to Postgres via the save effect.
+    // Persisted to Appwrite via the save effect.
     const student = availableStudents.find(
       (s) => s.studentId === form.studentId
     )

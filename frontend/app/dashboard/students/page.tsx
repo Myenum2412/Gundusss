@@ -75,7 +75,12 @@ export default function StudentsPage() {
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
 
   useEffect(() => {
-    if (open) loadDropdowns().then(setDropdowns)
+    if (open)
+      loadDropdowns()
+        .then(setDropdowns)
+        .catch((error) =>
+          console.error("Failed to load dropdown options", error)
+        )
   }, [open])
 
   const reloadStudents = useCallback(() => {
@@ -93,6 +98,8 @@ export default function StudentsPage() {
         setNextId((n) => Math.max(n, max + 1))
       }
       setHydrated(true)
+    }).catch((error) => {
+      console.error("Failed to load students", error)
     })
   }, [])
 
@@ -116,7 +123,7 @@ export default function StudentsPage() {
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // Persisted to Postgres via the save effect.
+    // Persisted to Appwrite via the save effect.
     // Student ID is auto-generated (STU-001, STU-002, ...).
     if (editingIndex !== null) {
       const id = students[editingIndex]?.studentId ?? nextStudentId(nextId)

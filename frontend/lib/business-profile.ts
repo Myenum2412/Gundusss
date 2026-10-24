@@ -114,8 +114,6 @@ export interface BusinessProfile {
   notes: string
 }
 
-const STORAGE_KEY = "business_profile"
-
 function day(open: boolean): DayHours {
   return { open, allDay: false, from: "09:00", to: "18:00" }
 }
@@ -286,24 +284,6 @@ export function normalizeBusinessProfile(raw: unknown): BusinessProfile {
   return merged
 }
 
-function loadLocal(): BusinessProfile {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return defaultBusinessProfile()
-    return normalizeBusinessProfile(JSON.parse(raw))
-  } catch {
-    return defaultBusinessProfile()
-  }
-}
-
-function cacheLocal(profile: BusinessProfile) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(profile))
-  } catch {
-    // Storage may be full or disabled; the server copy is still attempted.
-  }
-}
-
 export interface LoadedBusinessProfile {
   profile: BusinessProfile
   updatedAt: string | null
@@ -317,18 +297,16 @@ export async function loadBusinessProfile(): Promise<LoadedBusinessProfile> {
     const json = await res.json()
     const raw = json?.data?.profile
     if (!raw) {
-      // No record on the server yet — start from any local draft.
-      return { profile: loadLocal(), updatedAt: null, online: true }
+      // No record in Appwrite yet — show an empty form to fill in.
+      return { profile: defaultBusinessProfile(), updatedAt: null, online: true }
     }
-    const profile = normalizeBusinessProfile(raw)
-    cacheLocal(profile)
     return {
-      profile,
+      profile: normalizeBusinessProfile(raw),
       updatedAt: typeof json?.data?.updatedAt === "string" ? json.data.updatedAt : null,
       online: true,
     }
   } catch {
-    return { profile: loadLocal(), updatedAt: null, online: false }
+    return { profile: defaultBusinessProfile(), updatedAt: null, online: false }
   }
 }
 
@@ -340,8 +318,6 @@ export interface SaveBusinessProfileResult {
 export async function saveBusinessProfile(
   profile: BusinessProfile
 ): Promise<SaveBusinessProfileResult> {
-  // Always keep a local copy, so a temporary backend outage never loses edits.
-  cacheLocal(profile)
   try {
     const res = await apiFetch("/api/business-profile", {
       method: "PUT",

@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { getSetupStatus, login, setup } from "@/lib/auth"
-import { storeSession } from "@/lib/session"
+import { clearLegacyLocalData, storeSession } from "@/lib/session"
 
 export function LoginForm({
   className,
@@ -31,6 +31,8 @@ export function LoginForm({
   const [pending, setPending] = useState(false)
 
   useEffect(() => {
+    // Clear data cached by older builds before anyone signs in.
+    clearLegacyLocalData()
     let active = true
     getSetupStatus()
       .then((status) => {

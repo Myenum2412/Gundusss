@@ -258,6 +258,11 @@ allocating a new `RCP-00x`, because the app writes each row individually. The
 `users` table stores bcrypt password hashes; it is private to the backend API
 key.
 
+The browser never stores app data or account details in `localStorage`. A
+first-party session cookie holds the signed token (used only as a page gate),
+the signed-in account is kept in memory, and every page loads its data from
+Appwrite through the API. Old browser caches are cleared when the app starts.
+
 1. In the Appwrite console, create a server API key for project
    `6adaf4be003ae5c9e622` with these scopes:
    `databases.read`, `databases.write`, `tables.read`, `tables.write`,

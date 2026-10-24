@@ -81,6 +81,8 @@ export default function ProfilePage() {
           meta: `${a.announcementId} · ${a.sentCount}/${a.recipientIds.length} delivered`,
         }))
       )
+    }).catch((error) => {
+      console.error("Failed to load profile data", error)
     })
     getWaStatus()
       .then((s) =>

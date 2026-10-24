@@ -65,36 +65,44 @@ export function can(
 }
 
 // ---------------------------------------------------------------------------
-// Persistence
+// Session persistence
 // ---------------------------------------------------------------------------
+//
+// The signed token lives only in a first-party cookie (a UI gate — the backend
+// verifies the token on every API call). The account itself is kept in memory
+// for the lifetime of the page. Nothing is written to localStorage, so one
+// person's cached app data or account details can never be read by the next
+// person who signs in on the same browser.
 
-const TOKEN_KEY = "auth_token"
-const USER_KEY = "auth_user"
+let currentUser: AuthUser | null = null
 
 function hasWindow(): boolean {
   return typeof window !== "undefined"
 }
 
-export function getToken(): string | null {
-  if (!hasWindow()) return null
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null
+  const entry = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`))
+  if (!entry) return null
+  const raw = entry.slice(name.length + 1)
+  if (!raw) return null
   try {
-    return window.localStorage.getItem(TOKEN_KEY)
+    return decodeURIComponent(raw)
   } catch {
-    return null
+    return raw
   }
 }
 
+export function getToken(): string | null {
+  return readCookie(SESSION_COOKIE)
+}
+
+/** The signed-in account, available only in this browser tab's memory. */
 export function getStoredUser(): AuthUser | null {
-  if (!hasWindow()) return null
-  try {
-    const raw = window.localStorage.getItem(USER_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as AuthUser
-    if (!parsed?.email || !parsed?.role) return null
-    return parsed
-  } catch {
-    return null
-  }
+  return currentUser
 }
 
 function writeCookie(token: string) {
@@ -111,38 +119,47 @@ export function clearSessionCookie() {
 }
 
 export function storeSession(token: string, user: AuthUser) {
-  if (!hasWindow()) return
-  try {
-    window.localStorage.setItem(TOKEN_KEY, token)
-    window.localStorage.setItem(USER_KEY, JSON.stringify(user))
-  } catch {}
+  currentUser = user
   writeCookie(token)
 }
 
 export function storeUser(user: AuthUser) {
-  if (!hasWindow()) return
-  try {
-    window.localStorage.setItem(USER_KEY, JSON.stringify(user))
-  } catch {}
+  currentUser = user
 }
 
 export function clearSession() {
-  if (!hasWindow()) return
-  try {
-    window.localStorage.removeItem(TOKEN_KEY)
-    window.localStorage.removeItem(USER_KEY)
-  } catch {}
+  currentUser = null
   clearSessionCookie()
 }
 
 export function hasSessionCookie(): boolean {
-  if (typeof document === "undefined") return false
-  return document.cookie
-    .split(";")
-    .some((part) => part.trim().startsWith(`${SESSION_COOKIE}=`))
+  return Boolean(readCookie(SESSION_COOKIE))
 }
 
 /** Synchronous check used by data stores before attempting a write. */
 export function canWriteStored(): boolean {
-  return can(getStoredUser(), "data:write")
+  return can(currentUser, "data:write")
+}
+
+// Remove data written by older builds. Appwrite is now the only source of
+// truth, so any cached collections or account details must not linger in the
+// browser where a different account could read them.
+export function clearLegacyLocalData(): void {
+  if (!hasWindow()) return
+  const keys = [
+    "auth_token",
+    "auth_user",
+    "students",
+    "student_groups",
+    "fee_structures",
+    "receipts",
+    "announcements",
+    "dropdown_options",
+    "business_profile",
+  ]
+  try {
+    for (const key of keys) window.localStorage.removeItem(key)
+  } catch {
+    // Storage may be blocked; there is nothing else to clean up.
+  }
 }

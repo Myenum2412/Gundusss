@@ -12,41 +12,16 @@ export interface StoredReceipt {
   notes: string;
 }
 
-const KEY = "receipts";
-
-function loadLocal(): StoredReceipt[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as StoredReceipt[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function cacheLocal(receipts: StoredReceipt[]) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(receipts));
-  } catch {}
-}
-
-// Postgres-first; falls back to the local cache when the API is unreachable.
-export async function loadReceipts(): Promise<StoredReceipt[]> {
-  try {
-    const rows = await getCollection<StoredReceipt>("receipts");
-    cacheLocal(rows);
-    return rows;
-  } catch {
-    return loadLocal();
-  }
+// Appwrite (through the API) is the only source of truth. Nothing is cached in
+// the browser, so a signed-in account can never read another account's copy.
+export function loadReceipts(): Promise<StoredReceipt[]> {
+  return getCollection<StoredReceipt>("receipts");
 }
 
 export async function saveReceipts(receipts: StoredReceipt[]): Promise<void> {
-  cacheLocal(receipts);
   try {
     await trackSync(replaceCollection("receipts", receipts));
-  } catch {
-    // Local cache already updated; will sync on the next successful save.
+  } catch (error) {
+    console.error("Failed to save receipts", error);
   }
 }

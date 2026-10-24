@@ -8,9 +8,9 @@ import { getMe, logout } from "@/lib/auth"
 import { ApiError } from "@/lib/api-base"
 import {
   can as canWithUser,
+  clearLegacyLocalData,
   clearSession,
   getStoredUser,
-  getToken,
   hasSessionCookie,
   storeUser,
   type AuthUser,
@@ -41,8 +41,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = React.useState<string | null>(null)
 
   const validate = React.useCallback(async () => {
-    if (!getToken()) {
+    if (!hasSessionCookie()) {
       clearSession()
+      setUser(null)
       router.replace("/login")
       return
     }
@@ -59,7 +60,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         router.replace("/login")
       } else {
         // The backend may be starting up or briefly unreachable. Keep the
-        // cached session rather than signing the user out on a network blip.
+        // cookie so the session can be verified again, and never sign the user
+        // out on a network blip.
         const cached = getStoredUser()
         if (cached) {
           setUser(cached)
@@ -71,8 +73,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               ? err.message
               : "Could not verify your session."
           )
-          clearSession()
-          router.replace("/login")
         }
       }
     } finally {
@@ -80,15 +80,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [router])
 
+  const retry = React.useCallback(() => {
+    setError(null)
+    setReady(false)
+    void validate()
+  }, [validate])
+
   React.useEffect(() => {
-    // A cookie without a token (or vice versa) means a stale/half session.
-    if (!hasSessionCookie() && !getToken()) {
+    // Remove collections cached by older builds. Appwrite is the only source
+    // of truth, and no account data may linger in this browser.
+    clearLegacyLocalData()
+    // No cookie means there is no session to verify.
+    if (!hasSessionCookie()) {
       router.replace("/login")
       return
     }
-    // Paint the cached user immediately, then confirm with the backend.
-    const cached = getStoredUser()
-    if (cached) setUser(cached)
     void validate()
   }, [router, validate])
 
@@ -148,10 +154,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       <div className="flex h-svh items-center justify-center bg-background px-6">
         <div className="flex max-w-sm flex-col items-center gap-2 text-center">
           <ShieldAlertIcon className="size-6 text-muted-foreground" />
-          <p className="text-sm font-medium">Your session is not valid.</p>
+          <p className="text-sm font-medium">Your session could not be verified.</p>
           <p className="text-[13px] text-muted-foreground">
             {error ?? "Redirecting you to sign in…"}
           </p>
+          <button
+            type="button"
+            onClick={retry}
+            className="mt-3 rounded-[10px] border bg-background px-3 py-1.5 text-[13px] font-medium hover:bg-muted"
+          >
+            Try again
+          </button>
         </div>
       </div>
     )

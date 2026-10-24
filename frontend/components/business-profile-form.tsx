@@ -581,7 +581,7 @@ export default function BusinessProfileForm() {
       if (!loaded.online) {
         setNotice({
           tone: "warning",
-          text: "The backend is unreachable. Showing the copy saved on this device — saves will stay local until it reconnects.",
+          text: "The backend is unreachable. Your saved profile could not be loaded, and changes cannot be saved until it reconnects.",
         })
       }
     })
@@ -742,18 +742,18 @@ export default function BusinessProfileForm() {
     setNotice(null)
     const result = await saveBusinessProfile(profile)
     setSaving(false)
-    setSaved(profile)
     setUpdatedAt(result.updatedAt)
     setOnline(result.ok)
     if (result.ok) {
+      setSaved(profile)
       setNotice({
         tone: "success",
-        text: `Saved to Postgres${result.updatedAt ? ` · ${formatTimestamp(result.updatedAt)}` : ""}.`,
+        text: `Saved to Appwrite${result.updatedAt ? ` · ${formatTimestamp(result.updatedAt)}` : ""}.`,
       })
     } else {
       setNotice({
-        tone: "warning",
-        text: "Saved on this device. The backend is unreachable, so changes are not synced yet.",
+        tone: "error",
+        text: "Could not save. The backend is unreachable — your changes are still on screen, so try again.",
       })
     }
   }
@@ -1763,7 +1763,7 @@ export default function BusinessProfileForm() {
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
             <p className="text-xs text-muted-foreground">
               Fields marked <span className="text-destructive">*</span> are
-              required for a complete listing. Changes are saved to Postgres and
+              required for a complete listing. Changes are saved to Appwrite and
               cached on this device.
             </p>
             <div className="flex items-center gap-2">

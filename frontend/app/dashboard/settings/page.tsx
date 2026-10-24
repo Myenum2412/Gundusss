@@ -95,6 +95,8 @@ export default function SettingsPage() {
     loadDropdowns().then((map) => {
       if (isSyncing()) return
       setDropdowns((prev) => (sameJson(prev, map) ? prev : map))
+    }).catch((error) => {
+      console.error("Failed to load dropdown options", error)
     })
   }, [])
 

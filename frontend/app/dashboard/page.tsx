@@ -65,7 +65,9 @@ export default function Page() {
         setReceipts((prev) => (sameJson(prev, r) ? prev : r))
         setAnnouncements((prev) => (sameJson(prev, a) ? prev : a))
       }
-    )
+    ).catch((error) => {
+      console.error("Failed to load the dashboard data", error)
+    })
   }, [])
 
   useEffect(() => {

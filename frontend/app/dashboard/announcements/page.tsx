@@ -82,6 +82,8 @@ export default function AnnouncementsPage() {
         setNextId((n) => Math.max(n, max + 1))
       }
       setHydrated(true)
+    }).catch((error) => {
+      console.error("Failed to load announcements", error)
     })
   }, [])
 
@@ -96,7 +98,10 @@ export default function AnnouncementsPage() {
   }, [items, hydrated])
 
   useEffect(() => {
-    if (open) loadStudents().then(setAvailableStudents)
+    if (open)
+      loadStudents()
+        .then(setAvailableStudents)
+        .catch((error) => console.error("Failed to load students", error))
   }, [open])
 
   function toggleStudent(id: string) {

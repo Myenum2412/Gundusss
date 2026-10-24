@@ -99,6 +99,8 @@ export function FeeStructurePage() {
         setNextId((n) => Math.max(n, max + 1))
       }
       setHydrated(true)
+    }).catch((error) => {
+      console.error("Failed to load fee structures", error)
     })
   }, [])
 
@@ -114,9 +116,15 @@ export function FeeStructurePage() {
 
   useEffect(() => {
     if (open) {
-      loadStudents().then(setAvailableStudents)
-      loadGroups().then(setAvailableGroups)
-      loadDropdowns().then(setDropdowns)
+      loadStudents()
+        .then(setAvailableStudents)
+        .catch((error) => console.error("Failed to load students", error))
+      loadGroups()
+        .then(setAvailableGroups)
+        .catch((error) => console.error("Failed to load student groups", error))
+      loadDropdowns()
+        .then(setDropdowns)
+        .catch((error) => console.error("Failed to load dropdown options", error))
     }
   }, [open])
 
@@ -150,7 +158,7 @@ export function FeeStructurePage() {
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // Persisted to Postgres via the save effect.
+    // Persisted to Appwrite via the save effect.
     if (editingIndex !== null) {
       const id = structures[editingIndex]?.structureId ?? nextStructureId(nextId)
       const updated: FeeStructure = {
