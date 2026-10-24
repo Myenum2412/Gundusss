@@ -11,6 +11,12 @@ import { collectionsRoutes } from './routes/collections.js';
 import { paymentRoutes } from './routes/payments.js';
 import { paymentSettingsRoutes } from './routes/payment-settings.js';
 import { businessProfileRoutes } from './routes/business-profile.js';
+import {
+  getAppwriteStatus,
+  isAppwriteConfigured,
+  scheduleAppwriteSync,
+  syncAllToAppwrite,
+} from './appwrite.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -75,6 +81,42 @@ app.get('/api/health', async () => ({
   ok: true,
   time: new Date().toISOString(),
 }));
+
+// Appwrite mirror diagnostics and manual trigger.
+app.get('/api/appwrite/status', async () => ({ data: getAppwriteStatus() }));
+app.post('/api/appwrite/sync', async () => {
+  await syncAllToAppwrite('manual');
+  return { data: getAppwriteStatus() };
+});
+
+// Keep Appwrite in sync after every successful write. The sync is debounced
+// and never blocks or fails the request that triggered it.
+const APPWRITE_MIRRORED_PATHS = [
+  '/api/fees',
+  '/api/students',
+  '/api/student-groups',
+  '/api/fee-structures',
+  '/api/receipts',
+  '/api/announcements',
+  '/api/dropdowns',
+  '/api/business-profile',
+  '/api/payments',
+];
+
+function shouldMirrorToAppwrite(url: string): boolean {
+  const path = url.split('?')[0];
+  return APPWRITE_MIRRORED_PATHS.some(
+    (prefix) => path === prefix || path.startsWith(`${prefix}/`)
+  );
+}
+
+app.addHook('onResponse', async (request, reply) => {
+  if (!isAppwriteConfigured()) return;
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) return;
+  if (reply.statusCode >= 400) return;
+  if (!shouldMirrorToAppwrite(request.url)) return;
+  scheduleAppwriteSync(`${request.method} ${request.url.split('?')[0]}`);
+});
 
 await app.register(feeRoutes);
 await app.register(authRoutes);
@@ -260,6 +302,13 @@ try {
   await ensureSchema();
   await app.listen({ port, host });
   console.log(`Backend listening on http://${host}:${port}`);
+  if (isAppwriteConfigured()) {
+    void syncAllToAppwrite('startup');
+  } else {
+    console.log(
+      'Appwrite mirror disabled (APPWRITE_API_KEY is not set).'
+    );
+  }
 } catch (err) {
   app.log.error(err);
   process.exit(1);

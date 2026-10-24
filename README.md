@@ -199,6 +199,43 @@ The gateway's real verification engine runs, then delivers the signed webhook to
 the backend. The payment row should become `SUCCESS`, a receipt should appear,
 and the matching fee should become `paid`.
 
+## Appwrite data mirror
+
+Appwrite is wired as a full-data mirror. Postgres remains the source of truth
+for payments, receipts, and live dashboard reads; after every successful write
+(and once at startup) the backend writes a complete snapshot of each app
+collection to one Appwrite collection. The mirror is disabled until an Appwrite
+API key is configured.
+
+1. In the Appwrite console, create a server API key for project
+   `6adaf4be003ae5c9e622` with these scopes:
+   `databases.read`, `databases.write`, `collections.read`,
+   `collections.write`, `attributes.read`, `attributes.write`,
+   `documents.read`, `documents.write`.
+2. Add the key to `backend/.env`:
+   ```bash
+   APPWRITE_ENDPOINT=https://nyc.cloud.appwrite.io/v1
+   APPWRITE_PROJECT_ID=6adaf4be003ae5c9e622
+   APPWRITE_API_KEY=<server API key>
+   APPWRITE_DATABASE_ID=fees
+   APPWRITE_STATE_COLLECTION_ID=app_state
+   ```
+3. Create the database, collection, and attributes:
+   ```bash
+   npm run appwrite:setup --workspace=backend
+   ```
+4. Restart the backend. It mirrors on startup and after every write. Check:
+   ```bash
+   curl http://localhost:4000/api/appwrite/status
+   curl -X POST http://localhost:4000/api/appwrite/sync
+   ```
+
+The `app_state` collection stores one JSON snapshot document per app
+collection (`students`, `student_groups`, `fee_structures`, `receipts`,
+`announcements`, `dropdown_options`, `fees`, `payment_orders`,
+`payment_events`, `payment_settings`, `business_profiles`). The `users` table is
+deliberately excluded so password hashes never leave Postgres.
+
 ## Docker (full stack)
 
 The Docker path uses a real Postgres service instead of PGlite:
@@ -228,3 +265,5 @@ docker compose up --build
 - `GET /api/payments/settings/qr?upiId=&payeeName=&amount=` (live QR preview)
 - `POST /api/payments/settings/sync` (retry a pending YOUPI PG UPI sync)
 - `POST /api/payments/webhook` (YOUPI PG → backend, HMAC-SHA256 verified)
+- `GET /api/appwrite/status` (mirror configuration and last sync state)
+- `POST /api/appwrite/sync` (force a full Appwrite snapshot)

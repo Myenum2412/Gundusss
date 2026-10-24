@@ -10,6 +10,7 @@
     "prestart": "node scripts/prestart.mjs",
     "start": "pglite-server --db=./.pgdata --port=5433 --max-connections=10 --include-database-url --run \"node dist/server.js\"",
     "start:app": "node dist/server.js",
+    "appwrite:setup": "node scripts/setup-appwrite.mjs",
     "db:migrate": "psql $DATABASE_URL -f ./sql/init.sql"
   },
   "dependencies": {
