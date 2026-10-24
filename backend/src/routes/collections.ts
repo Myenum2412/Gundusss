@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { pool } from '../db.js';
+import {
+  APPWRITE_COLLECTIONS,
+  listRecords,
+  replaceAllRecords,
+} from '../appwrite.js';
 
 const str = (max = 500) => z.string().max(max).default('');
 const strArray = z.array(z.string().max(200)).default([]);
@@ -79,186 +83,161 @@ function itemsSchema<T extends z.ZodTypeAny>(item: T) {
   return z.object({ items: z.array(item).max(10000) });
 }
 
-// Full-replace a table inside a transaction (matches the frontend's
-// whole-collection save pattern).
-async function replaceAll(table: string, columns: string[], rows: any[][]) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query(`DELETE FROM ${table}`);
-    if (rows.length > 0) {
-      const values: any[] = [];
-      const placeholders = rows.map((row, r) => {
-        const cells = row.map((v, c) => {
-          values.push(v);
-          return `$${r * row.length + c + 1}`;
-        });
-        return `(${cells.join(', ')})`;
-      });
-      await client.query(
-        `INSERT INTO ${table} (${columns.join(', ')}) VALUES ${placeholders.join(', ')}`,
-        values
-      );
-    }
-    await client.query('COMMIT');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
+type Student = z.infer<typeof StudentSchema>;
+type Group = z.infer<typeof GroupSchema>;
+type FeeStructure = z.infer<typeof FeeStructureSchema>;
+type Receipt = z.infer<typeof ReceiptSchema>;
+type Announcement = z.infer<typeof AnnouncementSchema>;
+
+async function listData<T>(
+  collection: (typeof APPWRITE_COLLECTIONS)[keyof typeof APPWRITE_COLLECTIONS],
+  sortKey: (value: T) => string
+): Promise<T[]> {
+  const records = await listRecords<T>(collection);
+  return records
+    .map((record) => record.data)
+    .sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
 }
 
 export async function collectionsRoutes(app: FastifyInstance) {
   // ---- Students ----
   app.get('/api/students', async () => {
-    const { rows } = await pool.query(
-      `SELECT student_id AS "studentId", student_name AS "studentName", dob, gender,
-              guardian, phone, email, address, class_group AS "group", course,
-              joining_date AS "joiningDate", status
-       FROM students ORDER BY student_id`
-    );
-    return { data: rows };
+    return {
+      data: await listData<Student>(
+        APPWRITE_COLLECTIONS.students,
+        (student) => student.studentId
+      ),
+    };
   });
 
   app.put('/api/students', async (req, reply) => {
     const parsed = itemsSchema(StudentSchema).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
-    await replaceAll(
-      'students',
-      ['student_id', 'student_name', 'dob', 'gender', 'guardian', 'phone', 'email', 'address', 'class_group', 'course', 'joining_date', 'status'],
-      parsed.data.items.map((s) => [s.studentId, s.studentName, s.dob, s.gender, s.guardian, s.phone, s.email, s.address, s.group, s.course, s.joiningDate, s.status])
+    await replaceAllRecords(
+      APPWRITE_COLLECTIONS.students,
+      parsed.data.items.map((student) => ({
+        entityId: student.studentId,
+        data: student,
+      }))
     );
     return { data: { count: parsed.data.items.length } };
   });
 
   // ---- Student groups ----
   app.get('/api/student-groups', async () => {
-    const { rows } = await pool.query(
-      `SELECT group_id AS "groupId", group_name AS "groupName", course, batch,
-              fee_amount AS "feeAmount", fee_frequency AS "feeFrequency",
-              start_date AS "startDate", end_date AS "endDate", description,
-              COALESCE(student_ids, '{}') AS "studentIds"
-       FROM student_groups ORDER BY group_id`
-    );
-    return { data: rows };
+    return {
+      data: await listData<Group>(
+        APPWRITE_COLLECTIONS.studentGroups,
+        (group) => group.groupId
+      ),
+    };
   });
 
   app.put('/api/student-groups', async (req, reply) => {
     const parsed = itemsSchema(GroupSchema).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
-    await replaceAll(
-      'student_groups',
-      ['group_id', 'group_name', 'course', 'batch', 'fee_amount', 'fee_frequency', 'start_date', 'end_date', 'description', 'student_ids'],
-      parsed.data.items.map((g) => [g.groupId, g.groupName, g.course, g.batch, g.feeAmount, g.feeFrequency, g.startDate, g.endDate, g.description, g.studentIds])
+    await replaceAllRecords(
+      APPWRITE_COLLECTIONS.studentGroups,
+      parsed.data.items.map((group) => ({
+        entityId: group.groupId,
+        data: group,
+      }))
     );
     return { data: { count: parsed.data.items.length } };
   });
 
   // ---- Fee structures ----
   app.get('/api/fee-structures', async () => {
-    const { rows } = await pool.query(
-      `SELECT structure_id AS "structureId", structure_name AS "structureName",
-              course_group AS "courseGroup", fee_type AS "feeType", amount, frequency,
-              due_date AS "dueDate", late_fee AS "lateFee",
-              COALESCE(payment_methods, '{}') AS "paymentMethods", status, description,
-              COALESCE(student_ids, '{}') AS "studentIds"
-       FROM fee_structures ORDER BY structure_id`
-    );
-    return { data: rows };
+    return {
+      data: await listData<FeeStructure>(
+        APPWRITE_COLLECTIONS.feeStructures,
+        (structure) => structure.structureId
+      ),
+    };
   });
 
   app.put('/api/fee-structures', async (req, reply) => {
     const parsed = itemsSchema(FeeStructureSchema).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
-    await replaceAll(
-      'fee_structures',
-      ['structure_id', 'structure_name', 'course_group', 'fee_type', 'amount', 'frequency', 'due_date', 'late_fee', 'payment_methods', 'status', 'description', 'student_ids'],
-      parsed.data.items.map((s) => [s.structureId, s.structureName, s.courseGroup, s.feeType, s.amount, s.frequency, s.dueDate, s.lateFee, s.paymentMethods, s.status, s.description, s.studentIds])
+    await replaceAllRecords(
+      APPWRITE_COLLECTIONS.feeStructures,
+      parsed.data.items.map((structure) => ({
+        entityId: structure.structureId,
+        data: structure,
+      }))
     );
     return { data: { count: parsed.data.items.length } };
   });
 
   // ---- Receipts ----
   app.get('/api/receipts', async () => {
-    const { rows } = await pool.query(
-      `SELECT receipt_id AS "receiptId", student_id AS "studentId",
-              student_name AS "studentName", amount, method,
-              payment_date AS "paymentDate", status, notes
-       FROM receipts ORDER BY receipt_id`
-    );
-    return { data: rows };
+    return {
+      data: await listData<Receipt>(
+        APPWRITE_COLLECTIONS.receipts,
+        (receipt) => receipt.receiptId
+      ),
+    };
   });
 
   app.put('/api/receipts', async (req, reply) => {
     const parsed = itemsSchema(ReceiptSchema).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
-    await replaceAll(
-      'receipts',
-      ['receipt_id', 'student_id', 'student_name', 'amount', 'method', 'payment_date', 'status', 'notes'],
-      parsed.data.items.map((r) => [r.receiptId, r.studentId, r.studentName, r.amount, r.method, r.paymentDate, r.status, r.notes])
+    await replaceAllRecords(
+      APPWRITE_COLLECTIONS.receipts,
+      parsed.data.items.map((receipt) => ({
+        entityId: receipt.receiptId,
+        data: receipt,
+      }))
     );
     return { data: { count: parsed.data.items.length } };
   });
 
   // ---- Announcements ----
   app.get('/api/announcements', async () => {
-    const { rows } = await pool.query(
-      `SELECT announcement_id AS "announcementId", title, message,
-              COALESCE(recipient_ids, '{}') AS "recipientIds",
-              COALESCE(recipient_names, '{}') AS "recipientNames",
-              sent_count AS "sentCount", failed_count AS "failedCount",
-              status, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"
-       FROM announcements ORDER BY announcement_id`
-    );
-    return { data: rows };
+    return {
+      data: await listData<Announcement>(
+        APPWRITE_COLLECTIONS.announcements,
+        (announcement) => announcement.announcementId
+      ),
+    };
   });
 
   app.put('/api/announcements', async (req, reply) => {
     const parsed = itemsSchema(AnnouncementSchema).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
-    await replaceAll(
-      'announcements',
-      ['announcement_id', 'title', 'message', 'recipient_ids', 'recipient_names', 'sent_count', 'failed_count', 'status', 'created_at'],
-      parsed.data.items.map((a) => [
-        a.announcementId, a.title, a.message, a.recipientIds, a.recipientNames,
-        a.sentCount, a.failedCount, a.status,
-        a.createdAt || new Date().toISOString(),
-      ])
+    await replaceAllRecords(
+      APPWRITE_COLLECTIONS.announcements,
+      parsed.data.items.map((announcement) => ({
+        entityId: announcement.announcementId,
+        data: {
+          ...announcement,
+          createdAt: announcement.createdAt || new Date().toISOString(),
+        },
+      }))
     );
     return { data: { count: parsed.data.items.length } };
   });
 
   // ---- Dropdown options ----
   app.get('/api/dropdowns', async () => {
-    const { rows } = await pool.query<{ list_key: string; options: string[] }>(
-      'SELECT list_key, COALESCE(options, \'{}\') AS options FROM dropdown_options'
-    );
+    const records = await listRecords<string[]>(APPWRITE_COLLECTIONS.dropdownOptions);
     const map: Record<string, string[]> = {};
-    for (const r of rows) map[r.list_key] = r.options ?? [];
+    for (const record of records) {
+      map[record.entityId] = Array.isArray(record.data) ? record.data : [];
+    }
     return { data: map };
   });
 
   app.put('/api/dropdowns', async (req, reply) => {
     const parsed = DropdownsSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      for (const [key, options] of Object.entries(parsed.data.dropdowns)) {
-        await client.query(
-          `INSERT INTO dropdown_options (list_key, options) VALUES ($1, $2)
-           ON CONFLICT (list_key) DO UPDATE SET options = EXCLUDED.options`,
-          [key, options]
-        );
-      }
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    await replaceAllRecords(
+      APPWRITE_COLLECTIONS.dropdownOptions,
+      Object.entries(parsed.data.dropdowns).map(([key, options]) => ({
+        entityId: key,
+        data: options,
+      }))
+    );
     return { data: { count: Object.keys(parsed.data.dropdowns).length } };
   });
 }

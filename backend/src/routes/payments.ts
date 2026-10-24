@@ -1,12 +1,22 @@
 import type { FastifyInstance } from 'fastify';
-import type { PoolClient } from 'pg';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import { pool, query } from '../db.js';
+import {
+  APPWRITE_COLLECTIONS,
+  getRecord,
+  listRecords,
+  putRecord,
+} from '../appwrite.js';
+import type { Fee } from '../schemas.js';
 import { ensureGatewayUpiSynced } from './payment-settings.js';
 
 const YOUPI_API = (process.env.YOUPI_PAYMENT_API_URL ?? 'http://localhost:6100').replace(/\/+$/, '');
 const YOUPI_WEBHOOK_SECRET = process.env.YOUPI_WEBHOOK_SECRET ?? '';
 const YOUPI_ADMIN_TOKEN = (process.env.YOUPI_ADMIN_TOKEN ?? '').trim();
+
+const ORDERS = APPWRITE_COLLECTIONS.paymentOrders;
+const EVENTS = APPWRITE_COLLECTIONS.paymentEvents;
+const FEES = APPWRITE_COLLECTIONS.fees;
+const RECEIPTS = APPWRITE_COLLECTIONS.receipts;
 
 const PAYMENT_METHODS = ['UPI', 'CASH_COUNTER', 'CARD_COUNTER'] as const;
 type PaymentMethodValue = (typeof PAYMENT_METHODS)[number];
@@ -63,55 +73,6 @@ interface GatewayPaymentView {
   method?: string;
 }
 
-/**
- * Reads the gateway's view with merchant-owner credentials. Status polling is
- * display-only: receipts and fee marks still come exclusively from the signed
- * webhook.
- */
-async function fetchGatewayPayment(
-  paymentId: string | null,
-  orderId: string
-): Promise<GatewayPaymentView | null> {
-  const id = paymentId || orderId;
-  if (!id) return null;
-
-  const headers: Record<string, string> = {};
-  if (YOUPI_WEBHOOK_SECRET) headers['X-Merchant-Key'] = YOUPI_WEBHOOK_SECRET;
-
-  try {
-    const upstream = await fetch(`${YOUPI_API}/api/v1/payments/${encodeURIComponent(id)}`, {
-      headers,
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!upstream.ok) return null;
-    return (await upstream.json().catch(() => null)) as GatewayPaymentView | null;
-  } catch {
-    return null;
-  }
-}
-
-const ORDER_SELECT = `
-  SELECT order_id AS "orderId", payment_id AS "paymentId",
-         status, gateway_status AS "gatewayStatus", method, utr,
-         amount, student_id AS "studentId", student_name AS "studentName",
-         fee_id AS "feeId", checkout_url AS "checkoutUrl", receipt_id AS "receiptId",
-         to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",
-         to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"
-  FROM payment_orders`;
-
-async function refreshLocalOrder(orderId: string): Promise<LocalOrder | null> {
-  const rows = await query<LocalOrder>(`${ORDER_SELECT} WHERE order_id = $1 LIMIT 1`, [orderId]);
-  return rows[0] ?? null;
-}
-
-async function findLocalOrder(id: string): Promise<LocalOrder | null> {
-  const rows = await query<LocalOrder>(
-    `${ORDER_SELECT} WHERE payment_id = $1 OR order_id = $1 ORDER BY updated_at DESC LIMIT 1`,
-    [id]
-  );
-  return rows[0] ?? null;
-}
-
 interface PaymentEventRow {
   id: string;
   orderId: string;
@@ -123,61 +84,15 @@ interface PaymentEventRow {
   createdAt: string;
 }
 
-/**
- * Append-only lifecycle log. Polling and webhook retries are noisy, so an
- * event is only written when the last known tuple actually changes.
- */
-async function recordPaymentEvent(input: {
-  orderId: string;
+interface ReceiptRecord {
+  receiptId: string;
+  studentId: string;
+  studentName: string;
+  amount: string;
+  method: string;
+  paymentDate: string;
   status: string;
-  gatewayStatus?: string;
-  method?: string;
-  source: string;
-  message?: string;
-}): Promise<void> {
-  const gatewayStatus = input.gatewayStatus ?? '';
-  const last = await query<{ status: string; gateway_status: string; source: string }>(
-    `SELECT status, gateway_status, source
-     FROM payment_events
-     WHERE order_id = $1
-     ORDER BY created_at DESC, id DESC
-     LIMIT 1`,
-    [input.orderId]
-  );
-  const previous = last[0];
-  if (
-    previous &&
-    previous.status === input.status &&
-    previous.gateway_status === gatewayStatus &&
-    previous.source === input.source
-  ) {
-    return;
-  }
-
-  await query(
-    `INSERT INTO payment_events (order_id, status, gateway_status, method, source, message)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [
-      input.orderId,
-      input.status,
-      gatewayStatus,
-      input.method ?? '',
-      input.source,
-      input.message ?? '',
-    ]
-  );
-}
-
-async function readPaymentEvents(orderId: string): Promise<PaymentEventRow[]> {
-  return query<PaymentEventRow>(
-    `SELECT id, order_id AS "orderId", status, gateway_status AS "gatewayStatus",
-            method, source, message,
-            to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"
-     FROM payment_events
-     WHERE order_id = $1
-     ORDER BY created_at ASC, id ASC`,
-    [orderId]
-  );
+  notes: string;
 }
 
 interface CreatePaymentBody {
@@ -219,13 +134,132 @@ interface WebhookPayload {
   metadata?: Record<string, unknown>;
 }
 
-interface OrderRow {
-  order_id: string;
-  student_id: string;
-  student_name: string;
-  fee_id: number | null;
-  amount: string;
-  receipt_id: string | null;
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+async function fetchGatewayPayment(
+  paymentId: string | null,
+  orderId: string
+): Promise<GatewayPaymentView | null> {
+  const id = paymentId || orderId;
+  if (!id) return null;
+
+  const headers: Record<string, string> = {};
+  if (YOUPI_WEBHOOK_SECRET) headers['X-Merchant-Key'] = YOUPI_WEBHOOK_SECRET;
+
+  try {
+    const upstream = await fetch(`${YOUPI_API}/api/v1/payments/${encodeURIComponent(id)}`, {
+      headers,
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!upstream.ok) return null;
+    return (await upstream.json().catch(() => null)) as GatewayPaymentView | null;
+  } catch {
+    return null;
+  }
+}
+
+async function getLocalOrder(orderId: string): Promise<LocalOrder | null> {
+  const record = await getRecord<LocalOrder>(ORDERS, orderId);
+  return record?.data ?? null;
+}
+
+async function listOrders(): Promise<LocalOrder[]> {
+  const records = await listRecords<LocalOrder>(ORDERS);
+  return records
+    .map((record) => record.data)
+    .sort((a, b) =>
+      String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
+    );
+}
+
+async function findLocalOrder(id: string): Promise<LocalOrder | null> {
+  const direct = await getLocalOrder(id);
+  if (direct) return direct;
+  const orders = await listOrders();
+  return orders.find((order) => order.paymentId === id) ?? null;
+}
+
+async function saveLocalOrder(order: LocalOrder): Promise<void> {
+  await putRecord(ORDERS, order.orderId, order);
+}
+
+async function readPaymentEvents(orderId: string): Promise<PaymentEventRow[]> {
+  const records = await listRecords<PaymentEventRow>(EVENTS);
+  return records
+    .map((record) => record.data)
+    .filter((event) => event.orderId === orderId)
+    .sort(
+      (a, b) =>
+        String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')) ||
+        String(a.id).localeCompare(String(b.id))
+    );
+}
+
+/**
+ * Append-only lifecycle log. Polling and webhook retries are noisy, so an
+ * event is only written when the last known tuple actually changes.
+ */
+async function recordPaymentEvent(input: {
+  orderId: string;
+  status: string;
+  gatewayStatus?: string;
+  method?: string;
+  source: string;
+  message?: string;
+}): Promise<void> {
+  const gatewayStatus = input.gatewayStatus ?? '';
+  const events = await readPaymentEvents(input.orderId);
+  const previous = events[events.length - 1];
+  if (
+    previous &&
+    previous.status === input.status &&
+    previous.gatewayStatus === gatewayStatus &&
+    previous.source === input.source
+  ) {
+    return;
+  }
+
+  const event: PaymentEventRow = {
+    id: randomUUID(),
+    orderId: input.orderId,
+    status: input.status,
+    gatewayStatus,
+    method: input.method ?? '',
+    source: input.source,
+    message: input.message ?? '',
+    createdAt: nowIso(),
+  };
+  await putRecord(EVENTS, event.id, event);
+}
+
+async function listReceipts(): Promise<Array<{ entityId: string; data: ReceiptRecord }>> {
+  const records = await listRecords<ReceiptRecord>(RECEIPTS);
+  return records.map((record) => ({ entityId: record.entityId, data: record.data }));
+}
+
+async function nextReceiptId(): Promise<string> {
+  const receipts = await listReceipts();
+  const max = receipts.reduce((current, receipt) => {
+    const digits = String(receipt.data.receiptId ?? receipt.entityId).replace(/[^0-9]/g, '');
+    return Math.max(current, Number(digits) || 0);
+  }, 0);
+  return `RCP-${String(max + 1).padStart(3, '0')}`;
+}
+
+// Appwrite has no transactions. Serializing receipt creation in-process keeps
+// duplicate webhook deliveries from allocating two receipt numbers, and the
+// notes lookup below recovers if a crash happened after the receipt write.
+let receiptQueue: Promise<unknown> = Promise.resolve();
+
+function withReceiptLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = receiptQueue.then(fn, fn);
+  receiptQueue = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
 }
 
 function parseFeeId(value: unknown): number | null {
@@ -253,12 +287,21 @@ function paymentDate(completedAt?: string): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function nextReceiptId(client: PoolClient): Promise<string> {
-  const { rows } = await client.query<{ next_num: number | string }>(
-    "SELECT COALESCE(MAX(NULLIF(regexp_replace(receipt_id, '[^0-9]', '', 'g'), '')::int), 0) + 1 AS next_num FROM receipts"
-  );
-  const next = Number(rows[0]?.next_num ?? 1);
-  return `RCP-${String(next).padStart(3, '0')}`;
+async function findFeeByStudentAndAmount(
+  studentName: string,
+  amount: number
+): Promise<Fee | null> {
+  const records = await listRecords<Fee>(FEES);
+  const matches = records
+    .map((record) => record.data)
+    .filter(
+      (fee) =>
+        fee.status !== 'paid' &&
+        fee.student_name.toLowerCase() === studentName.toLowerCase() &&
+        Number(fee.amount) === amount
+    )
+    .sort((a, b) => Number(b.id) - Number(a.id));
+  return matches[0] ?? null;
 }
 
 export async function paymentRoutes(app: FastifyInstance) {
@@ -341,28 +384,38 @@ export async function paymentRoutes(app: FastifyInstance) {
     }
 
     const initialStatus = json.status ?? 'INITIATED';
-    await query(
-      `INSERT INTO payment_orders (order_id, payment_id, student_id, student_name, fee_id, amount, status, gateway_status, method, checkout_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9)
-       ON CONFLICT (order_id) DO UPDATE SET
-         payment_id = EXCLUDED.payment_id,
-         status = EXCLUDED.status,
-         gateway_status = EXCLUDED.gateway_status,
-         method = EXCLUDED.method,
-         checkout_url = EXCLUDED.checkout_url,
-         updated_at = NOW()`,
-      [
-        orderId,
-        json.paymentId ?? null,
-        body.studentId ?? '',
-        studentName,
-        body.feeId ?? null,
-        amountStr,
-        initialStatus,
-        method,
-        json.checkoutUrl ?? '',
-      ]
-    );
+    const existing = await getLocalOrder(orderId);
+    const timestamp = nowIso();
+    // Reusing an order id must not regress a settled/terminal local record if
+    // the gateway returns the original session for the same idempotency key.
+    const alreadyTerminal = existing ? TERMINAL_STATUSES.has(existing.status) : false;
+    const order: LocalOrder = existing
+      ? {
+          ...existing,
+          paymentId: json.paymentId ?? existing.paymentId,
+          status: alreadyTerminal ? existing.status : initialStatus,
+          gatewayStatus: alreadyTerminal ? existing.gatewayStatus : initialStatus,
+          method,
+          checkoutUrl: json.checkoutUrl ?? existing.checkoutUrl,
+          updatedAt: timestamp,
+        }
+      : {
+          orderId,
+          paymentId: json.paymentId ?? null,
+          status: initialStatus,
+          gatewayStatus: initialStatus,
+          method,
+          utr: '',
+          amount: amountStr,
+          studentId: body.studentId ?? '',
+          studentName,
+          feeId: body.feeId ?? null,
+          checkoutUrl: json.checkoutUrl ?? '',
+          receiptId: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+    await saveLocalOrder(order);
 
     await recordPaymentEvent({
       orderId,
@@ -380,7 +433,7 @@ export async function paymentRoutes(app: FastifyInstance) {
         status: initialStatus,
         gatewayStatus: initialStatus,
         method,
-        checkoutUrl: json.checkoutUrl,
+        checkoutUrl: order.checkoutUrl,
         amount: amountStr,
         currency: json.currency ?? 'INR',
       },
@@ -389,20 +442,14 @@ export async function paymentRoutes(app: FastifyInstance) {
 
   // GET /api/payments — list payment sessions created through this app.
   app.get('/api/payments', async () => {
-    const rows = await query(`${ORDER_SELECT} ORDER BY created_at DESC`);
-    return { data: rows };
+    return { data: await listOrders() };
   });
 
   // GET /api/payments/:id — local record first, then reconcile display status
   // with the gateway. The webhook remains the only path that settles money.
   app.get('/api/payments/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-
-    const rows = await query<LocalOrder>(
-      `${ORDER_SELECT} WHERE payment_id = $1 OR order_id = $1 ORDER BY updated_at DESC LIMIT 1`,
-      [id]
-    );
-    let order = rows[0];
+    let order = await findLocalOrder(id);
 
     if (order && !TERMINAL_STATUSES.has(order.status)) {
       const gateway = await fetchGatewayPayment(order.paymentId, order.orderId);
@@ -410,8 +457,8 @@ export async function paymentRoutes(app: FastifyInstance) {
 
       if (gatewayStatus && KNOWN_STATUSES.has(gatewayStatus)) {
         // A gateway SUCCESS without a receipt stays PROCESSING until the signed
-        // webhook lands and creates the receipt. The CASE also stops a slow
-        // poll from regressing a webhook-settled SUCCESS.
+        // webhook lands and creates the receipt. This also stops a slow poll
+        // from regressing a webhook-settled SUCCESS.
         const method = (gateway?.method ?? order.method ?? '').toUpperCase();
         const displayStatus =
           gatewayStatus === 'SUCCESS' && !order.receiptId
@@ -423,21 +470,20 @@ export async function paymentRoutes(app: FastifyInstance) {
           (method !== '' && method !== order.method);
 
         if (changed) {
-          await query(
-            `UPDATE payment_orders
-             SET status = CASE
-                   WHEN status IN ('SUCCESS','FAILED','EXPIRED','CANCELLED','CANCELED','SUSPICIOUS','BLOCKED','REFUNDED')
-                     THEN status
-                   WHEN $1 = 'PROCESSING' AND receipt_id IS NOT NULL THEN 'SUCCESS'
-                   ELSE $1
-                 END,
-                 gateway_status = $2,
-                 method = COALESCE(NULLIF($3, ''), method),
-                 updated_at = NOW()
-             WHERE order_id = $4`,
-            [displayStatus, gatewayStatus, method, order.orderId]
-          );
-          order = (await refreshLocalOrder(order.orderId)) ?? order;
+          const terminal = TERMINAL_STATUSES.has(order.status);
+          const nextStatus = terminal
+            ? order.status
+            : displayStatus === 'PROCESSING' && order.receiptId
+              ? 'SUCCESS'
+              : displayStatus;
+          order = {
+            ...order,
+            status: nextStatus,
+            gatewayStatus,
+            method: method || order.method,
+            updatedAt: nowIso(),
+          };
+          await saveLocalOrder(order);
 
           await recordPaymentEvent({
             orderId: order.orderId,
@@ -528,16 +574,14 @@ export async function paymentRoutes(app: FastifyInstance) {
       });
     }
 
-    await query(
-      `UPDATE payment_orders
-       SET status = CASE WHEN receipt_id IS NOT NULL THEN 'SUCCESS' ELSE 'PROCESSING' END,
-           gateway_status = 'SUCCESS',
-           updated_at = NOW()
-       WHERE order_id = $1`,
-      [order.orderId]
-    );
+    const refreshed: LocalOrder = {
+      ...order,
+      status: order.receiptId ? 'SUCCESS' : 'PROCESSING',
+      gatewayStatus: 'SUCCESS',
+      updatedAt: nowIso(),
+    };
+    await saveLocalOrder(refreshed);
 
-    const refreshed = (await refreshLocalOrder(order.orderId)) ?? order;
     await recordPaymentEvent({
       orderId: order.orderId,
       status: refreshed.status,
@@ -610,14 +654,14 @@ export async function paymentRoutes(app: FastifyInstance) {
       });
     }
 
-    await query(
-      `UPDATE payment_orders
-       SET status = 'FAILED', gateway_status = 'FAILED', updated_at = NOW()
-       WHERE order_id = $1`,
-      [order.orderId]
-    );
+    const refreshed: LocalOrder = {
+      ...order,
+      status: 'FAILED',
+      gatewayStatus: 'FAILED',
+      updatedAt: nowIso(),
+    };
+    await saveLocalOrder(refreshed);
 
-    const refreshed = (await refreshLocalOrder(order.orderId)) ?? order;
     await recordPaymentEvent({
       orderId: order.orderId,
       status: 'FAILED',
@@ -659,6 +703,9 @@ export async function paymentRoutes(app: FastifyInstance) {
     const payload = (req.body ?? {}) as WebhookPayload;
     const event = (payload.event ?? 'UNKNOWN').toUpperCase();
     const orderId = payload.orderId ?? '';
+    if (!orderId.trim()) {
+      return reply.code(400).send({ error: 'Webhook payload is missing orderId' });
+    }
     const method = (payload.method ?? '').toUpperCase();
     const utr = payload.utr ?? '';
     const meta = payload.metadata ?? {};
@@ -674,160 +721,149 @@ export async function paymentRoutes(app: FastifyInstance) {
     const statusForOrder = moneyReceived ? 'PROCESSING' : event;
 
     // Idempotent order upsert (deliveries may be retried).
-    await query(
-      `INSERT INTO payment_orders (order_id, payment_id, student_id, student_name, fee_id, amount, status, gateway_status, method, utr)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $10, $8, $9)
-       ON CONFLICT (order_id) DO UPDATE SET
-         payment_id = COALESCE(EXCLUDED.payment_id, payment_orders.payment_id),
-         status = CASE
-           WHEN payment_orders.status IN ('SUCCESS','REFUNDED') AND EXCLUDED.status <> 'REFUNDED'
-             THEN payment_orders.status
-           ELSE EXCLUDED.status
-         END,
-         gateway_status = CASE
-           WHEN payment_orders.status IN ('SUCCESS','REFUNDED') AND EXCLUDED.gateway_status <> 'REFUNDED'
-             THEN payment_orders.gateway_status
-           ELSE EXCLUDED.gateway_status
-         END,
-         method = COALESCE(NULLIF(EXCLUDED.method, ''), payment_orders.method),
-         utr = CASE WHEN EXCLUDED.utr <> '' THEN EXCLUDED.utr ELSE payment_orders.utr END,
-         fee_id = COALESCE(EXCLUDED.fee_id, payment_orders.fee_id),
-         student_id = COALESCE(NULLIF(payment_orders.student_id, ''), EXCLUDED.student_id),
-         student_name = COALESCE(NULLIF(payment_orders.student_name, ''), EXCLUDED.student_name),
-         updated_at = NOW()`,
-      [
-        orderId,
-        payload.paymentId ?? null,
-        metaStudentId,
-        metaStudentName,
-        metaFeeId,
-        payload.amount ?? '',
-        statusForOrder,
-        method,
-        utr,
-        event,
-      ]
-    );
-
-    const currentRows = await query<{
-      status: string;
-      gateway_status: string;
-      method: string;
-    }>(
-      `SELECT status, gateway_status, method
-       FROM payment_orders WHERE order_id = $1`,
-      [orderId]
-    );
-    const currentStatus = currentRows[0]?.status ?? statusForOrder;
-    const currentGatewayStatus = currentRows[0]?.gateway_status ?? event;
-    const currentMethod = currentRows[0]?.method ?? method;
+    const existing = await getLocalOrder(orderId);
+    const timestamp = nowIso();
+    const order: LocalOrder = existing
+      ? {
+          ...existing,
+          paymentId: payload.paymentId ?? existing.paymentId,
+          status:
+            (existing.status === 'SUCCESS' || existing.status === 'REFUNDED') &&
+            event !== 'REFUNDED'
+              ? existing.status
+              : statusForOrder,
+          gatewayStatus:
+            (existing.status === 'SUCCESS' || existing.status === 'REFUNDED') &&
+            event !== 'REFUNDED'
+              ? existing.gatewayStatus
+              : event,
+          method: method || existing.method,
+          utr: utr || existing.utr,
+          feeId: metaFeeId ?? existing.feeId,
+          studentId: existing.studentId || metaStudentId,
+          studentName: existing.studentName || metaStudentName,
+          amount: existing.amount || payload.amount || '',
+          updatedAt: timestamp,
+        }
+      : {
+          orderId,
+          paymentId: payload.paymentId ?? null,
+          status: statusForOrder,
+          gatewayStatus: event,
+          method,
+          utr,
+          amount: payload.amount ?? '',
+          studentId: metaStudentId,
+          studentName: metaStudentName,
+          feeId: metaFeeId,
+          checkoutUrl: '',
+          receiptId: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+    await saveLocalOrder(order);
 
     await recordPaymentEvent({
       orderId,
-      status: currentStatus,
-      gatewayStatus: currentGatewayStatus,
-      method: currentMethod,
+      status: order.status,
+      gatewayStatus: order.gatewayStatus,
+      method: order.method,
       source: 'webhook',
       message:
-        moneyReceived && currentStatus === 'PROCESSING'
+        moneyReceived && order.status === 'PROCESSING'
           ? 'Gateway verified the payment; creating the receipt.'
           : `Gateway reported ${event}.`,
     });
 
     if (moneyReceived) {
-      const rows = await query<OrderRow>(
-        `SELECT order_id, student_id, student_name, fee_id, amount, receipt_id
-         FROM payment_orders WHERE order_id = $1`,
-        [orderId]
-      );
-      const order = rows[0];
+      let current = (await getLocalOrder(orderId)) ?? order;
 
       // Resolve the fee to mark paid: explicit id, else a matching pending fee.
-      let feeId: number | null = metaFeeId ?? order?.fee_id ?? null;
-      const paidAmount = Number(payload.amount ?? order?.amount ?? '');
-      if (feeId === null && order && Number.isFinite(paidAmount)) {
-        const match = await query<{ id: number }>(
-          `SELECT id FROM fees
-           WHERE status <> 'paid'
-             AND lower(student_name) = lower($1)
-             AND amount = $2::numeric
-           ORDER BY id DESC LIMIT 1`,
-          [order.student_name, paidAmount]
-        );
-        feeId = match[0]?.id ?? null;
+      let feeId: number | null = metaFeeId ?? current.feeId ?? null;
+      const paidAmount = Number(payload.amount ?? current.amount ?? '');
+      if (feeId === null && Number.isFinite(paidAmount)) {
+        const match = await findFeeByStudentAndAmount(current.studentName, paidAmount);
+        feeId = match ? match.id : null;
       }
       if (feeId !== null) {
-        await query("UPDATE fees SET status = 'paid' WHERE id = $1", [feeId]);
+        const feeRecord = await getRecord<Fee>(FEES, String(feeId));
+        if (feeRecord && feeRecord.data.status !== 'paid') {
+          await putRecord<Fee>(FEES, String(feeId), {
+            ...feeRecord.data,
+            status: 'paid',
+          });
+        }
         // Remember a fuzzy-matched fee so a webhook retry cannot mark a
         // second fee for the same student/amount.
-        if (order && order.fee_id !== feeId) {
-          await query(
-            'UPDATE payment_orders SET fee_id = $1, updated_at = NOW() WHERE order_id = $2',
-            [feeId, orderId]
-          );
+        if (current.feeId !== feeId) {
+          current = { ...current, feeId, updatedAt: nowIso() };
+          await saveLocalOrder(current);
         }
       }
 
       // Create exactly one receipt per order, even across webhook retries.
-      const client = await pool.connect();
       try {
-        await client.query('BEGIN');
-        const locked = await client.query<{ receipt_id: string | null }>(
-          'SELECT receipt_id FROM payment_orders WHERE order_id = $1 FOR UPDATE',
-          [orderId]
-        );
+        await withReceiptLock(async () => {
+          const latest = (await getLocalOrder(orderId)) ?? current;
+          if (latest.receiptId) return;
 
-        if (!locked.rows[0]?.receipt_id) {
-          // Serialize receipt-ID allocation so concurrent webhooks cannot
-          // compute the same RCP-00x number.
-          await client.query('LOCK TABLE receipts IN SHARE ROW EXCLUSIVE MODE');
-          const receiptId = await nextReceiptId(client);
-          await client.query(
-            `INSERT INTO receipts (receipt_id, student_id, student_name, amount, method, payment_date, status, notes)
-             VALUES ($1, $2, $3, $4, $5, $6, 'Paid', $7)`,
-            [
-              receiptId,
-              order?.student_id ?? '',
-              order?.student_name ?? metaStudentName,
-              payload.amount ?? order?.amount ?? '',
-              receiptMethod(method),
-              paymentDate(payload.completedAt),
-              `YOUPI PG${utr ? ` · UTR ${utr}` : ` · Order ${orderId}`}`,
-            ]
+          const receipts = await listReceipts();
+          const existingReceipt = receipts.find((receipt) =>
+            String(receipt.data.notes ?? '').includes(orderId)
           );
-          await client.query(
-            'UPDATE payment_orders SET receipt_id = $1, updated_at = NOW() WHERE order_id = $2',
-            [receiptId, orderId]
-          );
-        }
-        await client.query('COMMIT');
+          if (existingReceipt) {
+            existingReceipt.data.receiptId = existingReceipt.data.receiptId || existingReceipt.entityId;
+            await saveLocalOrder({
+              ...latest,
+              receiptId: existingReceipt.data.receiptId,
+              updatedAt: nowIso(),
+            });
+            return;
+          }
+
+          const receiptId = await nextReceiptId();
+          const notes = `YOUPI PG${utr ? ` · UTR ${utr}` : ''} · Order ${orderId}`;
+          const receipt: ReceiptRecord = {
+            receiptId,
+            studentId: latest.studentId || '',
+            studentName: latest.studentName || metaStudentName,
+            amount: payload.amount ?? latest.amount ?? '',
+            method: receiptMethod(method || latest.method),
+            paymentDate: paymentDate(payload.completedAt),
+            status: 'Paid',
+            notes,
+          };
+          await putRecord<ReceiptRecord>(RECEIPTS, receiptId, receipt);
+          await saveLocalOrder({
+            ...latest,
+            receiptId,
+            updatedAt: nowIso(),
+          });
+        });
       } catch (err) {
-        await client.query('ROLLBACK');
         app.log.error({ err }, 'Failed to create receipt for YOUPI payment');
         // Ask the gateway to retry: the receipt has not been recorded yet.
         return reply.code(500).send({ error: 'Could not record receipt' });
-      } finally {
-        client.release();
       }
 
       // Receipt and fee are durable now: publish the authoritative SUCCESS.
-      await query(
-        'UPDATE payment_orders SET status = $1, gateway_status = $1, updated_at = NOW() WHERE order_id = $2',
-        [event, orderId]
-      );
+      const settled = (await getLocalOrder(orderId)) ?? current;
+      const finalOrder: LocalOrder = {
+        ...settled,
+        status: event,
+        gatewayStatus: event,
+        updatedAt: nowIso(),
+      };
+      await saveLocalOrder(finalOrder);
 
-      const settled = await query<{ receipt_id: string | null }>(
-        'SELECT receipt_id FROM payment_orders WHERE order_id = $1',
-        [orderId]
-      );
       await recordPaymentEvent({
         orderId,
         status: event,
         gatewayStatus: event,
         method,
         source: 'webhook',
-        message: settled[0]?.receipt_id
-          ? `Receipt ${settled[0].receipt_id} created and the fee is marked paid.`
+        message: finalOrder.receiptId
+          ? `Receipt ${finalOrder.receiptId} created and the fee is marked paid.`
           : 'Payment settled by the gateway.',
       });
     }

@@ -5,29 +5,35 @@ Monorepo with workspaces:
 ```
 fees/
   frontend/         Next.js 14 App Router (port 3000)
-  backend/          Fastify 5 + node-postgres (port 4000)
+  backend/          Fastify 5 + Appwrite (port 4000)
   payment-gateway/  YOUPI PG self-hosted UPI gateway (payment API on 6100,
                     checkout on 7000, merchant admin on 6001)
-  docker-compose.yml  Optional Postgres 16 for production-style local dev
+  docker-compose.yml  Optional container setup for frontend + backend
 ```
 
 ## Quick start (local dev)
 
-Local development needs **no Docker and no external Postgres**. The backend's
-`npm run dev` starts an embedded PGlite server on port `5433`, points the
-existing `pg` client at it, and creates the schema automatically. Data persists
-in `backend/.pgdata/` (gitignored). Delete that folder to reset the database.
+Appwrite is the app's primary database. Local development needs **no Postgres**
+and no Docker.
 
 1. Install dependencies and create the env files:
 ```bash
 npm install
 copy backend\.env.example backend\.env
 copy payment-gateway\.env.example payment-gateway\.env
+# set APPWRITE_API_KEY in backend/.env (scopes listed below)
 # set ENCRYPTION_MASTER_KEY and JWT_SECRET in payment-gateway/.env
 npm run gateway:install
 ```
 
-2. Put the **same** random token in both env files:
+2. Create the Appwrite database and tables:
+```bash
+npm run appwrite:setup --workspace=backend
+# Optional, once: import data from the previous Postgres/PGlite setup
+npm run appwrite:migrate --workspace=backend
+```
+
+3. Put the **same** random token in both env files:
 ```ini
 # backend/.env
 YOUPI_ADMIN_TOKEN=<shared-token>
@@ -38,12 +44,12 @@ ADMIN_API_TOKEN=<shared-token>
 The backend uses this token to sync the merchant UPI ID, read payment status,
 and confirm or decline cash/card counter payments through the gateway admin API.
 
-3. Point the gateway's default merchant webhook at the fees backend:
+4. Point the gateway's default merchant webhook at the fees backend:
 ```bash
 npm run gateway:webhook
 ```
 
-4. Start all three services:
+5. Start all three services:
 ```bash
 dev.bat
 # or separately:
@@ -62,36 +68,44 @@ npm run dev:gateway
 
 ### Troubleshooting
 
-**`RuntimeError: Aborted()` when the backend starts**
+**`missing scopes (["tables.write"])` during `appwrite:setup`**
 
-PGlite can abort if the process was killed while writing. Stop the backend and
-remove the stale lock file first:
+The Appwrite API key needs `databases.read`, `databases.write`, `tables.read`,
+`tables.write`, `columns.read`, `columns.write`, `rows.read`, and `rows.write`.
+Edit the key in the Appwrite console, then run
+`npm run appwrite:setup --workspace=backend` again.
 
-```powershell
-Remove-Item backend\.pgdata\postmaster.pid -Force
-npm run dev --workspace=backend
-```
+**`Appwrite tables are missing` when the backend starts**
 
-If it still aborts, move or delete `backend\.pgdata` and restart. The schema and
-demo fees are re-created automatically. The database is disposable dev data.
+The database or tables have not been created for this project. Run
+`npm run appwrite:setup --workspace=backend`, then restart the backend.
 
 **`/dashboard/...` returns 500 after a production build**
 
 `next dev` and `next build` both use `.next`. Don't run `npm run build` while the
 dev server is running; restart `npm run dev --workspace=frontend` afterwards.
 
-### Using a real Postgres instead
+### Importing existing Postgres/PGlite data
 
-`npm run dev:pg` (from `backend/`) skips PGlite and uses `DATABASE_URL` from
-`backend/.env`. Start the bundled Postgres with:
+The backend no longer reads Postgres. The one-time import script reads the old
+database and upserts every row into Appwrite. It never deletes Appwrite data, so
+it is safe to re-run.
 
 ```bash
-docker compose up -d postgres
-# schema is created at backend boot; or run backend/sql/init.sql manually
+# Terminal 1: start the embedded PGlite used by the previous dev setup
+npm run legacy:pglite --workspace=backend
+
+# Terminal 2: import it into Appwrite (auto-detects port 5433)
+npm run appwrite:migrate --workspace=backend
+
+# Or import a real Postgres connection:
+# PowerShell:
+$env:MIGRATE_DATABASE_URL="postgres://fees:fees@localhost:5432/fees"
+npm run appwrite:migrate --workspace=backend
 ```
 
-The PGlite dev server and a real Postgres cannot share port `5433`, so stop one
-before starting the other.
+Keep `backend/.pgdata/` until the import has been verified. After that it is no
+longer needed.
 
 ## Payments (YOUPI PG)
 
@@ -199,48 +213,62 @@ The gateway's real verification engine runs, then delivers the signed webhook to
 the backend. The payment row should become `SUCCESS`, a receipt should appear,
 and the matching fee should become `paid`.
 
-## Appwrite data mirror
+## Appwrite data store
 
-Appwrite is wired as a full-data mirror. Postgres remains the source of truth
-for payments, receipts, and live dashboard reads; after every successful write
-(and once at startup) the backend writes a complete snapshot of each app
-collection to one Appwrite collection. The mirror is disabled until an Appwrite
-API key is configured.
+Appwrite is the primary store for all app data: fees, users, students, student
+groups, fee structures, receipts, announcements, dropdown options, payment
+orders, payment events, payment settings, and the business profile.
+
+Each table stores one row per entity:
+
+| Column | Purpose |
+| --- | --- |
+| `entityId` | The app's logical id (fee id, student id, order id, etc.) |
+| `payload` | The entity as JSON, exactly the shape the API returns |
+| `createdAt` | Entity creation timestamp |
+| `updatedAt` | Last write timestamp |
+
+Row ids are deterministic hashes of `entityId`, so the backend can upsert
+without first looking up the row. Payment receipt creation is additionally
+serialized by an in-process lock and re-checks for an existing receipt before
+allocating a new `RCP-00x`, because the app writes each row individually. The
+`users` table stores bcrypt password hashes; it is private to the backend API
+key.
 
 1. In the Appwrite console, create a server API key for project
    `6adaf4be003ae5c9e622` with these scopes:
-   `databases.read`, `databases.write`, `collections.read`,
-   `collections.write`, `attributes.read`, `attributes.write`,
-   `documents.read`, `documents.write`.
+   `databases.read`, `databases.write`, `tables.read`, `tables.write`,
+   `columns.read`, `columns.write`, `rows.read`, `rows.write`.
 2. Add the key to `backend/.env`:
    ```bash
    APPWRITE_ENDPOINT=https://nyc.cloud.appwrite.io/v1
    APPWRITE_PROJECT_ID=6adaf4be003ae5c9e622
    APPWRITE_API_KEY=<server API key>
    APPWRITE_DATABASE_ID=fees
-   APPWRITE_STATE_COLLECTION_ID=app_state
    ```
-3. Create the database, collection, and attributes:
+3. Create the database, tables, and columns:
    ```bash
    npm run appwrite:setup --workspace=backend
    ```
-4. Restart the backend. It mirrors on startup and after every write. Check:
+4. Restart the backend and check the connection:
    ```bash
    curl http://localhost:4000/api/appwrite/status
-   curl -X POST http://localhost:4000/api/appwrite/sync
    ```
 
-The `app_state` collection stores one JSON snapshot document per app
-collection (`students`, `student_groups`, `fee_structures`, `receipts`,
-`announcements`, `dropdown_options`, `fees`, `payment_orders`,
-`payment_events`, `payment_settings`, `business_profiles`). The `users` table is
-deliberately excluded so password hashes never leave Postgres.
+The backend creates the default admin user, demo fees, and dropdown options only
+when the corresponding Appwrite tables are empty. The default login remains
+`admin@seedsofsuccess.com` / `Admin123!`.
 
-## Docker (full stack)
+## Docker (frontend + backend)
 
-The Docker path uses a real Postgres service instead of PGlite:
+The backend container talks to the same Appwrite project. YOUPI PG is expected
+to run on the host; Compose points the backend at `host.docker.internal:6100`.
 
 ```bash
+# PowerShell: export the secrets for Compose
+$env:APPWRITE_API_KEY="<server API key>"
+$env:YOUPI_ADMIN_TOKEN="<shared admin token>"
+$env:YOUPI_WEBHOOK_SECRET="<webhook secret>"
 docker compose up --build
 # frontend http://localhost:3000
 # backend  http://localhost:4000/api/health
@@ -264,6 +292,5 @@ docker compose up --build
 - `PUT /api/payments/settings` `{ upiId, payeeName, qrCodeDataUrl? }`
 - `GET /api/payments/settings/qr?upiId=&payeeName=&amount=` (live QR preview)
 - `POST /api/payments/settings/sync` (retry a pending YOUPI PG UPI sync)
-- `POST /api/payments/webhook` (YOUPI PG → backend, HMAC-SHA256 verified)
-- `GET /api/appwrite/status` (mirror configuration and last sync state)
-- `POST /api/appwrite/sync` (force a full Appwrite snapshot)
+- `POST /api/payments/webhook` (YOUPI PG -> backend, HMAC-SHA256 verified)
+- `GET /api/appwrite/status` (Appwrite connection and tables)

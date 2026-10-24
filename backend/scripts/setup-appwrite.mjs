@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Create the Appwrite database/collection/attributes used by the data mirror.
+ * Create the Appwrite database + tables used as the app's primary store.
  *
  * Usage:
  *   npm run appwrite:setup --workspace=backend
  *   npm run appwrite:setup --workspace=backend -- --dry-run
  *
- * Requires an Appwrite server API key with database, collection, attribute,
- * and document scopes. The key is read from backend/.env as APPWRITE_API_KEY.
+ * Requires an Appwrite server API key with database, table, column, and row
+ * scopes. The key is read from backend/.env as APPWRITE_API_KEY.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -42,35 +42,41 @@ const projectId = (
 ).trim();
 const apiKey = (process.env.APPWRITE_API_KEY ?? '').trim();
 const databaseId = (process.env.APPWRITE_DATABASE_ID ?? 'fees').trim();
-const collectionId = (
-  process.env.APPWRITE_STATE_COLLECTION_ID ?? 'app_state'
-).trim();
 const dryRun = process.argv.includes('--dry-run');
+
+const tables = [
+  { tableId: 'fees', name: 'Fees' },
+  { tableId: 'users', name: 'Users' },
+  { tableId: 'students', name: 'Students' },
+  { tableId: 'student_groups', name: 'Student Groups' },
+  { tableId: 'fee_structures', name: 'Fee Structures' },
+  { tableId: 'receipts', name: 'Receipts' },
+  { tableId: 'announcements', name: 'Announcements' },
+  { tableId: 'dropdown_options', name: 'Dropdown Options' },
+  { tableId: 'payment_orders', name: 'Payment Orders' },
+  { tableId: 'payment_events', name: 'Payment Events' },
+  { tableId: 'payment_settings', name: 'Payment Settings' },
+  { tableId: 'business_profiles', name: 'Business Profiles' },
+];
+
+const columns = [
+  { type: 'varchar', key: 'entityId', size: 128, required: true },
+  { type: 'longtext', key: 'payload', required: true },
+  { type: 'varchar', key: 'createdAt', size: 64, required: true },
+  { type: 'varchar', key: 'updatedAt', size: 64, required: true },
+];
 
 const schema = {
   endpoint,
   projectId,
   databaseId,
-  collectionId,
   database: { databaseId, name: 'Fees App' },
-  collection: {
-    collectionId,
-    name: 'App State',
+  tables: tables.map((table) => ({
+    ...table,
     permissions: [],
-    documentSecurity: false,
-  },
-  attributes: [
-    { type: 'string', key: 'entity', size: 64, required: true },
-    { type: 'string', key: 'payload', size: 16_777_216, required: true },
-    {
-      type: 'integer',
-      key: 'count',
-      required: true,
-      min: 0,
-      max: 2_147_483_647,
-    },
-    { type: 'string', key: 'updatedAt', size: 64, required: true },
-  ],
+    rowSecurity: false,
+    columns,
+  })),
 };
 
 if (dryRun) {
@@ -83,18 +89,17 @@ if (!apiKey) {
     [
       'APPWRITE_API_KEY is not set in backend/.env.',
       '',
-      'Create an Appwrite API key with these scopes:',
+      'Create an Appwrite API key with the table/database scopes:',
       '  databases.read, databases.write',
-      '  collections.read, collections.write',
-      '  attributes.read, attributes.write',
-      '  documents.read, documents.write',
+      '  tables.read, tables.write',
+      '  columns.read, columns.write',
+      '  rows.read, rows.write',
       '',
       'Then add to backend/.env:',
       `  APPWRITE_ENDPOINT=${endpoint}`,
       `  APPWRITE_PROJECT_ID=${projectId}`,
       '  APPWRITE_API_KEY=<your server API key>',
       `  APPWRITE_DATABASE_ID=${databaseId}`,
-      `  APPWRITE_STATE_COLLECTION_ID=${collectionId}`,
     ].join('\n')
   );
   process.exit(1);
@@ -107,19 +112,25 @@ const headers = {
 };
 
 async function request(path, init = {}) {
-  const res = await fetch(`${endpoint}${path}`, {
-    ...init,
-    headers: { ...headers, ...(init.headers ?? {}) },
-    signal: AbortSignal.timeout(30_000),
-  });
-  const text = await res.text().catch(() => '');
-  let body = null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
   try {
-    body = text ? JSON.parse(text) : null;
-  } catch {
-    body = text;
+    const res = await fetch(`${endpoint}${path}`, {
+      ...init,
+      headers: { ...headers, ...(init.headers ?? {}) },
+      signal: controller.signal,
+    });
+    const text = await res.text().catch(() => '');
+    let body = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = text;
+    }
+    return { ok: res.ok, status: res.status, body };
+  } finally {
+    clearTimeout(timer);
   }
-  return { ok: res.ok, status: res.status, body };
 }
 
 function fail(step, result) {
@@ -130,81 +141,127 @@ function fail(step, result) {
   throw new Error(`${step} failed (HTTP ${result.status}): ${detail}`);
 }
 
-async function main() {
-  console.log(`Appwrite: ${endpoint} · project ${projectId}`);
+function databasePath() {
+  return `/databases/${encodeURIComponent(databaseId)}`;
+}
 
-  let res = await request('/databases', {
+function tablePath(tableId) {
+  return `/tablesdb/${encodeURIComponent(databaseId)}/tables/${encodeURIComponent(
+    tableId
+  )}`;
+}
+
+async function ensureDatabase() {
+  // Check first: Appwrite returns a plan-limit 403 instead of 409 when the
+  // database already exists on a plan with a one-database cap.
+  const existing = await request(databasePath());
+  if (existing.ok) {
+    console.log(`Database "${databaseId}" already exists.`);
+    return;
+  }
+  if (existing.status !== 404) fail('Check database', existing);
+
+  const res = await request('/databases', {
     method: 'POST',
     body: JSON.stringify(schema.database),
   });
   if (!res.ok && res.status !== 409) fail('Create database', res);
-  console.log(
-    res.status === 409
-      ? `Database "${databaseId}" already exists.`
-      : `Created database "${databaseId}".`
-  );
+  console.log(`Created database "${databaseId}".`);
+}
 
-  res = await request(`/databases/${encodeURIComponent(databaseId)}/collections`, {
-    method: 'POST',
-    body: JSON.stringify(schema.collection),
-  });
-  if (!res.ok && res.status !== 409) fail('Create collection', res);
-  console.log(
-    res.status === 409
-      ? `Collection "${collectionId}" already exists.`
-      : `Created collection "${collectionId}".`
-  );
+async function ensureTable(table) {
+  const existing = await request(tablePath(table.tableId));
+  if (existing.ok) {
+    console.log(`  Table "${table.tableId}" already exists.`);
+    return;
+  }
+  if (existing.status !== 404) {
+    fail(`Check table "${table.tableId}"`, existing);
+  }
 
-  const attributesPath = `/databases/${encodeURIComponent(
-    databaseId
-  )}/collections/${encodeURIComponent(collectionId)}/attributes`;
-  const existing = await request(attributesPath);
-  if (!existing.ok) fail('List attributes', existing);
-  const existingKeys = new Set(
-    (existing.body?.attributes ?? []).map((attr) => attr.key)
-  );
-
-  for (const attr of schema.attributes) {
-    if (existingKeys.has(attr.key)) {
-      console.log(`Attribute "${attr.key}" already exists.`);
-      continue;
+  const res = await request(
+    `/tablesdb/${encodeURIComponent(databaseId)}/tables`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        tableId: table.tableId,
+        name: table.name,
+        permissions: table.permissions,
+        rowSecurity: table.rowSecurity,
+      }),
     }
-    const { type, ...body } = attr;
-    const created = await request(`${attributesPath}/${type}`, {
+  );
+  if (!res.ok && res.status !== 409) {
+    fail(`Create table "${table.tableId}"`, res);
+  }
+  console.log(`  Created table "${table.tableId}".`);
+}
+
+async function ensureColumns(table) {
+  const path = `${tablePath(table.tableId)}/columns`;
+  const existing = await request(path);
+  if (!existing.ok) fail(`List columns for "${table.tableId}"`, existing);
+  const existingKeys = new Set(
+    (existing.body?.columns ?? []).map((column) => column.key)
+  );
+
+  for (const column of columns) {
+    if (existingKeys.has(column.key)) continue;
+    const { type, ...body } = column;
+    const created = await request(`${path}/${type}`, {
       method: 'POST',
       body: JSON.stringify(body),
     });
-    if (!created.ok) fail(`Create attribute "${attr.key}"`, created);
-    console.log(`Creating attribute "${attr.key}"…`);
+    if (!created.ok && created.status !== 409) {
+      fail(
+        `Create column "${column.key}" on "${table.tableId}"`,
+        created
+      );
+    }
   }
+}
 
-  // Appwrite builds attributes asynchronously; wait before the backend writes.
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    const list = await request(attributesPath);
-    if (!list.ok) fail('List attributes', list);
-    const attributes = list.body?.attributes ?? [];
-    const failed = attributes.find((attr) => attr.status === 'failed');
+async function waitForColumns(table) {
+  const path = `${tablePath(table.tableId)}/columns`;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const list = await request(path);
+    if (!list.ok) fail(`List columns for "${table.tableId}"`, list);
+    const current = list.body?.columns ?? [];
+    const failed = current.find((column) => column.status === 'failed');
     if (failed) {
-      throw new Error(`Attribute "${failed.key}" failed to build.`);
+      throw new Error(
+        `Column "${failed.key}" on "${table.tableId}" failed to build.`
+      );
     }
-    const ready = schema.attributes.every((wanted) =>
-      attributes.some(
-        (attr) => attr.key === wanted.key && attr.status === 'available'
-      )
-    );
-    if (ready) {
-      console.log('All Appwrite attributes are available.');
-      console.log('');
-      console.log('Next: restart the backend. It will mirror all data on startup');
-      console.log('and after every write. Check GET /api/appwrite/status.');
-      return;
-    }
+    const ready = columns.every((wanted) => {
+      const column = current.find((item) => item.key === wanted.key);
+      return Boolean(column) && (!column.status || column.status === 'available');
+    });
+    if (ready) return;
     await new Promise((resolve) => setTimeout(resolve, 2_000));
   }
+  throw new Error(`Timed out waiting for columns on "${table.tableId}".`);
+}
 
-  throw new Error(
-    'Timed out waiting for Appwrite attributes. Check the Appwrite console.'
-  );
+async function main() {
+  console.log(`Appwrite: ${endpoint} · project ${projectId}`);
+  await ensureDatabase();
+
+  for (const table of tables) {
+    await ensureTable(table);
+    await ensureColumns(table);
+  }
+
+  console.log('Waiting for Appwrite to finish building columns…');
+  for (const table of tables) {
+    await waitForColumns(table);
+    console.log(`  ${table.tableId}: ready`);
+  }
+
+  console.log('');
+  console.log('Appwrite tables are ready.');
+  console.log('Next: import existing Postgres data with:');
+  console.log('  npm run appwrite:migrate --workspace=backend');
 }
 
 main().catch((err) => {

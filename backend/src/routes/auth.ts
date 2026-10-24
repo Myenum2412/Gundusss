@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
-import { query } from '../db.js';
+import { APPWRITE_COLLECTIONS, getRecord } from '../appwrite.js';
 import { LoginSchema } from '../schemas.js';
 
 interface UserRow {
@@ -18,16 +18,17 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'Invalid body', details: parsed.error.flatten() });
     }
     const { email, password } = parsed.data;
+    const normalizedEmail = email.toLowerCase().trim();
 
-    const rows = await query<UserRow>(
-      'SELECT id, email, password_hash, created_at FROM users WHERE email = $1',
-      [email.toLowerCase().trim()]
+    const record = await getRecord<UserRow>(
+      APPWRITE_COLLECTIONS.users,
+      normalizedEmail
     );
-    if (rows.length === 0) {
+    if (!record) {
       return reply.code(401).send({ error: 'Invalid email or password' });
     }
 
-    const user = rows[0];
+    const user = record.data;
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) {
       return reply.code(401).send({ error: 'Invalid email or password' });

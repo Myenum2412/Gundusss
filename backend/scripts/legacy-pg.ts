@@ -1,5 +1,10 @@
 import pg from 'pg';
 
+/**
+ * Legacy Postgres/PGlite connection used only by the one-time
+ * `appwrite:migrate` import. The backend runtime does not import this module.
+ */
+
 const { Pool } = pg;
 
 if (!process.env.DATABASE_URL) {
@@ -11,13 +16,3 @@ export const pool = new Pool({
     process.env.DATABASE_URL ?? 'postgres://fees:fees@localhost:5432/fees',
   max: 10,
 });
-
-export async function query<T = any>(text: string, params?: any[]): Promise<T[]> {
-  const client = await pool.connect();
-  try {
-    const res = await client.query(text, params);
-    return res.rows as T[];
-  } finally {
-    client.release();
-  }
-}

@@ -1,3 +1,5 @@
+-- Legacy Postgres schema. The backend now uses Appwrite TablesDB; this file is
+-- kept only as a reference for the one-time appwrite:migrate import.
 CREATE TABLE IF NOT EXISTS fees (
   id SERIAL PRIMARY KEY,
   student_name VARCHAR(200) NOT NULL,

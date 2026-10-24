@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { pool } from '../db.js';
+import {
+  APPWRITE_COLLECTIONS,
+  getRecord,
+  putRecord,
+} from '../appwrite.js';
 
 const str = (max = 500) => z.string().max(max).default('');
 const list = (maxItems = 30, maxLength = 200) =>
@@ -121,17 +125,21 @@ const PutBodySchema = z.object({
   profile: BusinessProfileSchema,
 });
 
+interface StoredProfile {
+  profile: unknown;
+  updatedAt: string;
+}
+
+const COLLECTION = APPWRITE_COLLECTIONS.businessProfiles;
+
 export async function businessProfileRoutes(app: FastifyInstance) {
   app.get('/api/business-profile', async () => {
-    const { rows } = await pool.query<{ data: unknown; updated_at: Date }>(
-      'SELECT data, updated_at FROM business_profiles WHERE id = 1'
-    );
-    const row = rows[0];
-    if (!row) return { data: { profile: null, updatedAt: null } };
+    const record = await getRecord<StoredProfile>(COLLECTION, '1');
+    if (!record) return { data: { profile: null, updatedAt: null } };
     return {
       data: {
-        profile: row.data,
-        updatedAt: row.updated_at?.toISOString?.() ?? null,
+        profile: record.data.profile ?? null,
+        updatedAt: record.data.updatedAt ?? null,
       },
     };
   });
@@ -145,19 +153,12 @@ export async function businessProfileRoutes(app: FastifyInstance) {
       });
     }
 
-    const { rows } = await pool.query<{ updated_at: Date }>(
-      `INSERT INTO business_profiles (id, data, updated_at)
-       VALUES (1, $1, NOW())
-       ON CONFLICT (id) DO UPDATE
-         SET data = EXCLUDED.data, updated_at = NOW()
-       RETURNING updated_at`,
-      [parsed.data.profile]
-    );
+    const updatedAt = new Date().toISOString();
+    await putRecord<StoredProfile>(COLLECTION, '1', {
+      profile: parsed.data.profile,
+      updatedAt,
+    });
 
-    return {
-      data: {
-        updatedAt: rows[0]?.updated_at?.toISOString?.() ?? new Date().toISOString(),
-      },
-    };
+    return { data: { updatedAt } };
   });
 }

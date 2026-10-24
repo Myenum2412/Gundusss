@@ -1,28 +1,23 @@
 services:
-  postgres:
-    image: postgres:16
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: fees
-      POSTGRES_PASSWORD: fees
-      POSTGRES_DB: fees
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
   backend:
     build: ./backend
     restart: unless-stopped
     ports:
       - "4000:4000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       PORT: 4000
       HOST: 0.0.0.0
-      DATABASE_URL: postgres://fees:fees@postgres:5432/fees
       FRONTEND_URL: http://localhost:3000
-    depends_on:
-      - postgres
+      APPWRITE_ENDPOINT: ${APPWRITE_ENDPOINT:-https://nyc.cloud.appwrite.io/v1}
+      APPWRITE_PROJECT_ID: ${APPWRITE_PROJECT_ID:-6adaf4be003ae5c9e622}
+      APPWRITE_API_KEY: ${APPWRITE_API_KEY:?Set APPWRITE_API_KEY before starting Compose}
+      APPWRITE_DATABASE_ID: ${APPWRITE_DATABASE_ID:-fees}
+      # YOUPI PG runs on the host in the default local setup.
+      YOUPI_PAYMENT_API_URL: ${YOUPI_PAYMENT_API_URL:-http://host.docker.internal:6100}
+      YOUPI_WEBHOOK_SECRET: ${YOUPI_WEBHOOK_SECRET:-}
+      YOUPI_ADMIN_TOKEN: ${YOUPI_ADMIN_TOKEN:-}
 
   frontend:
     build: ./frontend
@@ -33,6 +28,3 @@ services:
       NEXT_PUBLIC_API_URL: http://localhost:4000
     depends_on:
       - backend
-
-volumes:
-  pgdata:

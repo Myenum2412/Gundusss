@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import QRCode from 'qrcode';
-import { query } from '../db.js';
+import {
+  APPWRITE_COLLECTIONS,
+  getRecord,
+  putRecord,
+} from '../appwrite.js';
 
 /**
  * Merchant UPI profile for the in-app checkout preview.
@@ -57,13 +61,11 @@ function adminToken() {
   return (process.env.YOUPI_ADMIN_TOKEN ?? '').trim();
 }
 
+const COLLECTION = APPWRITE_COLLECTIONS.paymentSettings;
+
 async function readLocalSettings(): Promise<SettingsRow | null> {
-  const rows = await query<SettingsRow>(
-    `SELECT upi_id, payee_name, qr_code_data_url,
-            to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at
-     FROM payment_settings WHERE id = 1`
-  );
-  return rows[0] ?? null;
+  const record = await getRecord<SettingsRow>(COLLECTION, '1');
+  return record?.data ?? null;
 }
 
 async function fetchGatewaySettings(): Promise<GatewayInfo> {
@@ -339,16 +341,12 @@ export async function paymentSettingsRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: qr.error });
     }
 
-    await query(
-      `INSERT INTO payment_settings (id, upi_id, payee_name, qr_code_data_url, updated_at)
-       VALUES (1, $1, $2, $3, NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         upi_id = EXCLUDED.upi_id,
-         payee_name = EXCLUDED.payee_name,
-         qr_code_data_url = EXCLUDED.qr_code_data_url,
-         updated_at = NOW()`,
-      [upiId, payeeName, qr.value]
-    );
+    await putRecord<SettingsRow>(COLLECTION, '1', {
+      upi_id: upiId,
+      payee_name: payeeName,
+      qr_code_data_url: qr.value,
+      updated_at: new Date().toISOString(),
+    });
 
     const gateway = await syncGatewaySettings(upiId, payeeName);
     if (!gateway.synced) {

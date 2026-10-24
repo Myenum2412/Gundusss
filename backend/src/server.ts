@@ -3,7 +3,16 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import bcrypt from 'bcryptjs';
 import { Readable } from 'node:stream';
-import { pool } from './db.js';
+import {
+  APPWRITE_COLLECTIONS,
+  assertAppwriteSetup,
+  getAppwriteStatus,
+  getRecord,
+  isAppwriteConfigured,
+  listRecords,
+  putRecord,
+} from './appwrite.js';
+import type { Fee } from './schemas.js';
 import { feeRoutes } from './routes/fees.js';
 import { authRoutes } from './routes/auth.js';
 import { whatsappRoutes } from './routes/whatsapp.js';
@@ -11,12 +20,6 @@ import { collectionsRoutes } from './routes/collections.js';
 import { paymentRoutes } from './routes/payments.js';
 import { paymentSettingsRoutes } from './routes/payment-settings.js';
 import { businessProfileRoutes } from './routes/business-profile.js';
-import {
-  getAppwriteStatus,
-  isAppwriteConfigured,
-  scheduleAppwriteSync,
-  syncAllToAppwrite,
-} from './appwrite.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -26,7 +29,9 @@ declare module 'fastify' {
   }
 }
 
-const app = Fastify({ logger: true });
+// Merchant QR uploads are stored as data URLs (up to ~3.5M chars), so the
+// default 1 MiB Fastify body limit is too small for PUT /api/payments/settings.
+const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
 
 app.addHook('preParsing', async (request, _reply, payload) => {
   const chunks: Buffer[] = [];
@@ -77,46 +82,22 @@ await app.register(cors, {
   },
 });
 
+app.setErrorHandler((error, _request, reply) => {
+  app.log.error(error);
+  const status =
+    typeof (error as { statusCode?: unknown }).statusCode === 'number'
+      ? (error as { statusCode: number }).statusCode
+      : 500;
+  const message = error instanceof Error ? error.message : 'Internal Server Error';
+  reply.code(status).send({ error: message });
+});
+
 app.get('/api/health', async () => ({
   ok: true,
   time: new Date().toISOString(),
 }));
 
-// Appwrite mirror diagnostics and manual trigger.
 app.get('/api/appwrite/status', async () => ({ data: getAppwriteStatus() }));
-app.post('/api/appwrite/sync', async () => {
-  await syncAllToAppwrite('manual');
-  return { data: getAppwriteStatus() };
-});
-
-// Keep Appwrite in sync after every successful write. The sync is debounced
-// and never blocks or fails the request that triggered it.
-const APPWRITE_MIRRORED_PATHS = [
-  '/api/fees',
-  '/api/students',
-  '/api/student-groups',
-  '/api/fee-structures',
-  '/api/receipts',
-  '/api/announcements',
-  '/api/dropdowns',
-  '/api/business-profile',
-  '/api/payments',
-];
-
-function shouldMirrorToAppwrite(url: string): boolean {
-  const path = url.split('?')[0];
-  return APPWRITE_MIRRORED_PATHS.some(
-    (prefix) => path === prefix || path.startsWith(`${prefix}/`)
-  );
-}
-
-app.addHook('onResponse', async (request, reply) => {
-  if (!isAppwriteConfigured()) return;
-  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) return;
-  if (reply.statusCode >= 400) return;
-  if (!shouldMirrorToAppwrite(request.url)) return;
-  scheduleAppwriteSync(`${request.method} ${request.url.split('?')[0]}`);
-});
 
 await app.register(feeRoutes);
 await app.register(authRoutes);
@@ -129,168 +110,93 @@ await app.register(businessProfileRoutes);
 const SEED_EMAIL = 'admin@seedsofsuccess.com';
 const SEED_PASSWORD = 'Admin123!';
 
-async function ensureSchema() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS fees (
-      id SERIAL PRIMARY KEY,
-      student_name VARCHAR(200) NOT NULL,
-      amount NUMERIC(10,2) NOT NULL CHECK (amount > 0),
-      status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','overdue')),
-      due_date DATE NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      email VARCHAR(255) NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS students (
-      student_id VARCHAR(30) PRIMARY KEY,
-      student_name VARCHAR(200) NOT NULL,
-      dob TEXT NOT NULL DEFAULT '',
-      gender TEXT NOT NULL DEFAULT '',
-      guardian TEXT NOT NULL DEFAULT '',
-      phone TEXT NOT NULL DEFAULT '',
-      email TEXT NOT NULL DEFAULT '',
-      address TEXT NOT NULL DEFAULT '',
-      class_group TEXT NOT NULL DEFAULT '',
-      course TEXT NOT NULL DEFAULT '',
-      joining_date TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'Active'
-    );
-    CREATE TABLE IF NOT EXISTS student_groups (
-      group_id VARCHAR(30) PRIMARY KEY,
-      group_name VARCHAR(200) NOT NULL,
-      course TEXT NOT NULL DEFAULT '',
-      batch TEXT NOT NULL DEFAULT '',
-      fee_amount TEXT NOT NULL DEFAULT '',
-      fee_frequency TEXT NOT NULL DEFAULT 'Monthly',
-      start_date TEXT NOT NULL DEFAULT '',
-      end_date TEXT NOT NULL DEFAULT '',
-      description TEXT NOT NULL DEFAULT '',
-      student_ids TEXT[] NOT NULL DEFAULT '{}'
-    );
-    CREATE TABLE IF NOT EXISTS fee_structures (
-      structure_id VARCHAR(30) PRIMARY KEY,
-      structure_name VARCHAR(200) NOT NULL,
-      course_group TEXT NOT NULL DEFAULT '',
-      fee_type TEXT NOT NULL DEFAULT 'Tuition Fee',
-      amount TEXT NOT NULL DEFAULT '',
-      frequency TEXT NOT NULL DEFAULT 'Monthly',
-      due_date TEXT NOT NULL DEFAULT '',
-      late_fee TEXT NOT NULL DEFAULT '',
-      payment_methods TEXT[] NOT NULL DEFAULT '{}',
-      status TEXT NOT NULL DEFAULT 'Active',
-      description TEXT NOT NULL DEFAULT '',
-      student_ids TEXT[] NOT NULL DEFAULT '{}'
-    );
-    CREATE TABLE IF NOT EXISTS receipts (
-      receipt_id VARCHAR(30) PRIMARY KEY,
-      student_id TEXT NOT NULL DEFAULT '',
-      student_name TEXT NOT NULL DEFAULT '',
-      amount TEXT NOT NULL DEFAULT '',
-      method TEXT NOT NULL DEFAULT 'Cash',
-      payment_date TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'Paid',
-      notes TEXT NOT NULL DEFAULT ''
-    );
-    CREATE TABLE IF NOT EXISTS announcements (
-      announcement_id VARCHAR(30) PRIMARY KEY,
-      title TEXT NOT NULL DEFAULT '',
-      message TEXT NOT NULL DEFAULT '',
-      recipient_ids TEXT[] NOT NULL DEFAULT '{}',
-      recipient_names TEXT[] NOT NULL DEFAULT '{}',
-      sent_count INTEGER NOT NULL DEFAULT 0,
-      failed_count INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'Sent',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS payment_orders (
-      order_id VARCHAR(64) PRIMARY KEY,
-      payment_id VARCHAR(64),
-      student_id TEXT NOT NULL DEFAULT '',
-      student_name TEXT NOT NULL DEFAULT '',
-      fee_id INTEGER,
-      amount TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'INITIATED',
-      gateway_status TEXT NOT NULL DEFAULT '',
-      method TEXT NOT NULL DEFAULT '',
-      utr TEXT NOT NULL DEFAULT '',
-      checkout_url TEXT NOT NULL DEFAULT '',
-      receipt_id TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS receipt_id TEXT;
-    ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS gateway_status TEXT NOT NULL DEFAULT '';
-    ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS method TEXT NOT NULL DEFAULT '';
-    CREATE TABLE IF NOT EXISTS payment_events (
-      id BIGSERIAL PRIMARY KEY,
-      order_id VARCHAR(64) NOT NULL,
-      status VARCHAR(32) NOT NULL,
-      gateway_status VARCHAR(32) NOT NULL DEFAULT '',
-      method VARCHAR(32) NOT NULL DEFAULT '',
-      source VARCHAR(32) NOT NULL DEFAULT '',
-      message TEXT NOT NULL DEFAULT '',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    CREATE INDEX IF NOT EXISTS payment_events_order_idx
-      ON payment_events (order_id, created_at);
-    CREATE TABLE IF NOT EXISTS payment_settings (
-      id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-      upi_id TEXT NOT NULL DEFAULT '',
-      payee_name TEXT NOT NULL DEFAULT '',
-      qr_code_data_url TEXT NOT NULL DEFAULT '',
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS dropdown_options (
-      list_key TEXT PRIMARY KEY,
-      options TEXT[] NOT NULL DEFAULT '{}'
-    );
-    CREATE TABLE IF NOT EXISTS business_profiles (
-      id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-      data JSONB NOT NULL DEFAULT '{}'::jsonb,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-  `);
+interface UserRecord {
+  id: number;
+  email: string;
+  password_hash: string;
+  created_at: string;
+}
 
-  // Seed default login user (PostgreSQL) if missing.
-  const existing = await pool.query('SELECT id FROM users WHERE email = $1', [SEED_EMAIL]);
-  if (existing.rowCount === 0) {
+function isoDateInDays(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+async function ensureAppwriteSeed(): Promise<void> {
+  await assertAppwriteSetup();
+
+  const existingUser = await getRecord<UserRecord>(
+    APPWRITE_COLLECTIONS.users,
+    SEED_EMAIL
+  );
+  if (!existingUser) {
     const hash = await bcrypt.hash(SEED_PASSWORD, 10);
-    await pool.query('INSERT INTO users (email, password_hash) VALUES ($1, $2)', [SEED_EMAIL, hash]);
+    await putRecord<UserRecord>(APPWRITE_COLLECTIONS.users, SEED_EMAIL, {
+      id: 1,
+      email: SEED_EMAIL,
+      password_hash: hash,
+      created_at: new Date().toISOString(),
+    });
   }
 
-  // Seed demo fees (mirrors sql/init.sql) if the table is empty.
-  const feeCount = await pool.query('SELECT COUNT(*)::int AS n FROM fees');
-  if (Number((feeCount.rows[0] as any)?.n ?? 0) === 0) {
-    await pool.query(
-      `INSERT INTO fees (student_name, amount, status, due_date) VALUES
-        ('Aarav Sharma', 2500.00, 'pending', CURRENT_DATE + INTERVAL '7 days'),
-        ('Diya Patel', 3200.50, 'paid', CURRENT_DATE - INTERVAL '2 days'),
-        ('Kabir Singh', 1800.00, 'overdue', CURRENT_DATE - INTERVAL '5 days')`
-    );
+  const fees = await listRecords<Fee>(APPWRITE_COLLECTIONS.fees);
+  if (fees.length === 0) {
+    const demo: Fee[] = [
+      {
+        id: 1,
+        student_name: 'Aarav Sharma',
+        amount: '2500.00',
+        status: 'pending',
+        due_date: isoDateInDays(7),
+        created_at: new Date().toISOString(),
+      },
+      {
+        id: 2,
+        student_name: 'Diya Patel',
+        amount: '3200.50',
+        status: 'paid',
+        due_date: isoDateInDays(-2),
+        created_at: new Date().toISOString(),
+      },
+      {
+        id: 3,
+        student_name: 'Kabir Singh',
+        amount: '1800.00',
+        status: 'overdue',
+        due_date: isoDateInDays(-5),
+        created_at: new Date().toISOString(),
+      },
+    ];
+    for (const fee of demo) {
+      await putRecord<Fee>(APPWRITE_COLLECTIONS.fees, String(fee.id), fee);
+    }
   }
 
-  // Seed default dropdown options if none are stored.
-  const ddCount = await pool.query('SELECT COUNT(*)::int AS n FROM dropdown_options');
-  if (Number((ddCount.rows[0] as any)?.n ?? 0) === 0) {
+  const dropdowns = await listRecords<string[]>(
+    APPWRITE_COLLECTIONS.dropdownOptions
+  );
+  if (dropdowns.length === 0) {
     const defaults: Record<string, string[]> = {
       gender: ['Male', 'Female', 'Other'],
       classGroup: ['Class 1', 'Class 2', 'Class 3', 'Group A', 'Group B'],
       course: ['Science', 'Commerce', 'Arts', 'General'],
       studentStatus: ['Active', 'Inactive'],
       feeFrequency: ['Monthly', 'Quarterly', 'Half-Yearly', 'Yearly', 'One-Time'],
-      feeType: ['Tuition Fee', 'Admission Fee', 'Exam Fee', 'Transport Fee', 'Library Fee', 'Hostel Fee', 'Other'],
+      feeType: [
+        'Tuition Fee',
+        'Admission Fee',
+        'Exam Fee',
+        'Transport Fee',
+        'Library Fee',
+        'Hostel Fee',
+        'Other',
+      ],
       paymentMethod: ['Cash', 'UPI', 'Bank Transfer'],
       receiptStatus: ['Paid', 'Pending', 'Cancelled'],
     };
     for (const [key, options] of Object.entries(defaults)) {
-      await pool.query(
-        'INSERT INTO dropdown_options (list_key, options) VALUES ($1, $2) ON CONFLICT (list_key) DO NOTHING',
-        [key, options]
-      );
+      await putRecord<string[]>(APPWRITE_COLLECTIONS.dropdownOptions, key, options);
     }
   }
 }
@@ -299,16 +205,17 @@ const port = Number(process.env.PORT ?? 4000);
 const host = process.env.HOST ?? '0.0.0.0';
 
 try {
-  await ensureSchema();
-  await app.listen({ port, host });
-  console.log(`Backend listening on http://${host}:${port}`);
-  if (isAppwriteConfigured()) {
-    void syncAllToAppwrite('startup');
-  } else {
-    console.log(
-      'Appwrite mirror disabled (APPWRITE_API_KEY is not set).'
+  if (!isAppwriteConfigured()) {
+    throw new Error(
+      'APPWRITE_API_KEY is required. Add it to backend/.env and restart the backend.'
     );
   }
+  await ensureAppwriteSeed();
+  await app.listen({ port, host });
+  console.log(`Backend listening on http://${host}:${port}`);
+  console.log(
+    `Appwrite store connected: ${getAppwriteStatus().endpoint} | database ${getAppwriteStatus().databaseId}`
+  );
 } catch (err) {
   app.log.error(err);
   process.exit(1);

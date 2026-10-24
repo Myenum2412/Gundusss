@@ -1,13 +1,8 @@
 import net from 'node:net';
 
-// Fail fast when another backend/PGlite instance is already running.
-// PGlite opens the data directory before binding its port, so starting a
-// second copy used to initialize the DB, fail on EADDRINUSE, and risk
-// corrupting .pgdata. Checking the ports first keeps .pgdata single-writer.
-const checks = [
-  { port: Number(process.env.PORT ?? 4000), label: 'backend API' },
-  { port: 5433, label: 'PGlite database' },
-];
+// Fail fast when another backend instance is already running. Appwrite is the
+// primary data store now, so the old PGlite port is no longer required.
+const checks = [{ port: Number(process.env.PORT ?? 4000), label: 'backend API' }];
 
 function isListening(port) {
   return new Promise((resolve, reject) => {

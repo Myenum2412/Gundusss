@@ -12,7 +12,6 @@
     "dev:gateway": "npm --prefix payment-gateway run dev",
     "gateway:webhook": "npm --prefix payment-gateway run configure:fees-webhook",
     "gateway:install": "npm --prefix payment-gateway install",
-    "build": "npm run build --workspaces",
-    "db:up": "docker compose up -d postgres"
+    "build": "npm run build --workspaces"
   }
 }

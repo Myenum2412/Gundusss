@@ -1,15 +1,12 @@
-import { pool } from './db.js';
+import { createHash } from 'node:crypto';
 
 /**
- * Full-data mirror to Appwrite.
+ * Appwrite TablesDB is the primary data store for the fees app.
  *
- * Postgres remains the source of truth for payments, receipts, and the live
- * dashboard. After every successful mutation (and once at startup) this module
- * writes a complete snapshot of each app collection into one Appwrite
- * collection. That keeps Appwrite in sync without changing the transaction
- * boundaries that the payment flow depends on.
- *
- * The mirror is opt-in: it does nothing unless APPWRITE_API_KEY is set.
+ * Each app entity is a row in its own table. A row stores the entity's JSON
+ * payload plus the logical entity id, so the backend can keep the same API
+ * shapes the frontend already uses. Row ids are deterministic hashes of the
+ * logical id, which makes upserts safe without a transaction.
  */
 
 const ENDPOINT = (
@@ -18,69 +15,81 @@ const ENDPOINT = (
 const PROJECT_ID = (process.env.APPWRITE_PROJECT_ID ?? '6adaf4be003ae5c9e622').trim();
 const API_KEY = (process.env.APPWRITE_API_KEY ?? '').trim();
 const DATABASE_ID = (process.env.APPWRITE_DATABASE_ID ?? 'fees').trim();
-const COLLECTION_ID = (process.env.APPWRITE_STATE_COLLECTION_ID ?? 'app_state').trim();
-const SYNC_DEBOUNCE_MS = 750;
 
-export interface AppwriteSyncStatus {
+export const APPWRITE_COLLECTIONS = {
+  fees: 'fees',
+  users: 'users',
+  students: 'students',
+  studentGroups: 'student_groups',
+  feeStructures: 'fee_structures',
+  receipts: 'receipts',
+  announcements: 'announcements',
+  dropdownOptions: 'dropdown_options',
+  paymentOrders: 'payment_orders',
+  paymentEvents: 'payment_events',
+  paymentSettings: 'payment_settings',
+  businessProfiles: 'business_profiles',
+} as const;
+
+export type AppwriteCollection =
+  (typeof APPWRITE_COLLECTIONS)[keyof typeof APPWRITE_COLLECTIONS];
+
+export const APPWRITE_COLLECTION_IDS = Object.values(APPWRITE_COLLECTIONS);
+
+export interface StoredRecord<T> {
+  entityId: string;
+  data: T;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AppwriteStatus {
   configured: boolean;
   endpoint: string;
   projectId: string;
   databaseId: string;
-  collectionId: string;
-  lastSyncAt: string | null;
-  lastReason: string | null;
+  tables: string[];
+  missingTables: string[];
   lastError: string | null;
-  documentCount: number;
 }
 
-const status: AppwriteSyncStatus = {
-  configured: Boolean(API_KEY),
-  endpoint: ENDPOINT,
-  projectId: PROJECT_ID,
-  databaseId: DATABASE_ID,
-  collectionId: COLLECTION_ID,
-  lastSyncAt: null,
-  lastReason: null,
-  lastError: null,
-  documentCount: 0,
-};
-
-interface Snapshot {
-  id: string;
-  sql: string;
-}
-
-// Excludes users/password hashes on purpose. Everything else that the app
-// stores is mirrored as a complete JSON snapshot.
-const SNAPSHOTS: Snapshot[] = [
-  { id: 'fees', sql: 'SELECT * FROM fees ORDER BY id' },
-  { id: 'students', sql: 'SELECT * FROM students ORDER BY student_id' },
-  { id: 'student_groups', sql: 'SELECT * FROM student_groups ORDER BY group_id' },
-  { id: 'fee_structures', sql: 'SELECT * FROM fee_structures ORDER BY structure_id' },
-  { id: 'receipts', sql: 'SELECT * FROM receipts ORDER BY receipt_id' },
-  { id: 'announcements', sql: 'SELECT * FROM announcements ORDER BY announcement_id' },
-  { id: 'dropdown_options', sql: 'SELECT * FROM dropdown_options ORDER BY list_key' },
-  { id: 'payment_orders', sql: 'SELECT * FROM payment_orders ORDER BY created_at DESC' },
-  { id: 'payment_events', sql: 'SELECT * FROM payment_events ORDER BY created_at ASC, id ASC' },
-  { id: 'payment_settings', sql: 'SELECT * FROM payment_settings ORDER BY id' },
-  { id: 'business_profiles', sql: 'SELECT * FROM business_profiles ORDER BY id' },
-];
-
-let timer: ReturnType<typeof setTimeout> | null = null;
-let running = false;
-let queued = false;
+let lastError: string | null = null;
+let missingTables: string[] = [];
 
 export function isAppwriteConfigured(): boolean {
   return Boolean(API_KEY);
 }
 
-export function getAppwriteStatus(): AppwriteSyncStatus {
-  return { ...status };
+export function getAppwriteStatus(): AppwriteStatus {
+  return {
+    configured: Boolean(API_KEY),
+    endpoint: ENDPOINT,
+    projectId: PROJECT_ID,
+    databaseId: DATABASE_ID,
+    tables: APPWRITE_COLLECTION_IDS,
+    missingTables,
+    lastError,
+  };
 }
 
-function collectionPath(): string {
-  return `/databases/${encodeURIComponent(DATABASE_ID)}/collections/${encodeURIComponent(
-    COLLECTION_ID
+function requireConfig(): void {
+  if (!API_KEY) {
+    throw new Error(
+      'APPWRITE_API_KEY is not configured. Add it to backend/.env and restart the backend.'
+    );
+  }
+}
+
+function rowId(collection: AppwriteCollection, entityId: string): string {
+  return createHash('sha256')
+    .update(`${collection}\u0000${entityId}`)
+    .digest('hex')
+    .slice(0, 32);
+}
+
+function tablePath(collection: AppwriteCollection): string {
+  return `/tablesdb/${encodeURIComponent(DATABASE_ID)}/tables/${encodeURIComponent(
+    collection
   )}`;
 }
 
@@ -93,92 +102,190 @@ async function appwriteFetch(path: string, init: RequestInit = {}): Promise<Resp
       'X-Appwrite-Key': API_KEY,
       ...(init.headers ?? {}),
     },
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(30_000),
   });
 }
 
 async function responseDetail(res: Response): Promise<string> {
   const text = await res.text().catch(() => '');
-  return text.slice(0, 500);
+  return text.slice(0, 1_000);
 }
 
-async function upsertDocument(
-  documentId: string,
-  data: Record<string, unknown>
-): Promise<void> {
-  const path = collectionPath();
-  const create = await appwriteFetch(`${path}/documents`, {
-    method: 'POST',
-    body: JSON.stringify({ documentId, data }),
-  });
-  if (create.ok) return;
+async function assertOk(res: Response, action: string): Promise<void> {
+  if (res.ok) return;
+  const detail = await responseDetail(res);
+  lastError = `${action} failed (HTTP ${res.status}): ${detail}`;
+  throw new Error(lastError);
+}
 
-  if (create.status === 409) {
-    const update = await appwriteFetch(
-      `${path}/documents/${encodeURIComponent(documentId)}`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify({ data }),
-      }
+function query(method: string, values: unknown[]): string {
+  return JSON.stringify({ method, values });
+}
+
+function mapRow<T>(row: Record<string, unknown>): StoredRecord<T> {
+  const raw = row.payload;
+  if (typeof raw !== 'string') {
+    throw new Error('Appwrite row is missing its JSON payload.');
+  }
+  let data: T;
+  try {
+    data = JSON.parse(raw) as T;
+  } catch {
+    throw new Error('Appwrite row payload is not valid JSON.');
+  }
+  return {
+    entityId: String(row.entityId ?? ''),
+    data,
+    createdAt: String(row.createdAt ?? ''),
+    updatedAt: String(row.updatedAt ?? ''),
+  };
+}
+
+/** List every row in a table, following Appwrite pagination. */
+export async function listRecords<T>(
+  collection: AppwriteCollection
+): Promise<StoredRecord<T>[]> {
+  requireConfig();
+  const limit = 100;
+  let offset = 0;
+  const records: StoredRecord<T>[] = [];
+
+  while (true) {
+    const params = new URLSearchParams();
+    params.append('queries[]', query('limit', [limit]));
+    params.append('queries[]', query('offset', [offset]));
+    const res = await appwriteFetch(
+      `${tablePath(collection)}/rows?${params.toString()}`
     );
-    if (update.ok) return;
-    throw new Error(
-      `Appwrite update failed (${update.status}): ${await responseDetail(update)}`
-    );
+    await assertOk(res, `List ${collection}`);
+    const json = (await res.json()) as {
+      total?: number;
+      rows?: Record<string, unknown>[];
+    };
+    const rows = json.rows ?? [];
+    records.push(...rows.map((row) => mapRow<T>(row)));
+    if (rows.length < limit) break;
+    offset += limit;
+    if (typeof json.total === 'number' && offset >= json.total) break;
   }
 
-  throw new Error(
-    `Appwrite create failed (${create.status}): ${await responseDetail(create)}`
+  return records;
+}
+
+/** Read one row by its logical entity id. */
+export async function getRecord<T>(
+  collection: AppwriteCollection,
+  entityId: string
+): Promise<StoredRecord<T> | null> {
+  requireConfig();
+  const res = await appwriteFetch(
+    `${tablePath(collection)}/rows/${rowId(collection, entityId)}`
   );
+  if (res.status === 404) return null;
+  await assertOk(res, `Get ${collection}/${entityId}`);
+  return mapRow<T>((await res.json()) as Record<string, unknown>);
+}
+
+/** Create or replace one row. Appwrite's PUT is an upsert. */
+export async function putRecord<T>(
+  collection: AppwriteCollection,
+  entityId: string,
+  data: T
+): Promise<void> {
+  requireConfig();
+  const now = new Date().toISOString();
+  const res = await appwriteFetch(
+    `${tablePath(collection)}/rows/${rowId(collection, entityId)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        data: {
+          entityId,
+          payload: JSON.stringify(data),
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    }
+  );
+  await assertOk(res, `Save ${collection}/${entityId}`);
+}
+
+/** Delete one row; a missing row is treated as already deleted. */
+export async function deleteRecord(
+  collection: AppwriteCollection,
+  entityId: string
+): Promise<void> {
+  requireConfig();
+  const res = await appwriteFetch(
+    `${tablePath(collection)}/rows/${rowId(collection, entityId)}`,
+    { method: 'DELETE' }
+  );
+  if (res.status === 404) return;
+  await assertOk(res, `Delete ${collection}/${entityId}`);
+}
+
+async function mapLimit<T>(
+  items: T[],
+  limit: number,
+  run: (item: T) => Promise<void>
+): Promise<void> {
+  let index = 0;
+  const workers = Array.from(
+    { length: Math.min(limit, Math.max(items.length, 1)) },
+    async () => {
+      while (index < items.length) {
+        const item = items[index];
+        index += 1;
+        await run(item);
+      }
+    }
+  );
+  await Promise.all(workers);
 }
 
 /**
- * Write a complete snapshot of every collection to Appwrite.
- * Safe to call from an HTTP hook: it never throws.
+ * Replace a whole table, matching the frontend's "save the entire list"
+ * pattern. New rows are upserted; rows no longer present are deleted.
  */
-export async function syncAllToAppwrite(reason = 'manual'): Promise<void> {
-  if (!isAppwriteConfigured()) return;
-  if (running) {
-    queued = true;
-    return;
-  }
+export async function replaceAllRecords<T>(
+  collection: AppwriteCollection,
+  items: Array<{ entityId: string; data: T }>
+): Promise<void> {
+  requireConfig();
+  const existing = await listRecords<T>(collection);
+  const wanted = new Set(items.map((item) => item.entityId));
+  const stale = existing.filter((record) => !wanted.has(record.entityId));
 
-  running = true;
-  status.lastReason = reason;
-  try {
-    let documentCount = 0;
-    for (const snapshot of SNAPSHOTS) {
-      const { rows } = await pool.query(snapshot.sql);
-      await upsertDocument(snapshot.id, {
-        entity: snapshot.id,
-        payload: JSON.stringify(rows),
-        count: rows.length,
-        updatedAt: new Date().toISOString(),
-      });
-      documentCount += 1;
-    }
-    status.lastSyncAt = new Date().toISOString();
-    status.lastError = null;
-    status.documentCount = documentCount;
-  } catch (err) {
-    status.lastError = err instanceof Error ? err.message : String(err);
-    // Do not fail the request that triggered the mirror.
-    console.error('[Appwrite] sync failed:', status.lastError);
-  } finally {
-    running = false;
-    if (queued) {
-      queued = false;
-      void syncAllToAppwrite('queued');
-    }
-  }
+  await mapLimit(stale, 4, (record) => deleteRecord(collection, record.entityId));
+  await mapLimit(items, 4, (item) =>
+    putRecord(collection, item.entityId, item.data)
+  );
 }
 
-/** Debounced sync used by the server's onResponse hook. */
-export function scheduleAppwriteSync(reason = 'mutation'): void {
-  if (!isAppwriteConfigured()) return;
-  if (timer) clearTimeout(timer);
-  timer = setTimeout(() => {
-    timer = null;
-    void syncAllToAppwrite(reason);
-  }, SYNC_DEBOUNCE_MS);
+/** Return the table ids that do not exist in the configured database. */
+export async function checkAppwriteSetup(): Promise<string[]> {
+  requireConfig();
+  const missing: string[] = [];
+  for (const collection of APPWRITE_COLLECTION_IDS) {
+    const res = await appwriteFetch(tablePath(collection));
+    if (res.status === 404) {
+      missing.push(collection);
+      continue;
+    }
+    await assertOk(res, `Check ${collection}`);
+  }
+  missingTables = missing;
+  return missing;
+}
+
+/** Fail fast at boot with an actionable message when the schema is missing. */
+export async function assertAppwriteSetup(): Promise<void> {
+  const missing = await checkAppwriteSetup();
+  if (missing.length > 0) {
+    throw new Error(
+      `Appwrite tables are missing: ${missing.join(', ')}. ` +
+        'Run: npm run appwrite:setup --workspace=backend'
+    );
+  }
 }
