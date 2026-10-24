@@ -34,6 +34,7 @@ interface SettingsBody {
 interface GatewayInfo {
   connected: boolean;
   synced?: boolean;
+  pendingSync?: boolean;
   upiId?: string;
   payeeName?: string;
   error?: string;
@@ -94,6 +95,7 @@ async function fetchGatewaySettings(): Promise<GatewayInfo> {
   } catch {
     return {
       connected: false,
+      pendingSync: true,
       error: 'YOUPI PG is not reachable. Start the gateway to sync the checkout UPI ID.',
     };
   }
@@ -138,9 +140,29 @@ async function syncGatewaySettings(upiId: string, payeeName: string): Promise<Ga
     return {
       connected: false,
       synced: false,
-      error: 'Saved locally, but YOUPI PG is not reachable. The checkout will keep the gateway’s current UPI ID until it is restarted.',
+      pendingSync: true,
+      error: 'YOUPI PG is offline right now. The UPI ID is saved and will sync before the next checkout.',
     };
   }
+}
+
+/**
+ * Make sure a saved UPI ID reaches the gateway before a new checkout starts.
+ * This closes the gap where a save happened while YOUPI PG was offline.
+ */
+export async function ensureGatewayUpiSynced(): Promise<GatewayInfo | null> {
+  const local = await readLocalSettings();
+  const upiId = local?.upi_id?.trim() ?? '';
+  if (!upiId) return null;
+
+  const payeeName = local?.payee_name?.trim() || DEFAULT_PAYEE_NAME;
+  const current = await fetchGatewaySettings();
+  if (!current.connected) return current;
+
+  if (current.upiId === upiId && (current.payeeName ?? '') === payeeName) {
+    return { ...current, synced: true };
+  }
+  return syncGatewaySettings(upiId, payeeName);
 }
 
 function validateQrDataUrl(value: unknown): { ok: true; value: string } | { ok: false; error: string } {
@@ -193,15 +215,27 @@ function validateQrDataUrl(value: unknown): { ok: true; value: string } | { ok: 
   return { ok: true, value: `data:image/${mime};base64,${bytes.toString('base64')}` };
 }
 
-async function generateQrDataUrl(upiId: string, payeeName: string): Promise<string> {
+function normalizePreviewAmount(value: unknown): string {
+  if (value === undefined || value === null || value === '') return '';
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return '';
+  return amount.toFixed(2);
+}
+
+async function generateQrDataUrl(
+  upiId: string,
+  payeeName: string,
+  amount = ''
+): Promise<string> {
   if (!VPA_RE.test(upiId)) return '';
   const payee = payeeName || DEFAULT_PAYEE_NAME;
-  const cacheKey = `${upiId}\u0000${payee}`;
+  const cacheKey = `${upiId}\u0000${payee}\u0000${amount}`;
   const cached = qrCache.get(cacheKey);
   if (cached) return cached;
 
   try {
     const params = new URLSearchParams({ pa: upiId, pn: payee, cu: 'INR' });
+    if (amount) params.set('am', amount);
     const dataUrl = await QRCode.toDataURL(`upi://pay?${params.toString()}`, {
       width: 512,
       margin: 2,
@@ -258,11 +292,28 @@ export async function paymentSettingsRoutes(app: FastifyInstance) {
 
   // GET /api/payments/settings/qr — live QR preview for unsaved form values.
   app.get('/api/payments/settings/qr', async (req) => {
-    const q = (req.query ?? {}) as { upiId?: string; payeeName?: string };
+    const q = (req.query ?? {}) as {
+      upiId?: string;
+      payeeName?: string;
+      amount?: string;
+    };
     const upiId = (q.upiId ?? '').trim();
     const payeeName = (q.payeeName ?? '').trim().slice(0, 120) || DEFAULT_PAYEE_NAME;
+    const amount = normalizePreviewAmount(q.amount);
     if (!VPA_RE.test(upiId)) return { data: { qrDataUrl: '' } };
-    return { data: { qrDataUrl: await generateQrDataUrl(upiId, payeeName) } };
+    return {
+      data: { qrDataUrl: await generateQrDataUrl(upiId, payeeName, amount) },
+    };
+  });
+
+  // POST /api/payments/settings/sync — retry a pending gateway sync.
+  app.post('/api/payments/settings/sync', async () => {
+    const local = await readLocalSettings();
+    const upiId = local?.upi_id?.trim() ?? '';
+    const gateway = upiId
+      ? await syncGatewaySettings(upiId, local?.payee_name?.trim() || DEFAULT_PAYEE_NAME)
+      : await fetchGatewaySettings();
+    return { data: await presentSettings(local, gateway) };
   });
 
   // PUT /api/payments/settings — save UPI ID / payee / QR and sync the VPA.

@@ -2,7 +2,7 @@ import { API_BASE } from "./api-base"
 
 const BASE = API_BASE
 
-export type PaymentMethod = "UPI" | "COD" | "CASH_COUNTER" | "CARD_COUNTER"
+export type PaymentMethod = "UPI" | "CASH_COUNTER" | "CARD_COUNTER"
 
 export interface PaymentEvent {
   id: number | string
@@ -46,7 +46,6 @@ export interface CreatePaymentInput {
 
 export const PAYMENT_METHOD_LABELS: Record<string, string> = {
   UPI: "UPI",
-  COD: "Cash on delivery",
   CASH_COUNTER: "Cash at counter",
   CARD_COUNTER: "Card at counter",
 }
@@ -55,7 +54,6 @@ export const PAYMENT_METHOD_NOTES: Record<string, string> = {
   UPI: "Pay now with any UPI app using a single-use QR.",
   CASH_COUNTER: "Create a counter pass and collect cash at the office.",
   CARD_COUNTER: "Create a counter pass and collect card payment at the office.",
-  COD: "Creates a COD order. The fee stays unpaid until cash is actually collected.",
 }
 
 export function paymentMethodLabel(method: string): string {
@@ -173,10 +171,18 @@ export function savePaymentSettings(
 
 export function getPreviewQr(
   upiId: string,
-  payeeName: string
+  payeeName: string,
+  amount?: number | string
 ): Promise<{ qrDataUrl: string }> {
   const params = new URLSearchParams({ upiId, payeeName })
+  if (amount !== undefined && amount !== "") params.set("amount", String(amount))
   return request<{ qrDataUrl: string }>(
     `/api/payments/settings/qr?${params.toString()}`
   )
+}
+
+export function syncPaymentSettings(): Promise<PaymentSettings> {
+  return request<PaymentSettings>("/api/payments/settings/sync", {
+    method: "POST",
+  })
 }

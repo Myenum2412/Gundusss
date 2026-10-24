@@ -103,21 +103,15 @@ repo. The Payments page supports every method exposed by the gateway:
 | `UPI` | In-app YOUPI checkout with a single-use QR | Yes, after the signed webhook |
 | `CASH_COUNTER` | Counter instructions; staff confirms in Payments | Yes, after the signed webhook |
 | `CARD_COUNTER` | Counter instructions; staff confirms in Payments | Yes, after the signed webhook |
-| `COD` | Cash-on-delivery order placed in the YOUPI checkout | No. `SUCCESS` only means the order was placed |
 
-UPI and COD use the embedded gateway checkout. Counter payments start as
-`ACTIVE`, show the amount to collect, and are confirmed or declined from the
-payment row. YOUPI PG still sends the signed server-to-server webhook when a
+UPI uses the embedded gateway checkout. Counter payments start as `ACTIVE`,
+show the amount to collect, and are confirmed or declined from the payment row. YOUPI PG still sends the signed server-to-server webhook when a
 counter payment is confirmed or a UPI transfer is verified. The backend verifies
 the HMAC over the raw body, then:
 
 - marks the matching row in `fees` as `paid` (explicit `feeId`, otherwise a
   pending/overdue fee matching the student name and amount), and
 - creates exactly one receipt (`RCP-00x`) per order, idempotently.
-
-> **COD rule:** a COD `SUCCESS` webhook means the order was placed, not that
-> cash was received. The backend deliberately does not create a receipt or mark
-> the fee paid for COD.
 
 The shared webhook secret is `COIN_STORE_WEBHOOK_SECRET` in
 `payment-gateway/.env` and `YOUPI_WEBHOOK_SECRET` in `backend/.env`. Both files
@@ -130,13 +124,17 @@ Open **Dashboard → Payments → UPI payment setup**:
 1. Enter the merchant **UPI ID** (for example `school@okhdfcbank`) and payee
    name.
 2. Optionally upload the merchant **QR image** (PNG, JPG or WebP, max 2 MB).
-3. Check the live checkout preview and click **Save payment setup**.
+3. Set the **Preview amount** to test the live checkout preview. The amount is
+   embedded in the generated QR (`am`), so the QR and the amount label always
+   match. This value is preview-only and does not change the saved fee amount.
+4. Click **Save payment setup**.
 
 Saving stores the profile in `payment_settings` and syncs the UPI ID / payee
 name to the gateway's active receiving account through
 `POST /api/v1/admin/upi-settings`. If the gateway is offline, the profile is
-still saved locally and the card shows a warning; retry once the gateway is
-running.
+still saved locally, the card shows a pending-sync notice, and the backend
+retries the sync before the next checkout. **Retry sync** is available in the
+card.
 
 > **QR note:** the uploaded QR is your merchant QR for the in-app preview and
 > display. At checkout YOUPI PG creates a fresh **amount-specific** QR from the
@@ -153,15 +151,6 @@ emits the signed webhook, which creates the receipt and marks the fee paid.
 **Decline** calls `POST /api/v1/admin/counter-decline` and closes the order as
 `FAILED`. Counter confirmation requires the shared admin token described above.
 
-### Cash on delivery (COD)
-
-COD orders can be created and tracked, but the gateway requires COD to be
-enabled for the merchant in YOUPI merchant settings. The customer completes the
-COD step in the checkout. A resulting `SUCCESS` is an order-placed event only:
-the Payments table shows `SUCCESS` plus a `COD_PLACED` marker and “Cash due”,
-and the fee remains unpaid. YOUPI PG does not expose a COD cash-collection
-endpoint, so collect the cash through a separate process.
-
 ### Payment status lifecycle
 
 YOUPI PG lifecycle statuses:
@@ -169,9 +158,9 @@ YOUPI PG lifecycle statuses:
 `INITIATED`, `QUEUED`, `ACTIVE`, `PROCESSING`, `SUCCESS`, `FAILED`, `EXPIRED`,
 `CANCELLED`
 
-The app also displays `SUSPICIOUS`, `BLOCKED`, `REFUNDED`, and a derived
-`COD_PLACED` marker. Every payment has a colored status badge and a **History**
-timeline backed by the append-only `payment_events` table. Use the status filter
+The app also displays `SUSPICIOUS`, `BLOCKED`, and `REFUNDED`. Every payment has
+a colored status badge and a **History** timeline backed by the append-only
+`payment_events` table. Use the status filter
 above the table to view every state.
 
 - `GET /api/payments/:id` reconciles non-terminal display status with the
@@ -229,12 +218,13 @@ docker compose up --build
 - `PUT /api/fees/:id`
 - `DELETE /api/fees/:id`
 - `POST /api/payments/create` `{ studentId?, studentName, amount, feeId?, description?, method? }`
-  (`method`: `UPI`, `COD`, `CASH_COUNTER`, or `CARD_COUNTER`; defaults to `UPI`)
+  (`method`: `UPI`, `CASH_COUNTER`, or `CARD_COUNTER`; defaults to `UPI`)
 - `GET /api/payments`
 - `GET /api/payments/:id` (includes the `events` lifecycle timeline)
 - `POST /api/payments/:id/counter-confirm` `{ operatorId? }`
 - `POST /api/payments/:id/counter-decline` `{ reason?, operatorId? }`
 - `GET /api/payments/settings`
 - `PUT /api/payments/settings` `{ upiId, payeeName, qrCodeDataUrl? }`
-- `GET /api/payments/settings/qr?upiId=&payeeName=` (live QR preview)
+- `GET /api/payments/settings/qr?upiId=&payeeName=&amount=` (live QR preview)
+- `POST /api/payments/settings/sync` (retry a pending YOUPI PG UPI sync)
 - `POST /api/payments/webhook` (YOUPI PG → backend, HMAC-SHA256 verified)

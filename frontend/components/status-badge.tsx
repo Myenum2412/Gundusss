@@ -23,8 +23,6 @@ function toneFor(value: string): string {
       "created",
       "queued",
       "processing",
-      "awaiting_cash",
-      "cod_placed",
     ].includes(v)
   ) {
     return tones.amber
@@ -45,7 +43,7 @@ function toneFor(value: string): string {
   ) {
     return tones.red
   }
-  if (["refunded", "announcement", "cod"].includes(v)) return tones.blue
+  if (["refunded", "announcement"].includes(v)) return tones.blue
   return tones.neutral
 }
 

@@ -36,7 +36,6 @@ import {
   QrCodeIcon,
   RefreshCwIcon,
   TriangleAlertIcon,
-  TruckIcon,
   XIcon,
   type LucideIcon,
 } from "lucide-react"
@@ -70,7 +69,6 @@ const METHOD_ICONS: Record<string, LucideIcon> = {
   UPI: QrCodeIcon,
   CASH_COUNTER: BanknoteIcon,
   CARD_COUNTER: CreditCardIcon,
-  COD: TruckIcon,
 }
 
 function formatAmount(value: string | number) {
@@ -101,10 +99,6 @@ function isCounterMethod(method: string) {
 
 function isPaid(order: PaymentOrder) {
   return order.status === "SUCCESS" && !!order.receiptId
-}
-
-function isCodPlaced(order: PaymentOrder) {
-  return order.method === "COD" && order.status === "SUCCESS" && !order.receiptId
 }
 
 function MethodCell({ method }: { method: string }) {
@@ -146,15 +140,11 @@ export default function PaymentsPage() {
 
   const filteredOrders = useMemo(() => {
     if (statusFilter === "ALL") return orders
-    if (statusFilter === "COD_PLACED") return orders.filter(isCodPlaced)
     return orders.filter((order) => normalizeStatus(order.status) === statusFilter)
   }, [orders, statusFilter])
 
   const paid = orders.filter(isPaid)
-  const codPlaced = orders.filter(isCodPlaced)
-  const awaiting = orders.filter(
-    (order) => !TERMINAL.has(order.status) || isCodPlaced(order)
-  ).length
+  const awaiting = orders.filter((order) => !TERMINAL.has(order.status)).length
   const receipts = paid.length
   const collected = paid.reduce(
     (sum, order) => sum + (Number(order.amount) || 0),
@@ -174,7 +164,7 @@ export default function PaymentsPage() {
     {
       name: "Awaiting payment",
       value: String(awaiting),
-      change: codPlaced.length > 0 ? `${codPlaced.length} COD due` : "live",
+      change: "live",
       changeType: "neutral" as const,
     },
     {
@@ -246,7 +236,7 @@ export default function PaymentsPage() {
     >
       <PageHeader
         title="Payments"
-        description="Collect fees via UPI, cash or card at the counter, or COD through YOUPI PG. Verified payments create a receipt and mark the matching fee paid automatically."
+        description="Collect fees via UPI or cash/card at the counter. Verified payments create a receipt and mark the matching fee paid automatically."
         meta={
           <span className="flex items-center gap-2">
             <span className="inline-flex h-6 items-center rounded-full border bg-card px-2.5 text-xs font-medium text-muted-foreground">
@@ -331,7 +321,6 @@ export default function PaymentsPage() {
                 {status}
               </option>
             ))}
-            <option value="COD_PLACED">COD placed (cash due)</option>
           </select>
         </div>
         <p className="text-xs text-muted-foreground">
@@ -373,7 +362,7 @@ export default function PaymentsPage() {
                     <EmptyState
                       icon={QrCodeIcon}
                       title="No payments yet"
-                      hint="Click Collect payment above to start a UPI, counter, or COD checkout."
+                      hint="Click Collect payment above to start a UPI or counter checkout."
                     />
                   </TableCell>
                 </TableRow>
@@ -390,7 +379,6 @@ export default function PaymentsPage() {
               ) : (
                 filteredOrders.map((order, index) => {
                   const busy = actionId === order.orderId
-                  const codPlaced = isCodPlaced(order)
                   const counter = isCounterMethod(order.method)
 
                   return (
@@ -416,21 +404,11 @@ export default function PaymentsPage() {
                         {formatAmount(order.amount)}
                       </TableCell>
                       <TableCell>
-                        <div className="flex flex-col gap-0.5">
-                          <MethodCell method={order.method} />
-                          {codPlaced && (
-                            <span className="text-[10px] leading-tight text-muted-foreground">
-                              Cash due
-                            </span>
-                          )}
-                        </div>
+                        <MethodCell method={order.method} />
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col items-start gap-1">
-                          <div className="flex flex-wrap items-center gap-1">
-                            <StatusBadge value={order.status} />
-                            {codPlaced && <StatusBadge value="COD_PLACED" />}
-                          </div>
+                          <StatusBadge value={order.status} />
                           {order.status === "PROCESSING" &&
                           order.gatewayStatus === "SUCCESS" ? (
                             <span className="text-[10px] leading-tight text-muted-foreground">
@@ -440,11 +418,6 @@ export default function PaymentsPage() {
                           {counter && !TERMINAL.has(order.status) ? (
                             <span className="text-[10px] leading-tight text-muted-foreground">
                               Awaiting counter confirmation
-                            </span>
-                          ) : null}
-                          {codPlaced ? (
-                            <span className="text-[10px] leading-tight text-muted-foreground">
-                              Fee not marked paid
                             </span>
                           ) : null}
                         </div>
@@ -522,8 +495,7 @@ export default function PaymentsPage() {
               {orders.length} order{orders.length === 1 ? "" : "s"}
             </span>
             <span className="hidden sm:block">
-              Webhook-verified payments create a receipt automatically. COD
-              stays unpaid until cash is collected.
+              Webhook-verified payments create a receipt automatically.
             </span>
           </div>
         )}

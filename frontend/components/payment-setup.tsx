@@ -26,6 +26,7 @@ import {
   getPaymentSettings,
   getPreviewQr,
   savePaymentSettings,
+  syncPaymentSettings,
   type PaymentSettings,
 } from "@/lib/payments"
 import { cn } from "cn"
@@ -72,9 +73,11 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
   const [previewAmount, setPreviewAmount] = useState("2500")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [noticeTone, setNoticeTone] = useState<"success" | "warning">("success")
   const fileRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
@@ -111,8 +114,11 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
     }
 
     let active = true
+    const amount = Number(previewAmount)
+    const qrAmount =
+      Number.isFinite(amount) && amount > 0 ? amount : undefined
     const timer = setTimeout(() => {
-      getPreviewQr(vpa, payeeName.trim())
+      getPreviewQr(vpa, payeeName.trim(), qrAmount)
         .then((result) => {
           if (active) setPreviewQr(result.qrDataUrl || "")
         })
@@ -125,7 +131,7 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
       active = false
       clearTimeout(timer)
     }
-  }, [upiId, payeeName, qr])
+  }, [upiId, payeeName, qr, previewAmount])
 
   function readFile(file: File) {
     setError(null)
@@ -185,13 +191,17 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
       setPayeeName(next.payeeName)
       setQr(next.qrCodeDataUrl)
       if (next.gateway?.synced) {
+        setNoticeTone("success")
         setNotice("Saved and synced to YOUPI PG. New checkouts will use this UPI ID.")
-      } else {
+      } else if (next.gateway?.connected) {
+        setNoticeTone("warning")
         setNotice(
-          `Saved in the fees app. ${
-            next.gateway?.error ||
-            "YOUPI PG did not confirm the sync, so it may still use its previous UPI ID."
-          }`
+          "Saved in the fees app. YOUPI PG did not confirm the sync yet. Retry sync once the gateway is available."
+        )
+      } else {
+        setNoticeTone("warning")
+        setNotice(
+          "Saved in the fees app. YOUPI PG is offline, so the sync is pending. It will be applied automatically before the next checkout."
         )
       }
       onSaved?.()
@@ -199,6 +209,34 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
       setError(err instanceof Error ? err.message : "Could not save UPI settings.")
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function retrySync() {
+    setSyncing(true)
+    setError(null)
+    try {
+      const next = await syncPaymentSettings()
+      setSettings(next)
+      setUpiId(next.upiId)
+      setPayeeName(next.payeeName)
+      setQr(next.qrCodeDataUrl)
+      if (next.gateway?.synced) {
+        setNoticeTone("success")
+        setNotice("Synced to YOUPI PG. New checkouts will use this UPI ID.")
+      } else {
+        setNoticeTone("warning")
+        setNotice(
+          "YOUPI PG is still offline. The UPI ID stays saved and will sync before the next checkout."
+        )
+      }
+    } catch (err) {
+      setNotice(null)
+      setError(
+        err instanceof Error ? err.message : "Could not sync the UPI settings."
+      )
+    } finally {
+      setSyncing(false)
     }
   }
 
@@ -448,14 +486,43 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
             </div>
           )}
           {!error && notice && (
-            <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400">
-              <CircleCheckIcon className="mt-0.5 size-4 shrink-0" />
-              <span>{notice}</span>
+            <div
+              className={cn(
+                "flex items-start gap-2 rounded-lg border px-3 py-2 text-sm",
+                noticeTone === "success"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400"
+                  : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300"
+              )}
+            >
+              {noticeTone === "success" ? (
+                <CircleCheckIcon className="mt-0.5 size-4 shrink-0" />
+              ) : (
+                <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
+              )}
+              <span className="min-w-0 flex-1">{notice}</span>
+              {settings?.gateway && !settings.gateway.synced && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void retrySync()}
+                  disabled={syncing}
+                >
+                  {syncing ? (
+                    <Loader2Icon className="animate-spin" />
+                  ) : (
+                    <RefreshCwIcon />
+                  )}
+                  Retry sync
+                </Button>
+              )}
             </div>
           )}
-          {!error && !notice && settings?.gateway?.error && (
+          {!error && !notice && settings?.gateway && !settings.gateway.synced && (
             <p className="text-xs text-muted-foreground">
-              Gateway: {settings.gateway.error}
+              {settings.gateway.connected
+                ? "YOUPI PG has not confirmed this UPI ID yet. Save the setup or use Retry sync."
+                : "YOUPI PG is offline. The saved UPI ID will sync before the next checkout."}
             </p>
           )}
         </form>

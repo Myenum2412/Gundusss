@@ -2,12 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import type { PoolClient } from 'pg';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { pool, query } from '../db.js';
+import { ensureGatewayUpiSynced } from './payment-settings.js';
 
 const YOUPI_API = (process.env.YOUPI_PAYMENT_API_URL ?? 'http://localhost:6100').replace(/\/+$/, '');
 const YOUPI_WEBHOOK_SECRET = process.env.YOUPI_WEBHOOK_SECRET ?? '';
 const YOUPI_ADMIN_TOKEN = (process.env.YOUPI_ADMIN_TOKEN ?? '').trim();
 
-const PAYMENT_METHODS = ['UPI', 'COD', 'CASH_COUNTER', 'CARD_COUNTER'] as const;
+const PAYMENT_METHODS = ['UPI', 'CASH_COUNTER', 'CARD_COUNTER'] as const;
 type PaymentMethodValue = (typeof PAYMENT_METHODS)[number];
 const COUNTER_METHODS = new Set<string>(['CASH_COUNTER', 'CARD_COUNTER']);
 
@@ -278,7 +279,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     const method = normalizePaymentMethod(body.method);
     if (!method) {
       return reply.code(400).send({
-        error: 'Invalid payment method. Use UPI, COD, CASH_COUNTER, or CARD_COUNTER.',
+        error: 'Invalid payment method. Use UPI, CASH_COUNTER, or CARD_COUNTER.',
       });
     }
 
@@ -303,6 +304,16 @@ export async function paymentRoutes(app: FastifyInstance) {
         source: 'fees-monorepo',
       },
     };
+
+    // A save made while YOUPI PG was offline is retried here, so the new
+    // checkout uses the UPI ID shown in the fees app.
+    const upiSync = await ensureGatewayUpiSynced();
+    if (upiSync?.error) {
+      app.log.warn(
+        { gatewayError: upiSync.error },
+        'YOUPI PG UPI settings were not synced before checkout'
+      );
+    }
 
     let upstream: Response;
     try {
@@ -359,10 +370,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       gatewayStatus: initialStatus,
       method,
       source: 'create',
-      message:
-        method === 'COD'
-          ? 'COD order created; cash is due on delivery.'
-          : `${method.replace('_', ' ')} payment session created.`,
+      message: `${method.replace('_', ' ')} payment session created.`,
     });
 
     return reply.code(upstream.ok ? 200 : 201).send({
@@ -402,14 +410,11 @@ export async function paymentRoutes(app: FastifyInstance) {
 
       if (gatewayStatus && KNOWN_STATUSES.has(gatewayStatus)) {
         // A gateway SUCCESS without a receipt stays PROCESSING until the signed
-        // webhook lands and creates the receipt. COD is the exception: a COD
-        // SUCCESS means the order was placed, not that money arrived, so there
-        // is no receipt to wait for and the fee stays unpaid. The CASE also
-        // stops a slow poll from regressing a webhook-settled SUCCESS.
+        // webhook lands and creates the receipt. The CASE also stops a slow
+        // poll from regressing a webhook-settled SUCCESS.
         const method = (gateway?.method ?? order.method ?? '').toUpperCase();
-        const codPlaced = gatewayStatus === 'SUCCESS' && method === 'COD';
         const displayStatus =
-          gatewayStatus === 'SUCCESS' && !order.receiptId && !codPlaced
+          gatewayStatus === 'SUCCESS' && !order.receiptId
             ? 'PROCESSING'
             : gatewayStatus;
         const changed =
@@ -440,10 +445,7 @@ export async function paymentRoutes(app: FastifyInstance) {
             gatewayStatus: order.gatewayStatus,
             method: order.method,
             source: 'gateway-poll',
-            message:
-              codPlaced && gatewayStatus === 'SUCCESS'
-                ? 'COD order placed; cash is due on delivery.'
-                : `Gateway reported ${gatewayStatus}.`,
+            message: `Gateway reported ${gatewayStatus}.`,
           });
         }
       }
@@ -665,8 +667,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     const metaStudentName = typeof meta.studentName === 'string' ? meta.studentName : '';
 
     // Only receipt money that was actually received.
-    // "SUCCESS" with method "COD" means cash on delivery is still outstanding.
-    const moneyReceived = event === 'SUCCESS' && method !== 'COD';
+    const moneyReceived = event === 'SUCCESS';
 
     // Hold the order at PROCESSING until the receipt exists, so the UI never
     // shows "paid" without its receipt being recorded.
@@ -728,11 +729,9 @@ export async function paymentRoutes(app: FastifyInstance) {
       method: currentMethod,
       source: 'webhook',
       message:
-        currentStatus === 'SUCCESS' && currentMethod === 'COD'
-          ? 'COD order placed; cash is due on delivery.'
-          : moneyReceived && currentStatus === 'PROCESSING'
-            ? 'Gateway verified the payment; creating the receipt.'
-            : `Gateway reported ${event}.`,
+        moneyReceived && currentStatus === 'PROCESSING'
+          ? 'Gateway verified the payment; creating the receipt.'
+          : `Gateway reported ${event}.`,
     });
 
     if (moneyReceived) {

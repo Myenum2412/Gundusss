@@ -32,7 +32,6 @@ import {
   QrCodeIcon,
   RefreshCwIcon,
   TriangleAlertIcon,
-  TruckIcon,
   WalletIcon,
   type LucideIcon,
 } from "lucide-react"
@@ -59,7 +58,6 @@ const METHOD_OPTIONS: Array<{
   { value: "UPI", label: "UPI", icon: QrCodeIcon },
   { value: "CASH_COUNTER", label: "Cash at counter", icon: BanknoteIcon },
   { value: "CARD_COUNTER", label: "Card at counter", icon: CreditCardIcon },
-  { value: "COD", label: "Cash on delivery", icon: TruckIcon },
 ]
 
 function formatInr(value: string | number) {
@@ -177,10 +175,7 @@ export function PayWithGateway({
           feeId,
           method: selectedMethod,
         })
-        if (
-          !created.checkoutUrl &&
-          (selectedMethod === "UPI" || selectedMethod === "COD")
-        ) {
+        if (!created.checkoutUrl && selectedMethod === "UPI") {
           throw new Error("Payment gateway did not return a checkout URL")
         }
         setOrder(created)
@@ -240,7 +235,6 @@ export function PayWithGateway({
   const activeMethod = (order?.method || method) as PaymentMethod
   const isCounter =
     activeMethod === "CASH_COUNTER" || activeMethod === "CARD_COUNTER"
-  const isCod = activeMethod === "COD"
   const methodLabel = paymentMethodLabel(activeMethod)
 
   const successful = order?.status === "SUCCESS"
@@ -310,9 +304,7 @@ export function PayWithGateway({
           <DialogHeader>
             <DialogTitle className="text-base font-semibold tracking-tight">
               {successful
-                ? isCod
-                  ? "COD order placed"
-                  : "Payment received"
+                ? "Payment received"
                 : processing
                   ? "Confirming payment"
                   : showForm
@@ -323,9 +315,7 @@ export function PayWithGateway({
             </DialogTitle>
             <DialogDescription>
               {successful
-                ? isCod
-                  ? "The COD order is placed. Cash is due on delivery; the fee stays unpaid until cash is collected."
-                  : "The receipt has been recorded automatically."
+                ? "The receipt has been recorded automatically."
                 : processing
                   ? isCounter
                     ? "The counter confirmed the payment. The receipt is being recorded now."
@@ -522,23 +512,14 @@ export function PayWithGateway({
                           </p>
                         </div>
                       ) : (
-                        <>
-                          {isCod && (
-                            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
-                              This is a Cash on Delivery order. Complete the COD
-                              step in the checkout. The fee is not marked paid
-                              until cash is collected.
-                            </p>
-                          )}
-                          <div className="overflow-hidden rounded-xl border bg-muted/30">
-                            <iframe
-                              src={order.checkoutUrl}
-                              title={`YOUPI PG ${methodLabel} checkout`}
-                              className="h-[540px] w-full border-0"
-                              allow="clipboard-write"
-                            />
-                          </div>
-                        </>
+                        <div className="overflow-hidden rounded-xl border bg-muted/30">
+                          <iframe
+                            src={order.checkoutUrl}
+                            title={`YOUPI PG ${methodLabel} checkout`}
+                            className="h-[540px] w-full border-0"
+                            allow="clipboard-write"
+                          />
+                        </div>
                       )}
 
                       <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
@@ -546,9 +527,7 @@ export function PayWithGateway({
                           <Loader2Icon className="size-3.5 animate-spin" />
                           {isCounter
                             ? "Waiting for the counter…"
-                            : isCod
-                              ? "Waiting for the COD order to be placed…"
-                              : "Waiting for UPI confirmation…"}
+                            : "Waiting for UPI confirmation…"}
                         </span>
                         {!isCounter && (
                           <a
@@ -593,32 +572,18 @@ export function PayWithGateway({
                 )}
 
                 {successful && order && (
-                  <div
-                    className={
-                      isCod
-                        ? "flex flex-col items-center gap-3 rounded-xl border border-sky-200 bg-sky-50/60 px-6 py-10 text-center dark:border-sky-500/20 dark:bg-sky-500/10"
-                        : "flex flex-col items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50/60 px-6 py-10 text-center dark:border-emerald-500/20 dark:bg-emerald-500/10"
-                    }
-                  >
-                    {isCod ? (
-                      <TruckIcon className="size-8 text-sky-600 dark:text-sky-400" />
-                    ) : (
-                      <CircleCheckIcon className="size-8 text-emerald-600 dark:text-emerald-400" />
-                    )}
+                  <div className="flex flex-col items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50/60 px-6 py-10 text-center dark:border-emerald-500/20 dark:bg-emerald-500/10">
+                    <CircleCheckIcon className="size-8 text-emerald-600 dark:text-emerald-400" />
                     <p className="text-sm font-semibold text-foreground">
-                      {isCod ? "COD order placed" : "Payment confirmed"}
+                      Payment confirmed
                     </p>
                     <p className="max-w-sm text-sm text-muted-foreground">
-                      {isCod
-                        ? `${formatInr(order.amount)} is due in cash on delivery. No receipt has been created yet.`
-                        : `${formatInr(order.amount)} received via ${methodLabel}.`}
+                      {formatInr(order.amount)} received via {methodLabel}.
                     </p>
                     {order.receiptId ? (
                       <p className="rounded-full border bg-card px-3 py-1 text-xs font-medium">
                         Receipt {order.receiptId}
                       </p>
-                    ) : isCod ? (
-                      <StatusBadge value="COD_PLACED" />
                     ) : (
                       <p className="text-xs text-muted-foreground">
                         Receipt is being recorded…
