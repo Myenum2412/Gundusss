@@ -1,31 +1,46 @@
 @echo off
+setlocal
 cd /d "%~dp0"
+chcp 65001 >nul
 
-echo Starting backend (Appwrite primary database)...
-start "Backend" cmd /c "npm run dev --workspace=backend"
+title Fees - dev (all services)
 
-echo Starting frontend...
-start "Frontend" cmd /c "npm run dev --workspace=frontend"
+where node >nul 2>nul
+if errorlevel 1 (
+  echo Node.js is required. Install Node 20+ from https://nodejs.org and try again.
+  pause
+  exit /b 1
+)
 
-echo Starting YOUPI PG payment gateway...
-start "YOUPI PG" cmd /c "npm --prefix payment-gateway run dev"
+if not exist "backend\.env" (
+  echo [!] backend\.env is missing.
+  echo     copy backend\.env.example backend\.env
+  echo     then set APPWRITE_API_KEY in backend\.env
+  pause
+  exit /b 1
+)
+
+if not exist "node_modules" (
+  echo Installing workspace dependencies...
+  call npm install
+  if errorlevel 1 (
+    echo npm install failed.
+    pause
+    exit /b 1
+  )
+)
 
 echo.
-echo Services are starting in separate windows:
-echo   Backend:      http://localhost:4000
-echo   Database:     Appwrite (project 6adaf4be003ae5c9e622)
-echo   Frontend:     http://localhost:3000
-echo   Payment API:  http://localhost:6100
-echo   Checkout:     http://localhost:7000
-echo   Merchant:     http://localhost:6001
+echo Starting backend, frontend and payment gateway in this window...
 echo.
-echo First run only:
-echo   1. copy backend\.env.example backend\.env
-echo   2. set APPWRITE_API_KEY in backend\.env
-echo   3. npm run appwrite:setup --workspace=backend
-echo   4. copy payment-gateway\.env.example payment-gateway\.env
-echo   5. set matching YOUPI_ADMIN_TOKEN / ADMIN_API_TOKEN in both files
-echo   6. npm run gateway:install
-echo   7. npm run gateway:webhook
-echo.
-pause
+
+node scripts\dev.mjs %*
+set "DEV_EXIT=%ERRORLEVEL%"
+
+if not "%DEV_EXIT%"=="0" (
+  echo.
+  echo Dev session ended with exit code %DEV_EXIT%.
+  pause
+)
+
+exit /b %DEV_EXIT%

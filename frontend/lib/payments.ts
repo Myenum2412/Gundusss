@@ -83,16 +83,36 @@ export interface PaymentSettingsInput {
   qrCodeDataUrl?: string
 }
 
+const RETRYABLE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
+const RETRY_DELAYS_MS = [400, 900, 1_600]
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  let res: Response
-  try {
-    res = await fetch(`${BASE}${path}`, {
-      cache: "no-store",
-      ...init,
-    })
-  } catch {
+  const method = (init?.method ?? "GET").toUpperCase()
+  // Retrying a GET is safe and rides out a backend that is still booting.
+  // Writes are attempted once so a lost response can never duplicate an order.
+  const attempts = RETRYABLE_METHODS.has(method) ? RETRY_DELAYS_MS.length + 1 : 1
+
+  let res: Response | undefined
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      res = await fetch(`${BASE}${path}`, {
+        cache: "no-store",
+        ...init,
+      })
+      break
+    } catch {
+      if (attempt === attempts - 1) break
+      await delay(RETRY_DELAYS_MS[attempt])
+    }
+  }
+
+  if (!res) {
     throw new Error(
-      `Cannot reach the payments backend at ${BASE}. Start the backend (npm run dev or dev.bat) and retry.`
+      `Cannot reach the payments backend at ${BASE}. Run "dev.bat" (or "npm run dev") and retry.`
     )
   }
 

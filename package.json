@@ -6,7 +6,8 @@
     "backend"
   ],
   "scripts": {
-    "dev": "(trap 'kill 0' INT; npm run dev:backend & npm run dev:frontend & wait)",
+    "dev": "node scripts/dev.mjs",
+    "dev:all": "node scripts/dev.mjs",
     "dev:backend": "npm run dev --workspace=backend",
     "dev:frontend": "npm run dev --workspace=frontend",
     "dev:gateway": "npm --prefix payment-gateway run dev",

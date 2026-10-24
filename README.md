@@ -49,14 +49,20 @@ and confirm or decline cash/card counter payments through the gateway admin API.
 npm run gateway:webhook
 ```
 
-5. Start all three services:
+5. Start everything in **one terminal**:
 ```bash
-dev.bat
-# or separately:
-npm run dev:backend
-npm run dev:frontend
-npm run dev:gateway
+dev.bat          # Windows (double-click, or run from a terminal)
+npm run dev      # PowerShell / Git Bash / macOS / Linux
 ```
+
+The runner starts the backend first and waits for
+`http://127.0.0.1:4000/api/health`, then starts the frontend (and the payment
+gateway when `payment-gateway/node_modules` exists). Logs from every service are
+prefixed in the same window; press **Ctrl+C** once to stop all of them.
+
+Useful options: `npm run dev -- --no-gateway` (skip the gateway) or
+`npm run dev -- --with-gateway` (require it). To run services individually:
+`npm run dev:backend`, `npm run dev:frontend`, `npm run dev:gateway`.
 
 | Service | URL |
 | --- | --- |
@@ -67,6 +73,23 @@ npm run dev:gateway
 | YOUPI merchant admin | http://localhost:6001 |
 
 ### Troubleshooting
+
+**`Cannot reach the payments backend at http://127.0.0.1:4000`**
+
+Start the stack with `dev.bat` (or `npm run dev`). It waits for the backend
+health check before launching the frontend, so the page cannot load while the
+API is still booting.
+
+If the API already runs on another port or you open the app from another device
+(for example a phone on your LAN), create `frontend/.env.local` with the address
+the browser can reach:
+
+```ini
+NEXT_PUBLIC_API_URL=http://192.168.1.10:4000
+```
+
+Then restart the frontend. Use an IP address rather than `localhost`, because
+Windows may resolve `localhost` to IPv6 `::1` while the backend listens on IPv4.
 
 **`missing scopes (["tables.write"])` during `appwrite:setup`**
 

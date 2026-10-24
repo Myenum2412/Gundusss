@@ -13,11 +13,12 @@ import { loadReceipts } from "@/lib/receipts-store"
 import { loadAnnouncements } from "@/lib/announcements-store"
 import { loadDropdowns, DROPDOWN_KEYS } from "@/lib/dropdown-store"
 import { getWaStatus } from "@/lib/api"
+import { API_BASE } from "@/lib/api-base"
 import { isSyncing } from "@/lib/live"
 import { useLiveReload } from "@/hooks/use-live-reload"
 import type { AuthUser } from "@/lib/api"
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"
+const API_URL = API_BASE
 
 export default function ProfilePage() {
   const router = useRouter()
@@ -146,7 +147,7 @@ export default function ProfilePage() {
         announcements={recentAnnouncements}
         system={{
           apiUrl: API_URL,
-          database: "Postgres · fees",
+          database: "Appwrite · fees",
           sync: "Live · every 5s",
           whatsapp,
         }}
