@@ -16,7 +16,6 @@ import {
   CheckCircle2Icon,
   CheckIcon,
   CopyIcon,
-  ExternalLinkIcon,
   GraduationCapIcon,
   Loader2Icon,
   PrinterIcon,
@@ -71,7 +70,7 @@ export default function PublicPaymentPage() {
   const [loadingProfile, setLoadingProfile] = useState(true)
   const [profileError, setProfileError] = useState<string | null>(null)
 
-  // Student identifier query (e.g. ?student=gunduss, ?student=STU-002, ?student=amarnath, ?user=gunduss)
+  // Student identifier query (e.g. ?student=gunduss, ?student=STU-002, ?student=amarnath)
   const targetStudentQuery = (
     searchParams?.get("student") ||
     searchParams?.get("studentId") ||
@@ -175,8 +174,8 @@ export default function PublicPaymentPage() {
     let active = true
     setGeneratingQr(true)
     QRCode.toDataURL(upiUri, {
-      width: 320,
-      margin: 2,
+      width: 260,
+      margin: 1,
       color: {
         dark: "#09090b",
         light: "#ffffff",
@@ -195,6 +194,36 @@ export default function PublicPaymentPage() {
     }
   }, [upiUri])
 
+  // Strict payment status verification: ONLY allow completed status if backend confirms SUCCESS or COMPLETED
+  const queryOrderId = (searchParams?.get("orderId") || "").trim()
+
+  useEffect(() => {
+    if (!queryOrderId) return
+    let active = true
+
+    const verifyServerPayment = async () => {
+      try {
+        const orderData = await getPublicPaymentStatus(queryOrderId)
+        if (!active) return
+        if (
+          orderData &&
+          (orderData.status === "SUCCESS" || orderData.status === "COMPLETED")
+        ) {
+          setOrder(orderData)
+        }
+      } catch {
+        // Without verified payment status, do not set completed status
+      }
+    }
+
+    verifyServerPayment()
+    const timer = setInterval(verifyServerPayment, 3500)
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [queryOrderId])
+
   // Select student and synchronize URL parameter
   const handleSelectStudent = (stu: PublicStudentOption) => {
     setSelectedStudentId(stu.studentId)
@@ -206,7 +235,7 @@ export default function PublicPaymentPage() {
     try {
       await navigator.clipboard.writeText(upiId)
       setCopiedUpi(true)
-      setTimeout(() => setCopiedUpi(false), 2200)
+      setTimeout(() => setCopiedUpi(false), 2000)
     } catch {
       // ignore
     }
@@ -249,51 +278,18 @@ export default function PublicPaymentPage() {
     }
   }
 
-  // Strict payment status verification: ONLY allow completed status if the server/gateway
-  // explicitly verifies and confirms the order status as SUCCESS or COMPLETED.
-  const queryOrderId = (searchParams?.get("orderId") || "").trim()
-
-  useEffect(() => {
-    if (!queryOrderId) return
-    let active = true
-
-    const verifyServerPayment = async () => {
-      try {
-        const orderData = await getPublicPaymentStatus(queryOrderId)
-        if (!active) return
-        // STRICT: Without verified payment status, do NOT allow completed status!
-        if (
-          orderData &&
-          (orderData.status === "SUCCESS" || orderData.status === "COMPLETED")
-        ) {
-          setOrder(orderData)
-        }
-      } catch {
-        // Without verified payment status, do not set completed status
-      }
-    }
-
-    verifyServerPayment()
-    const timer = setInterval(verifyServerPayment, 3500)
-    return () => {
-      active = false
-      clearInterval(timer)
-    }
-  }, [queryOrderId])
-
   // Loading state
   if (loadingProfile) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-slate-50/70 p-4 dark:bg-zinc-950">
         <div className="flex flex-col items-center gap-3">
-          <div className="relative flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <GraduationCapIcon className="size-7" />
-            <Loader2Icon className="absolute -bottom-1 -right-1 size-5 animate-spin text-primary" />
+          <div className="relative flex size-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600">
+            <WalletIcon className="size-6" />
+            <Loader2Icon className="absolute -bottom-1 -right-1 size-4 animate-spin text-emerald-600" />
           </div>
-          <p className="text-sm font-medium text-foreground">
-            Loading student fee portal…
+          <p className="text-xs font-semibold text-foreground">
+            Connecting to secure checkout…
           </p>
-          <p className="text-xs text-muted-foreground">Connecting securely</p>
         </div>
       </main>
     )
@@ -303,27 +299,23 @@ export default function PublicPaymentPage() {
   if (profileError || !profile) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-slate-50/70 p-4 dark:bg-zinc-950">
-        <div className="w-full max-w-md rounded-3xl border bg-card p-8 text-center shadow-lg shadow-black/[0.03]">
-          <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
-            <TriangleAlertIcon className="size-7" />
+        <div className="w-full max-w-sm rounded-3xl border bg-card p-6 text-center shadow-lg shadow-black/[0.03]">
+          <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600">
+            <TriangleAlertIcon className="size-6" />
           </div>
-          <h1 className="mt-4 text-xl font-bold tracking-tight text-foreground">
+          <h1 className="mt-3 text-base font-bold text-foreground">
             Institution Not Found
           </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            We could not find an institution matching{" "}
-            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            Could not find payment page for{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
               {slug}
             </code>
-            . Please check the link or contact your school/academy administrator.
           </p>
-          <div className="mt-6 flex flex-col gap-2">
-            <Button variant="outline" onClick={loadProfile}>
-              <RefreshCwIcon className="size-4 mr-2" />
+          <div className="mt-5 flex flex-col gap-2">
+            <Button variant="outline" size="sm" onClick={loadProfile}>
+              <RefreshCwIcon className="size-3.5 mr-1.5" />
               Try Again
-            </Button>
-            <Button variant="ghost" onClick={() => router.push("/login")}>
-              Go to Portal Login
             </Button>
           </div>
         </div>
@@ -332,191 +324,211 @@ export default function PublicPaymentPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100/60 px-4 py-8 text-foreground sm:py-12 dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950">
-      <div className="mx-auto max-w-xl">
-        {/* Verified Institution Header */}
-        <header className="mb-6 flex items-center justify-between rounded-3xl border bg-card/80 p-5 shadow-xs backdrop-blur-md sm:p-6">
-          <div className="flex items-center gap-3.5">
-            <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-emerald-600 font-bold text-lg text-white shadow-md shadow-emerald-600/20">
-              {profile.logoUrl ? (
-                <img
-                  src={profile.logoUrl}
-                  alt={profile.name}
-                  className="size-full object-cover"
-                />
-              ) : (
-                profile.name.slice(0, 2).toUpperCase()
-              )}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
-                  {profile.name}
-                </h1>
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-400">
-                  <CheckCircle2Icon className="size-2.5" />
-                  Verified
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Official Fee Payment Desk
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground border rounded-full px-2.5 py-1 bg-muted/30">
-            <ShieldCheckIcon className="size-3.5 text-emerald-600 dark:text-emerald-400" />
-            <span>256-bit Secure</span>
-          </div>
-        </header>
-
+    <main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-slate-100/80 via-slate-50 to-slate-100/60 p-3 sm:p-5 text-foreground dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950">
+      <div className="w-full max-w-[390px] transition-all">
         {/* =========================================================================
-            STATE 1: PAYMENT SUCCESS / RECEIPT (STRICT: ONLY ON VERIFIED PAYMENT STATUS)
+            STATE 1: PAYMENT SUCCESS / RECEIPT (STRICT: ONLY ON VERIFIED STATUS)
            ========================================================================= */}
         {order && (order.status === "SUCCESS" || order.status === "COMPLETED") ? (
-          <section className="rounded-3xl border bg-card p-6 shadow-md shadow-black/[0.04] sm:p-8 animate-in fade-in duration-300">
-            <div className="flex flex-col items-center text-center">
-              <div className="flex size-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 shadow-inner">
-                <CheckIcon className="size-8 stroke-[3]" />
+          <section className="overflow-hidden rounded-[26px] border bg-card shadow-xl shadow-black/[0.04] animate-in fade-in zoom-in-95 duration-200">
+            {/* YOUPI PG Header */}
+            <div className="flex items-center justify-between bg-slate-900 px-4 py-3 text-white dark:bg-slate-950 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="grid size-6 place-items-center rounded-full bg-emerald-500/20 text-emerald-400">
+                  <WalletIcon className="size-3.5" />
+                </span>
+                <div>
+                  <p className="text-xs font-bold leading-tight">YOUPI PG</p>
+                  <p className="text-[9px] leading-tight text-white/60">
+                    Payment Receipt
+                  </p>
+                </div>
               </div>
-              <h2 className="mt-4 text-2xl font-bold tracking-tight text-foreground">
-                Payment Completed!
+              <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[9px] font-semibold text-emerald-300">
+                VERIFIED
+              </span>
+            </div>
+
+            <div className="p-5 text-center">
+              <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
+                <CheckIcon className="size-6 stroke-[3]" />
+              </div>
+              <h2 className="mt-2.5 text-lg font-bold text-foreground">
+                Payment Successful!
               </h2>
-              <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-                Official payment receipt issued for {order.studentName}.
+              <p className="text-xs text-muted-foreground">
+                Official receipt for {order.studentName}
               </p>
-              <div className="mt-4 inline-block rounded-2xl bg-emerald-50 px-6 py-2.5 text-3xl font-extrabold tabular-nums text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-400">
+              <div className="mt-3 inline-block rounded-xl bg-emerald-50 px-4 py-1.5 text-2xl font-black tabular-nums text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-400">
                 {formatInr(order.amount)}
               </div>
-            </div>
 
-            <div className="mt-6 divide-y rounded-2xl border bg-muted/20 text-xs sm:text-sm">
-              <div className="flex items-center justify-between p-3.5">
-                <span className="text-muted-foreground">Student Name</span>
-                <span className="font-semibold text-foreground">
-                  {order.studentName}
-                </span>
-              </div>
-              {order.studentId && (
-                <div className="flex items-center justify-between p-3.5">
-                  <span className="text-muted-foreground">Student ID</span>
-                  <span className="font-mono text-foreground">{order.studentId}</span>
+              <div className="mt-4 divide-y rounded-xl border bg-muted/20 text-xs text-left">
+                <div className="flex justify-between p-2.5">
+                  <span className="text-muted-foreground">Student</span>
+                  <span className="font-semibold text-foreground">
+                    {order.studentName} ({order.studentId})
+                  </span>
                 </div>
-              )}
-              <div className="flex items-center justify-between p-3.5">
-                <span className="text-muted-foreground">Payment Mode</span>
-                <span className="font-medium text-foreground">{order.method || "UPI"}</span>
+                <div className="flex justify-between p-2.5">
+                  <span className="text-muted-foreground">Receipt</span>
+                  <span className="font-mono font-bold text-emerald-600">
+                    {order.receiptId || `REC-${order.orderId.slice(-6)}`}
+                  </span>
+                </div>
+                <div className="flex justify-between p-2.5">
+                  <span className="text-muted-foreground">Date</span>
+                  <span className="text-foreground">{formatDate(order.createdAt)}</span>
+                </div>
               </div>
-              <div className="flex items-center justify-between p-3.5">
-                <span className="text-muted-foreground">Receipt Number</span>
-                <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-400">
-                  {order.receiptId || `REC-${order.orderId.slice(-6)}`}
-                </span>
-              </div>
-              <div className="flex items-center justify-between p-3.5">
-                <span className="text-muted-foreground">Date & Time</span>
-                <span className="tabular-nums text-foreground">
-                  {formatDate(order.createdAt)}
-                </span>
-              </div>
-            </div>
 
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-              <Button
-                variant="outline"
-                onClick={() => window.print()}
-                className="gap-2"
-              >
-                <PrinterIcon className="size-4" />
-                Print / Save Receipt
-              </Button>
-              <Button
-                onClick={() => {
-                  setOrder(null)
-                  setCashPass(null)
-                }}
-              >
-                Done
-              </Button>
+              <div className="mt-5 flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.print()}
+                  className="w-1/2 gap-1.5 text-xs"
+                >
+                  <PrinterIcon className="size-3.5" />
+                  Print
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setOrder(null)
+                    setCashPass(null)
+                  }}
+                  className="w-1/2 text-xs"
+                >
+                  Done
+                </Button>
+              </div>
             </div>
           </section>
         ) : cashPass ? (
           /* =========================================================================
               STATE 2: CASH COUNTER PASS
              ========================================================================= */
-          <section className="rounded-3xl border bg-card p-6 shadow-md shadow-black/[0.04] sm:p-8 animate-in fade-in duration-300">
-            <div className="flex flex-col items-center text-center">
-              <div className="flex size-14 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                <SvglCash className="size-7" />
+          <section className="overflow-hidden rounded-[26px] border bg-card shadow-xl shadow-black/[0.04] animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between bg-slate-900 px-4 py-3 text-white dark:bg-slate-950 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="grid size-6 place-items-center rounded-full bg-amber-500/20 text-amber-400">
+                  <SvglCash className="size-3.5" />
+                </span>
+                <div>
+                  <p className="text-xs font-bold leading-tight">Cash Counter Pass</p>
+                  <p className="text-[9px] leading-tight text-white/60">
+                    Accounts Desk Slip
+                  </p>
+                </div>
               </div>
-              <h2 className="mt-3 text-xl font-bold tracking-tight text-foreground">
-                Cash Counter Payment Pass
+              <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[9px] font-semibold text-amber-300">
+                CASH PASS
+              </span>
+            </div>
+
+            <div className="p-5 text-center">
+              <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600">
+                <SvglCash className="size-6" />
+              </div>
+              <h2 className="mt-2.5 text-base font-bold text-foreground">
+                Deposit Pass Generated
               </h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Present this pass at the accounts desk to deposit cash.
+              <p className="text-xs text-muted-foreground">
+                Pay at {profile.name} Accounts Desk
               </p>
-              <div className="mt-4 rounded-2xl bg-amber-50 px-6 py-2.5 text-2xl font-bold tabular-nums text-amber-800 ring-1 ring-inset ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-400">
+              <div className="mt-3 inline-block rounded-xl bg-amber-50 px-4 py-1.5 text-2xl font-black tabular-nums text-amber-800 ring-1 ring-inset ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-400">
                 {formatInr(cashPass.amount)}
               </div>
-            </div>
 
-            <div className="mt-6 space-y-2 rounded-2xl border bg-muted/20 p-4 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Pass Reference:</span>
-                <span className="font-mono font-bold text-foreground">
-                  {cashPass.passId}
-                </span>
+              <div className="mt-4 space-y-1.5 rounded-xl border bg-muted/20 p-3 text-xs text-left">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Pass Code:</span>
+                  <span className="font-mono font-bold text-foreground">
+                    {cashPass.passId}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Student:</span>
+                  <span className="font-semibold text-foreground">
+                    {cashPass.studentName} ({cashPass.studentId})
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Time:</span>
+                  <span className="text-foreground">{formatDate(cashPass.timestamp)}</span>
+                </div>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Student:</span>
-                <span className="font-semibold text-foreground">
-                  {cashPass.studentName} ({cashPass.studentId})
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Institution Desk:</span>
-                <span className="font-medium text-foreground">{profile.name} Accounts Desk</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Issued At:</span>
-                <span className="tabular-nums text-foreground">
-                  {formatDate(cashPass.timestamp)}
-                </span>
-              </div>
-            </div>
 
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-              <Button
-                variant="outline"
-                onClick={() => window.print()}
-                className="gap-2"
-              >
-                <PrinterIcon className="size-4" />
-                Print Cash Pass
-              </Button>
-              <Button variant="ghost" onClick={() => setCashPass(null)}>
-                Back to Methods
-              </Button>
+              <div className="mt-5 flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.print()}
+                  className="w-1/2 gap-1.5 text-xs"
+                >
+                  <PrinterIcon className="size-3.5" />
+                  Print Pass
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setCashPass(null)}
+                  className="w-1/2 text-xs"
+                >
+                  Back
+                </Button>
+              </div>
             </div>
           </section>
         ) : (
           /* =========================================================================
-              MAIN USER PAYMENT SCREEN:
-              1. Exact Student & Fixed Verified Fee Amount ("dont create own")
-              2. Payment Methods Only
+              MAIN SHORT & SWEET CHECKOUT CARD
              ========================================================================= */
-          <div className="space-y-6">
-            {/* Student Switcher Bar (when multiple students enrolled) */}
-            {profile?.students && profile.students.length > 1 && (
-              <div className="rounded-2xl border bg-card/60 p-3 shadow-2xs">
-                <div className="flex items-center justify-between mb-2 px-1">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Enrolled Students
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    Select to view individual fee
-                  </span>
+          <div className="overflow-hidden rounded-[26px] border border-slate-200/80 bg-card shadow-xl shadow-black/[0.05] dark:border-zinc-800">
+            {/* 1. YOUPI PG Banner */}
+            <div className="flex items-center justify-between bg-slate-900 px-4 py-3 text-white dark:bg-slate-950 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="grid size-6 place-items-center rounded-full bg-emerald-500/20 text-emerald-400">
+                  <WalletIcon className="size-3.5" />
+                </span>
+                <div>
+                  <p className="text-xs font-bold leading-tight tracking-wide">YOUPI PG</p>
+                  <p className="text-[9px] leading-tight text-white/60">
+                    Secure UPI checkout
+                  </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
+              </div>
+              <span className="rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[9px] font-semibold tracking-wider text-white/80">
+                PREVIEW
+              </span>
+            </div>
+
+            {/* 2. Compact Payee & Fee Header */}
+            <div className="border-b bg-muted/20 px-4 py-3 text-center">
+              <div className="flex items-center justify-center gap-1.5">
+                <span className="text-xs font-bold text-foreground">
+                  {profile.name}
+                </span>
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
+                  <CheckCircle2Icon className="size-2.5" /> Verified
+                </span>
+              </div>
+
+              {/* Student Tag */}
+              {activeStudent && (
+                <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <GraduationCapIcon className="size-3 text-primary" />
+                  <span className="font-semibold text-foreground">
+                    {activeStudent.studentName}
+                  </span>
+                  <span>({activeStudent.studentId})</span>
+                </div>
+              )}
+
+              {/* Student Quick Switcher (If multiple students) */}
+              {profile?.students && profile.students.length > 1 && (
+                <div className="mt-2 flex items-center justify-center gap-1.5">
                   {profile.students.map((s) => {
                     const isSelected = activeStudent?.studentId === s.studentId
                     return (
@@ -525,291 +537,203 @@ export default function PublicPaymentPage() {
                         type="button"
                         onClick={() => handleSelectStudent(s)}
                         className={cn(
-                          "flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium transition active:scale-95",
+                          "rounded-full px-2.5 py-0.5 text-[10px] font-medium transition",
                           isSelected
-                            ? "bg-primary text-primary-foreground shadow-xs font-semibold ring-2 ring-primary/20"
-                            : "border bg-muted/30 text-foreground hover:bg-muted"
+                            ? "bg-foreground text-background font-bold shadow-2xs"
+                            : "bg-muted/80 text-muted-foreground hover:bg-muted"
                         )}
                       >
-                        <UserCheckIcon className="size-3.5" />
-                        <span>{s.studentName}</span>
-                        <span className="opacity-75">({s.studentId})</span>
-                        <span className="ml-1 rounded-md bg-black/10 dark:bg-white/10 px-1.5 py-0.5 text-[10px] font-bold">
-                          {formatInr(s.feeAmount || "5000")}
-                        </span>
+                        {s.studentName}
                       </button>
                     )
                   })}
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* -------------------------------------------------------------
-                CARD 1: HOW MUCH TO PAY (EXACT USER FEE VALUE ONLY)
-               ------------------------------------------------------------- */}
-            <section className="overflow-hidden rounded-3xl border bg-card p-6 shadow-md shadow-black/[0.03] sm:p-7">
-              <div className="flex items-center justify-between border-b pb-3">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {/* Large Due Fee Amount */}
+              <div className="mt-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   Fee Amount to Pay
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-400">
-                  Verified Due
-                </span>
-              </div>
-
-              {/* Exact Fee Display (Fixed, no arbitrary editing / cannot create own) */}
-              <div className="mt-4 flex flex-col items-center justify-center py-2 text-center">
-                <span className="text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl tabular-nums">
+                </p>
+                <p className="text-3xl font-black tracking-tight text-foreground sm:text-4xl tabular-nums">
                   {formatInr(fixedAmount)}
-                </span>
-
-                {/* Specific Student Info Card */}
-                {activeStudent && (
-                  <div className="mt-3 inline-flex items-center gap-2 rounded-full border bg-muted/40 px-3.5 py-1 text-xs text-foreground">
-                    <GraduationCapIcon className="size-3.5 text-primary" />
-                    <span className="font-semibold">{activeStudent.studentName}</span>
-                    <span className="text-muted-foreground">({activeStudent.studentId})</span>
-                    {activeStudent.group && (
-                      <span className="border-l pl-2 text-muted-foreground">
-                        {activeStudent.group}
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Official monthly fee for {activeStudent?.studentName || "student"} · {profile.name}
                 </p>
               </div>
-            </section>
 
-            {/* -------------------------------------------------------------
-                CARD 2: PAYMENT METHODS ONLY
-               ------------------------------------------------------------- */}
-            <section className="overflow-hidden rounded-3xl border bg-card shadow-md shadow-black/[0.03]">
-              {/* YOUPI PG Secure UPI checkout PREVIEW Banner */}
-              <div className="flex items-center justify-between bg-slate-900 px-5 py-3.5 text-white dark:bg-slate-950 border-b border-slate-800">
-                <div className="flex items-center gap-2.5">
-                  <span className="grid size-7 place-items-center rounded-full bg-white/10 text-emerald-400">
-                    <WalletIcon className="size-4" />
-                  </span>
-                  <div>
-                    <p className="text-xs font-bold leading-tight tracking-wide">YOUPI PG</p>
-                    <p className="text-[10px] leading-tight text-white/60">
-                      Secure UPI checkout
-                    </p>
-                  </div>
-                </div>
-                <span className="rounded-full border border-white/20 bg-white/5 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider text-white/90">
-                  PREVIEW
-                </span>
-              </div>
-
-              <div className="p-6 sm:p-7">
-                {/* Method Selector Tabs */}
-                <div className="flex items-center justify-between border-b pb-4">
-                  <div>
-                    <h2 className="text-base font-bold tracking-tight text-foreground">
-                      Select Payment Method
-                    </h2>
-                    <p className="text-xs text-muted-foreground">
-                      Instant zero-fee payment methods only
-                    </p>
-                  </div>
-                <div className="flex rounded-xl bg-muted/60 p-1 text-xs font-medium">
+              {/* Method Switch Tabs */}
+              <div className="mt-3 flex justify-center">
+                <div className="inline-flex rounded-xl bg-muted/60 p-0.5 text-xs font-medium">
                   <button
                     type="button"
                     onClick={() => setActiveTab("UPI")}
                     className={cn(
-                      "flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition",
+                      "flex items-center gap-1 rounded-lg px-3 py-1 text-[11px] transition",
                       activeTab === "UPI"
-                        ? "bg-card text-foreground shadow-xs font-semibold"
+                        ? "bg-card text-foreground font-semibold shadow-xs"
                         : "text-muted-foreground hover:text-foreground"
                     )}
                   >
-                    <SvglUpi className="size-3.5 shrink-0" />
+                    <SvglUpi className="size-3" />
                     <span>UPI / QR</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setActiveTab("CASH")}
                     className={cn(
-                      "flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition",
+                      "flex items-center gap-1 rounded-lg px-3 py-1 text-[11px] transition",
                       activeTab === "CASH"
-                        ? "bg-card text-foreground shadow-xs font-semibold"
+                        ? "bg-card text-foreground font-semibold shadow-xs"
                         : "text-muted-foreground hover:text-foreground"
                     )}
                   >
-                    <SvglCash className="size-3.5 shrink-0" />
-                    <span>Cash Counter</span>
+                    <SvglCash className="size-3" />
+                    <span>Cash</span>
                   </button>
                 </div>
               </div>
+            </div>
 
-              {/* TAB 1: UPI & DYNAMIC QR */}
-              {activeTab === "UPI" && (
-                <div className="mt-6 space-y-6">
-                  {/* Dynamic QR Code Card (Generated specifically for this user & fee) */}
-                  <div className="flex flex-col items-center justify-center rounded-2xl border bg-slate-50/80 dark:bg-zinc-900/60 p-6 shadow-inner text-center">
-                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      <SvglUpi className="size-3.5 shrink-0" />
-                      <span>Scan to Pay with Any UPI App</span>
-                    </div>
+            {/* 3. Method Content */}
+            <div className="p-4 sm:p-5">
+              {activeTab === "UPI" ? (
+                <div className="flex flex-col items-center space-y-3.5">
+                  {/* Dynamic QR Box */}
+                  <div className="relative flex size-[195px] items-center justify-center rounded-2xl border bg-white p-2 shadow-inner">
+                    {generatingQr || !qrDataUrl ? (
+                      <div className="flex size-full items-center justify-center">
+                        <Loader2Icon className="size-6 animate-spin text-primary" />
+                      </div>
+                    ) : (
+                      <img
+                        src={qrDataUrl}
+                        alt={`Scan UPI QR to pay ${formatInr(fixedAmount)}`}
+                        className="size-full object-contain"
+                      />
+                    )}
+                  </div>
 
-                    <div className="mt-3 relative flex items-center justify-center rounded-2xl border bg-white p-3 shadow-md">
-                      {generatingQr || !qrDataUrl ? (
-                        <div className="flex size-64 items-center justify-center">
-                          <Loader2Icon className="size-8 animate-spin text-primary" />
-                        </div>
+                  {/* SVGL Brand Icons Strip */}
+                  <div className="flex items-center justify-center gap-3 text-muted-foreground">
+                    <span className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                      <SvglGoogle className="size-3" /> GPay
+                    </span>
+                    <span className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                      <SvglPhonePe className="size-3 rounded-full" /> PhonePe
+                    </span>
+                    <span className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                      <SvglPaytmIcon className="size-3 rounded-xs" /> Paytm
+                    </span>
+                    <span className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                      <SvglBhim className="size-3 rounded-xs" /> BHIM
+                    </span>
+                  </div>
+
+                  {/* UPI ID + Copy */}
+                  <div className="flex w-full items-center justify-between rounded-xl border bg-muted/30 px-3 py-1.5 text-xs">
+                    <span className="font-mono text-[11px] font-semibold text-foreground">
+                      {upiId}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopyUpi}
+                      className="inline-flex items-center gap-1 text-[10px] font-semibold text-primary hover:underline"
+                    >
+                      {copiedUpi ? (
+                        <span className="text-emerald-600 flex items-center gap-0.5">
+                          <CheckIcon className="size-3" /> Copied
+                        </span>
                       ) : (
-                        <img
-                          src={qrDataUrl}
-                          alt={`Scan UPI QR to pay ${formatInr(fixedAmount)} for ${activeStudent?.studentName || "student"}`}
-                          className="size-60 sm:size-64 object-contain"
-                        />
+                        <span className="flex items-center gap-0.5">
+                          <CopyIcon className="size-3" /> Copy
+                        </span>
                       )}
-                    </div>
-
-                    {/* Supported Apps Logo Bar */}
-                    <div className="mt-3 flex items-center justify-center gap-4 py-1 text-muted-foreground">
-                      <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
-                        <SvglGoogle className="size-3.5" /> GPay
-                      </span>
-                      <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
-                        <SvglPhonePe className="size-3.5 rounded-full" /> PhonePe
-                      </span>
-                      <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
-                        <SvglPaytm className="h-3 w-auto" />
-                      </span>
-                      <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
-                        <SvglBhim className="size-3.5 rounded-xs" /> BHIM
-                      </span>
-                    </div>
-
-                    <div className="mt-2 flex items-center justify-center gap-2">
-                      <span className="text-xs text-muted-foreground">UPI ID:</span>
-                      <code className="rounded bg-muted px-2 py-0.5 font-mono text-xs font-semibold text-foreground">
-                        {upiId}
-                      </code>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        onClick={handleCopyUpi}
-                        className="h-6 px-2 text-[11px]"
-                      >
-                        {copiedUpi ? (
-                          <span className="text-emerald-600 flex items-center gap-1">
-                            <CheckIcon className="size-3" /> Copied
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1">
-                            <CopyIcon className="size-3" /> Copy
-                          </span>
-                        )}
-                      </Button>
-                    </div>
-
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      Paying {formatInr(fixedAmount)} for {activeStudent?.studentName} ({activeStudent?.studentId})
-                    </p>
+                    </button>
                   </div>
 
                   {/* One-Click Direct Pay Button */}
-                  <div className="space-y-3">
-                    <Button
-                      type="button"
-                      size="lg"
-                      onClick={() => handleOpenUpiApp()}
-                      className="w-full h-12 text-base font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-600/20 gap-2.5"
-                    >
-                      <SvglUpi className="size-5 shrink-0" />
-                      <span>Pay {formatInr(fixedAmount)} via UPI</span>
-                    </Button>
-
-                    {/* Quick Direct UPI App Launchers with SVGL icons */}
-                    <div className="grid grid-cols-3 gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleOpenUpiApp("tez://upi/pay?")}
-                        className="h-11 text-xs font-semibold border-muted/80 hover:border-foreground/30 bg-card shadow-2xs gap-2 hover:bg-muted/30"
-                      >
-                        <SvglGoogle className="size-4 shrink-0" />
-                        <span className="font-semibold text-foreground">GPay</span>
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleOpenUpiApp("phonepe://pay?")}
-                        className="h-11 text-xs font-semibold border-muted/80 hover:border-foreground/30 bg-card shadow-2xs gap-2 hover:bg-muted/30"
-                      >
-                        <SvglPhonePe className="size-4 shrink-0" />
-                        <span className="font-semibold text-foreground">PhonePe</span>
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleOpenUpiApp("paytmmp://pay?")}
-                        className="h-11 text-xs font-semibold border-muted/80 hover:border-foreground/30 bg-card shadow-2xs gap-2 hover:bg-muted/30"
-                      >
-                        <SvglPaytmIcon className="size-4 shrink-0 rounded-xs" />
-                        <span className="font-semibold text-foreground">Paytm</span>
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 2: CASH AT COUNTER */}
-              {activeTab === "CASH" && (
-                <div className="mt-6 space-y-5 text-center">
-                  <div className="rounded-2xl border bg-muted/20 p-5">
-                    <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary mb-3">
-                      <SvglCash className="size-6" />
-                    </div>
-                    <h3 className="font-semibold text-sm text-foreground">
-                      Pay Cash at Counter Desk
-                    </h3>
-                    <p className="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">
-                      Generate a digital cash payment pass to deposit {formatInr(fixedAmount)} for {activeStudent?.studentName} directly at the accounts counter desk.
-                    </p>
-                  </div>
-
                   <Button
                     type="button"
-                    size="lg"
+                    size="sm"
+                    onClick={() => handleOpenUpiApp()}
+                    className="w-full h-10 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 gap-1.5"
+                  >
+                    <SvglUpi className="size-4 shrink-0" />
+                    <span>Pay {formatInr(fixedAmount)} via UPI</span>
+                  </Button>
+
+                  {/* Direct Launchers */}
+                  <div className="grid grid-cols-3 gap-1.5 w-full">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleOpenUpiApp("tez://upi/pay?")}
+                      className="h-8 text-[11px] font-semibold gap-1.5 border-muted bg-card hover:bg-muted/40 shadow-2xs"
+                    >
+                      <SvglGoogle className="size-3.5" />
+                      <span>GPay</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleOpenUpiApp("phonepe://pay?")}
+                      className="h-8 text-[11px] font-semibold gap-1.5 border-muted bg-card hover:bg-muted/40 shadow-2xs"
+                    >
+                      <SvglPhonePe className="size-3.5 rounded-full" />
+                      <span>PhonePe</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleOpenUpiApp("paytmmp://pay?")}
+                      className="h-8 text-[11px] font-semibold gap-1.5 border-muted bg-card hover:bg-muted/40 shadow-2xs"
+                    >
+                      <SvglPaytmIcon className="size-3.5 rounded-xs" />
+                      <span>Paytm</span>
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                /* Cash Counter Tab */
+                <div className="flex flex-col items-center py-2 text-center space-y-3">
+                  <div className="flex size-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                    <SvglCash className="size-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-foreground">
+                      Pay Cash at Counter Desk
+                    </h3>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground leading-snug">
+                      Generate a cash pass to deposit {formatInr(fixedAmount)} at {profile.name} accounts desk.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
                     onClick={handleGenerateCashPass}
                     disabled={submitting}
-                    className="w-full h-11 text-sm font-semibold gap-2"
+                    className="w-full h-9 text-xs font-semibold gap-1.5"
                   >
                     {submitting ? (
-                      <Loader2Icon className="size-4 animate-spin" />
+                      <Loader2Icon className="size-3.5 animate-spin" />
                     ) : (
-                      <CheckIcon className="size-4" />
+                      <CheckIcon className="size-3.5" />
                     )}
-                    <span>Generate Cash Payment Pass</span>
+                    <span>Generate Cash Pass</span>
                   </Button>
                 </div>
               )}
-              </div>
-            </section>
+            </div>
+
+            {/* 4. Compact Footer */}
+            <div className="border-t bg-muted/10 px-4 py-2.5 text-center text-[10px] text-muted-foreground flex items-center justify-center gap-1.5 font-medium">
+              <ShieldCheckIcon className="size-3 text-emerald-600 dark:text-emerald-400" />
+              <span>256-bit Encrypted Official UPI Gateway</span>
+            </div>
           </div>
         )}
-
-        {/* Footer */}
-        <footer className="mt-8 text-center text-xs text-muted-foreground">
-          <p className="flex items-center justify-center gap-1.5 font-medium">
-            <ShieldCheckIcon className="size-3.5 text-emerald-600 dark:text-emerald-400" />
-            <span>256-bit Encrypted Direct UPI Payment</span>
-          </p>
-          <p className="mt-1">
-            Questions? Contact {profile.name} at {profile.phone || "6374984055"}.
-          </p>
-        </footer>
       </div>
     </main>
   )
