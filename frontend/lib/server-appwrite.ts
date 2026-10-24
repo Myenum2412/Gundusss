@@ -17,6 +17,7 @@ export interface PublicStudentOption {
   course: string
   phone: string
   email: string
+  feeAmount?: string
 }
 
 export interface PublicOrganizationProfile {
@@ -101,6 +102,7 @@ const FALLBACK_AMARNATH: PublicOrganizationProfile = {
       course: "Science",
       phone: "6374984055",
       email: "testuser2412@gmail.com",
+      feeAmount: "5000",
     },
     {
       studentId: "STU-002",
@@ -109,6 +111,7 @@ const FALLBACK_AMARNATH: PublicOrganizationProfile = {
       course: "Science",
       phone: "7708920447",
       email: "Gunduss1234@gmail.com",
+      feeAmount: "5000",
     },
   ],
 }
@@ -225,6 +228,7 @@ export async function fetchPublicProfileFromAppwrite(
                   course: s.course || "",
                   phone: s.phone || "",
                   email: s.email || "",
+                  feeAmount: s.feeAmount || "5000",
                 })
               }
             } catch {

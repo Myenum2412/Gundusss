@@ -1028,6 +1028,17 @@ export async function paymentRoutes(app: FastifyInstance) {
       status?: string;
     }>(APPWRITE_COLLECTIONS.students, profile.profileId);
 
+    const groupRecords = await listScopedRecords<{
+      groupName?: string;
+      feeAmount?: string | number;
+    }>(APPWRITE_COLLECTIONS.studentGroups, profile.profileId);
+    const feeMap = new Map<string, string>();
+    for (const g of groupRecords) {
+      if (g.data.groupName && g.data.feeAmount) {
+        feeMap.set(g.data.groupName.toLowerCase(), String(g.data.feeAmount));
+      }
+    }
+
     const students = studentRecords
       .map((r) => r.data)
       .filter((s) => (s.status ?? 'Active').toLowerCase() !== 'inactive')
@@ -1038,6 +1049,7 @@ export async function paymentRoutes(app: FastifyInstance) {
         course: s.course || '',
         phone: s.phone || '',
         email: s.email || '',
+        feeAmount: feeMap.get((s.group || '').toLowerCase()) || '5000',
       }));
 
     return {

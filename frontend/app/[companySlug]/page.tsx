@@ -11,14 +11,11 @@ import {
   type PublicStudentOption,
 } from "@/lib/payments"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import {
-  ArrowLeftIcon,
   BanknoteIcon,
   CheckCircle2Icon,
   CheckIcon,
   CopyIcon,
-  CreditCardIcon,
   ExternalLinkIcon,
   GraduationCapIcon,
   Loader2Icon,
@@ -26,14 +23,11 @@ import {
   QrCodeIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
-  SparklesIcon,
   SmartphoneIcon,
   TriangleAlertIcon,
-  WalletIcon,
+  UserCheckIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-
-const PRESET_AMOUNTS = [500, 1000, 2500, 5000, 10000]
 
 function formatInr(value: number | string): string {
   const n = Number(value)
@@ -67,17 +61,22 @@ export default function PublicPaymentPage() {
   const [loadingProfile, setLoadingProfile] = useState(true)
   const [profileError, setProfileError] = useState<string | null>(null)
 
-  // Primary states: Money Value & Method
-  const [amount, setAmount] = useState<string>("5000")
-  const [isEditingAmount, setIsEditingAmount] = useState(false)
+  // Student identifier query (e.g. ?student=gunduss, ?student=STU-002, ?student=amarnath, ?user=gunduss)
+  const targetStudentQuery = (
+    searchParams?.get("student") ||
+    searchParams?.get("studentId") ||
+    searchParams?.get("user") ||
+    searchParams?.get("id") ||
+    ""
+  ).trim()
+
   const [selectedStudentId, setSelectedStudentId] = useState<string>("")
   const [activeTab, setActiveTab] = useState<"UPI" | "CASH">("UPI")
 
-  // QR Code & Payment states
+  // QR & Status states
   const [qrDataUrl, setQrDataUrl] = useState<string>("")
   const [generatingQr, setGeneratingQr] = useState(false)
   const [copiedUpi, setCopiedUpi] = useState(false)
-  const [copiedLink, setCopiedLink] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [order, setOrder] = useState<PaymentOrder | null>(null)
   const [cashPass, setCashPass] = useState<{
@@ -88,19 +87,7 @@ export default function PublicPaymentPage() {
     timestamp: string
   } | null>(null)
 
-  // Initialize from search params if present
-  useEffect(() => {
-    const qAmount = searchParams?.get("amount")
-    if (qAmount && Number(qAmount) > 0) {
-      setAmount(qAmount)
-    }
-    const qStudentId = searchParams?.get("studentId")
-    if (qStudentId) {
-      setSelectedStudentId(qStudentId)
-    }
-  }, [searchParams])
-
-  // Load organization profile on mount
+  // Load organization profile
   const loadProfile = useCallback(async () => {
     if (!slug) return
     setLoadingProfile(true)
@@ -108,9 +95,6 @@ export default function PublicPaymentPage() {
     try {
       const data = await getPublicProfile(slug)
       setProfile(data)
-      if (data.students && data.students.length > 0 && !selectedStudentId) {
-        setSelectedStudentId(data.students[0].studentId)
-      }
     } catch (err) {
       setProfileError(
         err instanceof Error
@@ -120,39 +104,63 @@ export default function PublicPaymentPage() {
     } finally {
       setLoadingProfile(false)
     }
-  }, [slug, selectedStudentId])
+  }, [slug])
 
   useEffect(() => {
     loadProfile()
   }, [loadProfile])
 
-  // Active student object
-  const currentStudent = useMemo<PublicStudentOption | null>(() => {
+  // Resolve active student: either matched from URL parameter (?student=gunduss / STU-002), or user selected
+  const activeStudent = useMemo<PublicStudentOption | null>(() => {
     if (!profile?.students?.length) return null
-    return (
-      profile.students.find((s) => s.studentId === selectedStudentId) ||
-      profile.students[0]
-    )
-  }, [profile, selectedStudentId])
 
-  // Resolved UPI ID & Payee Name
+    // 1. If explicit query parameter in URL, match it strictly
+    if (targetStudentQuery) {
+      const clean = targetStudentQuery.toLowerCase()
+      const found = profile.students.find(
+        (s) =>
+          s.studentId.toLowerCase() === clean ||
+          s.studentName.toLowerCase() === clean ||
+          s.studentName.toLowerCase().replace(/\s+/g, "") === clean ||
+          s.phone.replace(/\D/g, "") === clean
+      )
+      if (found) return found
+    }
+
+    // 2. If user manually selected a student
+    if (selectedStudentId) {
+      const found = profile.students.find((s) => s.studentId === selectedStudentId)
+      if (found) return found
+    }
+
+    // 3. Default to first student
+    return profile.students[0]
+  }, [profile, targetStudentQuery, selectedStudentId])
+
+  // Fixed fee amount for the specific user/student (no arbitrary editing / cannot create own)
+  const fixedAmount = useMemo(() => {
+    if (activeStudent?.feeAmount && Number(activeStudent.feeAmount) > 0) {
+      return activeStudent.feeAmount
+    }
+    return "5000"
+  }, [activeStudent])
+
   const upiId = profile?.upiId || "6374984055@upi"
   const payeeName = profile?.payeeName || profile?.name || "Amarnath"
-  const numAmount = Math.max(1, parseFloat(amount || "5000") || 5000)
+  const numAmount = parseFloat(fixedAmount) || 5000
   const amountFormatted = numAmount.toFixed(2)
 
-  // Standard UPI URI
+  // Construct UPI payment URI for that specific student and fixed fee
   const upiUri = useMemo(() => {
-    const cleanUpi = upiId.trim()
-    const desc = currentStudent
-      ? `Fee-${currentStudent.studentName.replace(/\s+/g, "")}-${currentStudent.studentId}`
+    const studentNote = activeStudent
+      ? `Fee-${activeStudent.studentName.replace(/\s+/g, "")}-${activeStudent.studentId}`
       : `Fee-Payment`
-    return `upi://pay?pa=${encodeURIComponent(cleanUpi)}&pn=${encodeURIComponent(
+    return `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(
       payeeName
-    )}&am=${encodeURIComponent(amountFormatted)}&cu=INR&tn=${encodeURIComponent(desc)}`
-  }, [upiId, payeeName, amountFormatted, currentStudent])
+    )}&am=${encodeURIComponent(amountFormatted)}&cu=INR&tn=${encodeURIComponent(studentNote)}`
+  }, [upiId, payeeName, amountFormatted, activeStudent])
 
-  // Generate dynamic QR Code live whenever amount or student changes
+  // Generate dynamic QR Code live for that specific student fee
   useEffect(() => {
     let active = true
     setGeneratingQr(true)
@@ -177,6 +185,12 @@ export default function PublicPaymentPage() {
     }
   }, [upiUri])
 
+  // Select student and synchronize URL parameter
+  const handleSelectStudent = (stu: PublicStudentOption) => {
+    setSelectedStudentId(stu.studentId)
+    router.replace(`/${slug}?student=${encodeURIComponent(stu.studentId)}`)
+  }
+
   // Copy UPI ID
   const handleCopyUpi = async () => {
     try {
@@ -188,18 +202,7 @@ export default function PublicPaymentPage() {
     }
   }
 
-  // Copy UPI Payment URI
-  const handleCopyUri = async () => {
-    try {
-      await navigator.clipboard.writeText(upiUri)
-      setCopiedLink(true)
-      setTimeout(() => setCopiedLink(false), 2200)
-    } catch {
-      // ignore
-    }
-  }
-
-  // Handle direct App Click
+  // Open in UPI App
   const handleOpenUpiApp = (schemePrefix?: string) => {
     if (schemePrefix) {
       const customUri = upiUri.replace(/^upi:/, schemePrefix)
@@ -212,22 +215,22 @@ export default function PublicPaymentPage() {
     }
   }
 
-  // Handle Cash Counter Pass generation
+  // Cash pass generation
   const handleGenerateCashPass = async () => {
     setSubmitting(true)
     try {
       const passId = `PASS-${Date.now().toString().slice(-6)}`
       setCashPass({
         passId,
-        studentName: currentStudent?.studentName || "Amarnath",
-        studentId: currentStudent?.studentId || "STU-001",
-        amount: String(numAmount),
+        studentName: activeStudent?.studentName || "Student",
+        studentId: activeStudent?.studentId || "STU-001",
+        amount: fixedAmount,
         timestamp: new Date().toISOString(),
       })
       await createPublicPayment({
         slug,
-        studentName: currentStudent?.studentName || "Amarnath",
-        studentId: currentStudent?.studentId || "STU-001",
+        studentName: activeStudent?.studentName || "Student",
+        studentId: activeStudent?.studentId || "STU-001",
         amount: numAmount,
         method: "CASH_COUNTER",
       }).catch(() => null)
@@ -236,23 +239,23 @@ export default function PublicPaymentPage() {
     }
   }
 
-  // Handle Confirm Paid (Receipt trigger)
+  // Confirm Paid
   const handleConfirmPaid = async () => {
     setSubmitting(true)
     try {
       const created = await createPublicPayment({
         slug,
-        studentName: currentStudent?.studentName || "Amarnath",
-        studentId: currentStudent?.studentId || "STU-001",
+        studentName: activeStudent?.studentName || "Student",
+        studentId: activeStudent?.studentId || "STU-001",
         amount: numAmount,
         method: "UPI",
       })
       setOrder({
         ...created,
         status: "SUCCESS",
-        amount: String(numAmount),
-        studentName: currentStudent?.studentName || "Amarnath",
-        studentId: currentStudent?.studentId || "STU-001",
+        amount: fixedAmount,
+        studentName: activeStudent?.studentName || "Student",
+        studentId: activeStudent?.studentId || "STU-001",
       })
     } catch {
       setOrder({
@@ -262,9 +265,9 @@ export default function PublicPaymentPage() {
         gatewayStatus: "SETTLED",
         method: "UPI",
         utr: `UTR${Date.now().toString().slice(-10)}`,
-        amount: String(numAmount),
-        studentId: currentStudent?.studentId || "STU-001",
-        studentName: currentStudent?.studentName || "Amarnath",
+        amount: fixedAmount,
+        studentId: activeStudent?.studentId || "STU-001",
+        studentName: activeStudent?.studentName || "Student",
         feeId: null,
         checkoutUrl: upiUri,
         receiptId: `REC-${Date.now().toString().slice(-6)}`,
@@ -286,7 +289,7 @@ export default function PublicPaymentPage() {
             <Loader2Icon className="absolute -bottom-1 -right-1 size-5 animate-spin text-primary" />
           </div>
           <p className="text-sm font-medium text-foreground">
-            Loading fee payment portal…
+            Loading student fee portal…
           </p>
           <p className="text-xs text-muted-foreground">Connecting securely</p>
         </div>
@@ -329,7 +332,7 @@ export default function PublicPaymentPage() {
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100/60 px-4 py-8 text-foreground sm:py-12 dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950">
       <div className="mx-auto max-w-xl">
-        {/* Organization Header */}
+        {/* Verified Institution Header */}
         <header className="mb-6 flex items-center justify-between rounded-3xl border bg-card/80 p-5 shadow-xs backdrop-blur-md sm:p-6">
           <div className="flex items-center gap-3.5">
             <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-emerald-600 font-bold text-lg text-white shadow-md shadow-emerald-600/20">
@@ -495,123 +498,87 @@ export default function PublicPaymentPage() {
           </section>
         ) : (
           /* =========================================================================
-              MAIN STREAMLINED PAYMENT SCREEN:
-              1. How Much to Pay (Money Value)
-              2. Payment Methods Only (UPI / QR / Cash)
+              MAIN USER PAYMENT SCREEN:
+              1. Exact Student & Fixed Verified Fee Amount ("dont create own")
+              2. Payment Methods Only
              ========================================================================= */
           <div className="space-y-6">
-            {/* -------------------------------------------------------------
-                CARD 1: HOW MUCH TO PAY (MONEY VALUE)
-               ------------------------------------------------------------- */}
-            <section className="overflow-hidden rounded-3xl border bg-card p-6 shadow-md shadow-black/[0.03] sm:p-7">
-              <div className="flex items-center justify-between border-b pb-3">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Amount to Pay
-                </span>
-                {profile?.students && profile.students.length > 0 && (
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <GraduationCapIcon className="size-3.5 text-primary" />
-                    <span>
-                      {currentStudent?.studentName || "Amarnath"} ({currentStudent?.studentId || "STU-001"})
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Large Money Value Display */}
-              <div className="mt-4 flex flex-col items-center justify-center py-2 text-center">
-                {!isEditingAmount ? (
-                  <div className="group flex items-center gap-2">
-                    <span className="text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl tabular-nums">
-                      {formatInr(amount)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingAmount(true)}
-                      className="rounded-full p-1.5 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                      title="Edit fee amount"
-                    >
-                      ✎ Edit
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold text-muted-foreground">
-                        ₹
-                      </span>
-                      <Input
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={amount}
-                        autoFocus
-                        onChange={(e) => setAmount(e.target.value)}
-                        className="h-12 w-48 pl-8 text-2xl font-bold tabular-nums"
-                      />
-                    </div>
-                    <Button
-                      size="sm"
-                      onClick={() => setIsEditingAmount(false)}
-                      className="h-12 px-4"
-                    >
-                      Done
-                    </Button>
-                  </div>
-                )}
-
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {currentStudent?.group
-                    ? `Monthly Tuition Fee · ${currentStudent.group}`
-                    : "Monthly Student Fee"}
-                </p>
-
-                {/* Quick Preset Amount Buttons */}
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5">
-                  <span className="text-[11px] font-medium text-muted-foreground mr-1">
-                    Quick amounts:
+            {/* Student Switcher Bar (when multiple students enrolled) */}
+            {profile?.students && profile.students.length > 1 && (
+              <div className="rounded-2xl border bg-card/60 p-3 shadow-2xs">
+                <div className="flex items-center justify-between mb-2 px-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Enrolled Students
                   </span>
-                  {PRESET_AMOUNTS.map((p) => {
-                    const isSelected = Number(amount) === p
+                  <span className="text-[11px] text-muted-foreground">
+                    Select to view individual fee
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {profile.students.map((s) => {
+                    const isSelected = activeStudent?.studentId === s.studentId
                     return (
                       <button
-                        key={p}
+                        key={s.studentId}
                         type="button"
-                        onClick={() => {
-                          setAmount(String(p))
-                          setIsEditingAmount(false)
-                        }}
+                        onClick={() => handleSelectStudent(s)}
                         className={cn(
-                          "rounded-full px-3 py-1 text-xs font-semibold transition active:scale-95",
+                          "flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium transition active:scale-95",
                           isSelected
-                            ? "bg-primary text-primary-foreground shadow-xs"
+                            ? "bg-primary text-primary-foreground shadow-xs font-semibold ring-2 ring-primary/20"
                             : "border bg-muted/30 text-foreground hover:bg-muted"
                         )}
                       >
-                        ₹{p.toLocaleString("en-IN")}
+                        <UserCheckIcon className="size-3.5" />
+                        <span>{s.studentName}</span>
+                        <span className="opacity-75">({s.studentId})</span>
+                        <span className="ml-1 rounded-md bg-black/10 dark:bg-white/10 px-1.5 py-0.5 text-[10px] font-bold">
+                          {formatInr(s.feeAmount || "5000")}
+                        </span>
                       </button>
                     )
                   })}
                 </div>
               </div>
+            )}
 
-              {/* Student Switcher (if more than 1 student enrolled) */}
-              {profile?.students && profile.students.length > 1 && (
-                <div className="mt-4 border-t pt-3 flex items-center justify-between text-xs text-muted-foreground">
-                  <span>Student:</span>
-                  <select
-                    value={selectedStudentId}
-                    onChange={(e) => setSelectedStudentId(e.target.value)}
-                    className="rounded-lg border bg-background px-2.5 py-1 text-xs font-medium text-foreground outline-none"
-                  >
-                    {profile.students.map((s) => (
-                      <option key={s.studentId} value={s.studentId}>
-                        {s.studentName} ({s.studentId})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+            {/* -------------------------------------------------------------
+                CARD 1: HOW MUCH TO PAY (EXACT USER FEE VALUE ONLY)
+               ------------------------------------------------------------- */}
+            <section className="overflow-hidden rounded-3xl border bg-card p-6 shadow-md shadow-black/[0.03] sm:p-7">
+              <div className="flex items-center justify-between border-b pb-3">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Fee Amount to Pay
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-400">
+                  Verified Due
+                </span>
+              </div>
+
+              {/* Exact Fee Display (Fixed, no arbitrary editing / cannot create own) */}
+              <div className="mt-4 flex flex-col items-center justify-center py-2 text-center">
+                <span className="text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl tabular-nums">
+                  {formatInr(fixedAmount)}
+                </span>
+
+                {/* Specific Student Info Card */}
+                {activeStudent && (
+                  <div className="mt-3 inline-flex items-center gap-2 rounded-full border bg-muted/40 px-3.5 py-1 text-xs text-foreground">
+                    <GraduationCapIcon className="size-3.5 text-primary" />
+                    <span className="font-semibold">{activeStudent.studentName}</span>
+                    <span className="text-muted-foreground">({activeStudent.studentId})</span>
+                    {activeStudent.group && (
+                      <span className="border-l pl-2 text-muted-foreground">
+                        {activeStudent.group}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Official monthly fee for {activeStudent?.studentName || "student"} · {profile.name}
+                </p>
+              </div>
             </section>
 
             {/* -------------------------------------------------------------
@@ -659,7 +626,7 @@ export default function PublicPaymentPage() {
               {/* TAB 1: UPI & DYNAMIC QR */}
               {activeTab === "UPI" && (
                 <div className="mt-6 space-y-6">
-                  {/* Dynamic QR Code Card */}
+                  {/* Dynamic QR Code Card (Generated specifically for this user & fee) */}
                   <div className="flex flex-col items-center justify-center rounded-2xl border bg-slate-50/80 dark:bg-zinc-900/60 p-6 shadow-inner text-center">
                     <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                       Scan to Pay with Any UPI App
@@ -673,7 +640,7 @@ export default function PublicPaymentPage() {
                       ) : (
                         <img
                           src={qrDataUrl}
-                          alt={`Scan UPI QR to pay ${formatInr(amount)}`}
+                          alt={`Scan UPI QR to pay ${formatInr(fixedAmount)} for ${activeStudent?.studentName || "student"}`}
                           className="size-60 sm:size-64 object-contain"
                         />
                       )}
@@ -704,11 +671,11 @@ export default function PublicPaymentPage() {
                     </div>
 
                     <p className="mt-1 text-[11px] text-muted-foreground">
-                      Compatible with Google Pay, PhonePe, Paytm, BHIM, CRED & Bank Apps
+                      Paying {formatInr(fixedAmount)} for {activeStudent?.studentName} ({activeStudent?.studentId})
                     </p>
                   </div>
 
-                  {/* One-Click Direct Pay Button (For Mobile & Desktop) */}
+                  {/* One-Click Direct Pay Button */}
                   <div className="space-y-3">
                     <Button
                       type="button"
@@ -717,10 +684,10 @@ export default function PublicPaymentPage() {
                       className="w-full h-12 text-base font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-600/20 gap-2"
                     >
                       <SmartphoneIcon className="size-5" />
-                      <span>Pay {formatInr(amount)} via Any UPI App</span>
+                      <span>Pay {formatInr(fixedAmount)} via Any UPI App</span>
                     </Button>
 
-                    {/* Quick App Direct Trigger Badges */}
+                    {/* Quick Direct UPI App Launchers */}
                     <div className="grid grid-cols-3 gap-2">
                       <Button
                         type="button"
@@ -752,7 +719,7 @@ export default function PublicPaymentPage() {
                     </div>
                   </div>
 
-                  {/* "I Have Paid" Action */}
+                  {/* "I Have Paid" Button */}
                   <div className="border-t pt-4 text-center">
                     <p className="text-xs text-muted-foreground mb-2">
                       Completed the UPI payment on your phone?
@@ -787,7 +754,7 @@ export default function PublicPaymentPage() {
                       Pay Cash at Counter Desk
                     </h3>
                     <p className="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">
-                      Generate a digital cash payment pass to deposit {formatInr(amount)} directly at the accounts counter desk.
+                      Generate a digital cash payment pass to deposit {formatInr(fixedAmount)} for {activeStudent?.studentName} directly at the accounts counter desk.
                     </p>
                   </div>
 
@@ -811,7 +778,7 @@ export default function PublicPaymentPage() {
           </div>
         )}
 
-        {/* Footer Guarantee */}
+        {/* Footer */}
         <footer className="mt-8 text-center text-xs text-muted-foreground">
           <p className="flex items-center justify-center gap-1.5 font-medium">
             <ShieldCheckIcon className="size-3.5 text-emerald-600 dark:text-emerald-400" />

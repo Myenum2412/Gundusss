@@ -210,6 +210,7 @@ export interface PublicStudentOption {
   course: string
   phone: string
   email: string
+  feeAmount?: string
 }
 
 export interface PublicOrganizationProfile {

@@ -190,7 +190,8 @@ async function executeMonthlyReminders(
     const amountStr = `₹${parseFloat(studentFee).toLocaleString('en-IN')}`;
     const studentPhone = (student.phone || '').replace(/\D/g, '');
 
-    const message = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${student.studentName}*,\n\nThis is your monthly fee reminder for *${student.course || 'Course'}* (${student.group || 'Batch'}).\n\n• Student ID: *${student.studentId}*\n• Monthly Fee: *${amountStr}*\n• Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\n👉 ${paymentBaseUrl}\n\n— ${companyName} Accounts Desk`;
+    const studentPaymentUrl = `${paymentBaseUrl}?student=${encodeURIComponent(student.studentId)}`;
+    const message = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${student.studentName}*,\n\nThis is your monthly fee reminder for *${student.course || 'Course'}* (${student.group || 'Batch'}).\n\n• Student ID: *${student.studentId}*\n• Monthly Fee: *${amountStr}*\n• Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\n👉 ${studentPaymentUrl}\n\n— ${companyName} Accounts Desk`;
 
     let delivered = false;
     let errorMsg: string | undefined;

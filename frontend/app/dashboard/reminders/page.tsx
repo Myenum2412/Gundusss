@@ -198,7 +198,8 @@ export default function RemindersPage() {
       return
     }
 
-    const msg = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${stu.studentName}*,\n\nThis is your monthly fee reminder for *${stu.course || "Course"}* (${stu.group || "Batch"}).\n\n• Student ID: *${stu.studentId}*\n• Monthly Fee: *₹${parseFloat(feeAmount).toLocaleString("en-IN")}*\n• Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\n👉 ${activeProfile?.paymentUrl || "https://myfees.myenum.in/amarnath"}\n\n— ${activeProfile?.name || "Seeds of Success"} Accounts Desk`
+    const studentPaymentUrl = `${activeProfile?.paymentUrl || "https://myfees.myenum.in/amarnath"}?student=${encodeURIComponent(stu.studentId)}`
+    const msg = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${stu.studentName}*,\n\nThis is your monthly fee reminder for *${stu.course || "Course"}* (${stu.group || "Batch"}).\n\n• Student ID: *${stu.studentId}*\n• Monthly Fee: *₹${parseFloat(feeAmount).toLocaleString("en-IN")}*\n• Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\n👉 ${studentPaymentUrl}\n\n— ${activeProfile?.name || "Seeds of Success"} Accounts Desk`
 
     if (waState?.status === "ready") {
       try {
@@ -573,7 +574,8 @@ export default function RemindersPage() {
                 status="delivered"
                 showTail={true}
                 onButtonClick={() => {
-                  window.open(activeProfile?.paymentUrl || "https://myfees.myenum.in/amarnath", "_blank")
+                  const studentQuery = previewStudent ? `?student=${encodeURIComponent(previewStudent.studentId)}` : ""
+                  window.open((activeProfile?.paymentUrl || "https://myfees.myenum.in/amarnath") + studentQuery, "_blank")
                 }}
               />
 
