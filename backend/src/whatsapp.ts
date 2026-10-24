@@ -1,4 +1,6 @@
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import path from 'node:path';
 import QRCode from 'qrcode';
 
 const require = createRequire(import.meta.url);
@@ -23,12 +25,46 @@ let connectedNumber: string | null = null;
 let lastError: string | null = null;
 let starting = false;
 
-function chromePath() {
-  return (
-    process.env.CHROME_PATH ??
-    process.env.PUPPETEER_EXECUTABLE_PATH ??
-    '/usr/bin/google-chrome'
-  );
+function findChromeExecutable(): string | undefined {
+  if (process.env.CHROME_PATH && existsSync(process.env.CHROME_PATH)) {
+    return process.env.CHROME_PATH;
+  }
+  if (
+    process.env.PUPPETEER_EXECUTABLE_PATH &&
+    existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)
+  ) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+
+  const candidates = [
+    // Windows Chrome
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    process.env.LOCALAPPDATA
+      ? path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe')
+      : '',
+    // Windows Edge
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    // Linux
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/snap/bin/chromium',
+    // macOS
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
 }
 
 export function getWaState() {
@@ -49,17 +85,23 @@ export async function startWa() {
 
   try {
     if (!client) {
+      const execPath = findChromeExecutable();
+      const puppeteerOptions: Record<string, any> = {
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+        ],
+      };
+
+      if (execPath) {
+        puppeteerOptions.executablePath = execPath;
+      }
+
       client = new Client({
         authStrategy: new LocalAuth({ dataPath: '.wwebjs_auth' }),
-        puppeteer: {
-          executablePath: chromePath(),
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-          ],
-        },
+        puppeteer: puppeteerOptions,
       });
 
       client.on('qr', async (qr: string) => {
