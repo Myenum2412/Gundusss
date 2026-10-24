@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   Collapsible,
@@ -15,6 +16,7 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import { ChevronRightIcon } from "lucide-react"
 
@@ -35,6 +37,12 @@ export function NavMain({
   label?: string | null
 }) {
   const pathname = usePathname()
+  const { isMobile, setOpenMobile } = useSidebar()
+  const closeMobileMenu = () => {
+    // Client-side navigation keeps the sidebar mounted; the mobile sheet still
+    // has to be dismissed explicitly once a destination is chosen.
+    if (isMobile) setOpenMobile(false)
+  }
   const isActiveUrl = (url: string) =>
     url !== "#" && (pathname === url || pathname.startsWith(url + "/"))
 
@@ -67,7 +75,7 @@ export function NavMain({
                   {item.items?.map((subItem) => (
                     <SidebarMenuSubItem key={subItem.title}>
                       <SidebarMenuSubButton
-                        render={<a href={subItem.url} />}
+                        render={<Link href={subItem.url} onClick={closeMobileMenu} />}
                         isActive={isActiveUrl(subItem.url)}
                         className="h-7.5 rounded-lg text-[13px] data-active:bg-sidebar-accent data-active:font-medium"
                       >
@@ -81,7 +89,7 @@ export function NavMain({
           ) : (
             <SidebarMenuItem key={item.title}>
               <SidebarMenuButton
-                render={<a href={item.url} />}
+                render={<Link href={item.url} onClick={closeMobileMenu} />}
                 tooltip={item.title}
                 isActive={Boolean(active)}
                 className="h-8.5 rounded-[10px] px-2.5 text-[13px] font-medium data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground data-active:shadow-[inset_0_0_0_1px_var(--sidebar-border)]"
