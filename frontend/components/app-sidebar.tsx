@@ -26,6 +26,7 @@ import {
   MegaphoneIcon,
   SettingsIcon,
   UsersIcon,
+  Building2Icon,
 } from "lucide-react"
 import type { Permission } from "@/lib/session"
 
@@ -34,6 +35,8 @@ interface NavItem {
   url: string
   icon?: React.ReactNode
   permission: Permission
+  /** Only the fixed developer account may see this destination. */
+  superOnly?: boolean
   items?: { title: string; url: string; permission?: Permission }[]
 }
 
@@ -101,11 +104,23 @@ const navigation: { navMain: NavItem[]; navBottom: NavItem[] } = {
       icon: <SettingsIcon />,
       permission: "settings:manage",
     },
+    {
+      title: "Organizations",
+      url: "/orgmenu/dashboard",
+      icon: <Building2Icon />,
+      permission: "data:read",
+      superOnly: true,
+    },
   ],
 }
 
-function forNav(items: NavItem[], can: (permission: Permission) => boolean) {
+function forNav(
+  items: NavItem[],
+  can: (permission: Permission) => boolean,
+  isSuper: boolean
+) {
   return items
+    .filter((item) => !item.superOnly || isSuper)
     .filter((item) => can(item.permission))
     .map(({ title, url, icon, items: subItems }) => ({
       title,
@@ -116,9 +131,9 @@ function forNav(items: NavItem[], can: (permission: Permission) => boolean) {
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-  const { user, can } = useAuth()
-  const navMain = forNav(navigation.navMain, can)
-  const navBottom = forNav(navigation.navBottom, can)
+  const { user, can, isSuper, activeProfile } = useAuth()
+  const navMain = forNav(navigation.navMain, can, isSuper)
+  const navBottom = forNav(navigation.navBottom, can, isSuper)
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -130,8 +145,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <SproutIcon className="size-4" />
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate text-[13px] font-semibold tracking-tight">Seeds of Success</span>
-                <span className="truncate text-[11px] text-muted-foreground">Fees Manager</span>
+                <span className="truncate text-[13px] font-semibold tracking-tight">
+                  {activeProfile.name}
+                </span>
+                <span className="truncate font-mono text-[10px] text-muted-foreground">
+                  {activeProfile.profileId}
+                </span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>

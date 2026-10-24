@@ -1,18 +1,21 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
+import { resolveProfileId } from '../profiles.js';
 import {
   findUserByEmail,
   findUserById,
   hashPassword,
   invalidateUserCache,
-  listUsers,
+  isSuperUser,
+  listUsersForProfile,
   normalizeEmail,
   removeUser,
   saveUser,
   toPublicUser,
   createUser,
   type Role,
+  type UserRecord,
 } from '../users.js';
 
 const RoleSchema = z.enum(['admin', 'accountant', 'viewer']);
@@ -41,27 +44,32 @@ function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
-/** True when removing admin rights from `target` would leave no active admin. */
-async function isLastActiveAdmin(targetEmail: string): Promise<boolean> {
-  const users = await listUsers();
+/** True when removing admin rights from `target` would leave its profile without one. */
+async function isLastActiveAdmin(
+  target: UserRecord,
+  profileId: string
+): Promise<boolean> {
+  const users = await listUsersForProfile(profileId);
   const activeAdmins = users.filter(
     (user) =>
       user.role === 'admin' &&
       user.active !== false &&
-      normalizeEmail(user.email) !== normalizeEmail(targetEmail)
+      normalizeEmail(user.email) !== normalizeEmail(target.email)
   );
-  const target = users.find(
-    (user) => normalizeEmail(user.email) === normalizeEmail(targetEmail)
-  );
-  return Boolean(target && target.role === 'admin' && activeAdmins.length === 0);
+  return target.role === 'admin' && activeAdmins.length === 0;
+}
+
+function belongsToProfile(user: UserRecord, profileId: string): boolean {
+  return (user.profile_id ?? '').trim() === profileId;
 }
 
 export async function userRoutes(app: FastifyInstance) {
   // The global auth guard already requires `users:manage` (admin) for /api/users.
 
-  // GET /api/users
-  app.get('/api/users', async () => {
-    const users = await listUsers();
+  // GET /api/users — only accounts in the workspace being viewed.
+  app.get('/api/users', async (req) => {
+    const profileId = await resolveProfileId(req);
+    const users = await listUsersForProfile(profileId);
     return { data: users.map(toPublicUser) };
   });
 
@@ -74,8 +82,13 @@ export async function userRoutes(app: FastifyInstance) {
         .send({ error: 'Invalid body', details: parsed.error.flatten() });
     }
 
+    const profileId = await resolveProfileId(req);
+
     try {
-      const user = await createUser(parsed.data);
+      const user = await createUser({
+        ...parsed.data,
+        profileId,
+      });
       return reply.code(201).send({ data: toPublicUser(user) });
     } catch (err) {
       return reply
@@ -98,9 +111,17 @@ export async function userRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'Invalid user id.' });
     }
 
+    const profileId = await resolveProfileId(req);
     const user = await findUserById(id);
-    if (!user) {
+    if (!user || !belongsToProfile(user, profileId)) {
       return reply.code(404).send({ error: 'User not found.' });
+    }
+
+    // The fixed developer account may never be edited, disabled, or re-scoped.
+    if (isSuperUser(user)) {
+      return reply.code(400).send({
+        error: 'The system administrator account cannot be modified.',
+      });
     }
 
     const isSelf = normalizeEmail(user.email) === req.auth?.email;
@@ -115,7 +136,7 @@ export async function userRoutes(app: FastifyInstance) {
 
     const losesAdmin =
       user.role === 'admin' && (nextRole !== 'admin' || !nextActive);
-    if (losesAdmin && (await isLastActiveAdmin(user.email))) {
+    if (losesAdmin && (await isLastActiveAdmin(user, profileId))) {
       return reply.code(400).send({
         error: 'At least one active administrator is required.',
       });
@@ -126,6 +147,8 @@ export async function userRoutes(app: FastifyInstance) {
       name: parsed.data.name !== undefined ? parsed.data.name : user.name,
       role: nextRole,
       active: nextActive,
+      profile_id: user.profile_id,
+      super: false,
       password_hash: parsed.data.password
         ? await hashPassword(parsed.data.password)
         : user.password_hash,
@@ -150,9 +173,16 @@ export async function userRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'Invalid user id.' });
     }
 
+    const profileId = await resolveProfileId(req);
     const user = await findUserById(id);
-    if (!user) {
+    if (!user || !belongsToProfile(user, profileId)) {
       return reply.code(404).send({ error: 'User not found.' });
+    }
+
+    if (isSuperUser(user)) {
+      return reply.code(400).send({
+        error: 'The system administrator account cannot be deleted.',
+      });
     }
 
     if (normalizeEmail(user.email) === req.auth?.email) {
@@ -161,7 +191,7 @@ export async function userRoutes(app: FastifyInstance) {
         .send({ error: 'You cannot delete your own account.' });
     }
 
-    if (user.role === 'admin' && (await isLastActiveAdmin(user.email))) {
+    if (user.role === 'admin' && (await isLastActiveAdmin(user, profileId))) {
       return reply
         .code(400)
         .send({ error: 'At least one active administrator is required.' });
@@ -179,15 +209,21 @@ export async function userRoutes(app: FastifyInstance) {
   });
 
   // Small helper used by the frontend when it needs to validate an email
-  // before creating an account (admin-only, same guard).
+  // before creating an account (admin-only, same guard). Only emails inside
+  // the current workspace are reported, so addresses cannot be probed across
+  // profiles.
   app.get<{ Querystring: { email?: string } }>(
     '/api/users/lookup',
     async (req, reply) => {
+      const profileId = await resolveProfileId(req);
       const email = req.query.email?.trim();
       if (!email) return reply.code(400).send({ error: 'Email is required.' });
       const user = await findUserByEmail(email);
+      const visible = Boolean(user && belongsToProfile(user, profileId));
       return {
-        data: user ? { exists: true, email: normalizeEmail(user.email) } : { exists: false },
+        data: visible
+          ? { exists: true, email: normalizeEmail(user!.email) }
+          : { exists: false },
       };
     }
   );

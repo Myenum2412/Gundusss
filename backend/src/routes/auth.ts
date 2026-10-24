@@ -2,10 +2,15 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
 import { createToken, ROLE_PERMISSIONS } from '../auth.js';
+import {
+  createWorkspace,
+  getProfileOrDefault,
+  getSessionProfiles,
+} from '../profiles.js';
 import { LoginSchema } from '../schemas.js';
+import { SUPER_PROFILE_ID } from '../tenant.js';
 import {
   countUsers,
-  createUser,
   findUserByEmail,
   normalizeEmail,
   toPublicUser,
@@ -17,6 +22,19 @@ const SetupSchema = z.object({
   email: z.string().trim().email().max(255),
   password: z.string().min(8).max(128),
 });
+
+const SignupSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  organization: z.string().trim().min(1).max(120),
+  email: z.string().trim().email().max(255),
+  password: z.string().min(8).max(128),
+});
+
+function statusOf(err: unknown, fallback = 500): number {
+  return typeof (err as { statusCode?: unknown }).statusCode === 'number'
+    ? (err as { statusCode: number }).statusCode
+    : fallback;
+}
 
 export async function authRoutes(app: FastifyInstance) {
   // GET /api/auth/setup — public. Tells the login screen whether the very first
@@ -43,11 +61,11 @@ export async function authRoutes(app: FastifyInstance) {
 
     const { name, email, password } = parsed.data;
     try {
-      const user = await createUser({
+      const { user, profile } = await createWorkspace({
         name,
+        organization: `${name}'s workspace`,
         email,
         password,
-        role: 'admin',
       });
       const publicUser = toPublicUser(user);
       return reply.code(201).send({
@@ -55,16 +73,43 @@ export async function authRoutes(app: FastifyInstance) {
           token: createToken(publicUser),
           user: publicUser,
           permissions: ROLE_PERMISSIONS[publicUser.role],
+          profile,
+          activeProfile: profile,
         },
       });
     } catch (err) {
-      const status =
-        typeof (err as { statusCode?: unknown }).statusCode === 'number'
-          ? (err as { statusCode: number }).statusCode
-          : 500;
       return reply
-        .code(status)
+        .code(statusOf(err))
         .send({ error: err instanceof Error ? err.message : 'Setup failed' });
+    }
+  });
+
+  // POST /api/auth/signup — public. Creates a brand new isolated workspace and
+  // an administrator account for it.
+  app.post('/api/auth/signup', async (req, reply) => {
+    const parsed = SignupSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply
+        .code(400)
+        .send({ error: 'Invalid body', details: parsed.error.flatten() });
+    }
+
+    try {
+      const { user, profile } = await createWorkspace(parsed.data);
+      const publicUser = toPublicUser(user);
+      return reply.code(201).send({
+        data: {
+          token: createToken(publicUser),
+          user: publicUser,
+          permissions: ROLE_PERMISSIONS[publicUser.role],
+          profile,
+          activeProfile: profile,
+        },
+      });
+    } catch (err) {
+      return reply
+        .code(statusOf(err, 400))
+        .send({ error: err instanceof Error ? err.message : 'Signup failed' });
     }
   });
 
@@ -95,11 +140,18 @@ export async function authRoutes(app: FastifyInstance) {
       });
     }
 
+    const profile = await getProfileOrDefault(
+      publicUser.profile_id || SUPER_PROFILE_ID,
+      publicUser.email
+    );
+
     return {
       data: {
         token: createToken(publicUser),
         user: publicUser,
         permissions: ROLE_PERMISSIONS[publicUser.role],
+        profile,
+        activeProfile: profile,
       },
     };
   });
@@ -109,10 +161,13 @@ export async function authRoutes(app: FastifyInstance) {
     if (!req.auth) {
       return reply.code(401).send({ error: 'Authentication required.' });
     }
+    const { profile, activeProfile } = await getSessionProfiles(req);
     return {
       data: {
         user: req.auth,
         permissions: ROLE_PERMISSIONS[req.auth.role],
+        profile,
+        activeProfile,
       },
     };
   });

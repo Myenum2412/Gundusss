@@ -1,10 +1,12 @@
 import { apiFetch, readBody } from "./api-base"
-import type { AuthUser, Permission } from "./session"
+import type { AuthUser, Permission, ProfileInfo } from "./session"
 
 export interface AuthSession {
   token: string
   user: AuthUser
   permissions: Permission[]
+  profile: ProfileInfo
+  activeProfile: ProfileInfo
 }
 
 interface AuthResponse {
@@ -20,6 +22,22 @@ export interface SetupInput {
   name: string
   email: string
   password: string
+}
+
+export interface SignupInput {
+  name: string
+  organization: string
+  email: string
+  password: string
+}
+
+export async function signup(input: SignupInput): Promise<AuthSession> {
+  const res = await apiFetch("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  })
+  return (await readBody<AuthResponse>(res)).data
 }
 
 export async function login(input: LoginInput): Promise<AuthSession> {
@@ -48,10 +66,20 @@ export async function getSetupStatus(): Promise<{ needsSetup: boolean }> {
 export async function getMe(): Promise<{
   user: AuthUser
   permissions: Permission[]
+  profile: ProfileInfo
+  activeProfile: ProfileInfo
 }> {
   const res = await apiFetch("/api/auth/me")
-  return (await readBody<{ data: { user: AuthUser; permissions: Permission[] } }>(res))
-    .data
+  return (
+    await readBody<{
+      data: {
+        user: AuthUser
+        permissions: Permission[]
+        profile: ProfileInfo
+        activeProfile: ProfileInfo
+      }
+    }>(res)
+  ).data
 }
 
 export async function logout(): Promise<void> {

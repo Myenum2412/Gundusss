@@ -15,10 +15,16 @@ import {
   storeUser,
   type AuthUser,
   type Permission,
+  type ProfileInfo,
 } from "@/lib/session"
 
 interface AuthContextValue {
   user: AuthUser
+  /** The account's home workspace. */
+  profile: ProfileInfo
+  /** The workspace currently being viewed (differs during a super-admin view). */
+  activeProfile: ProfileInfo
+  isSuper: boolean
   can: (permission: Permission) => boolean
   signOut: () => Promise<void>
   refresh: () => Promise<void>
@@ -37,6 +43,10 @@ export function useAuth(): AuthContextValue {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const [user, setUser] = React.useState<AuthUser | null>(null)
+  const [profile, setProfile] = React.useState<ProfileInfo | null>(null)
+  const [activeProfile, setActiveProfile] = React.useState<ProfileInfo | null>(
+    null
+  )
   const [ready, setReady] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
@@ -50,6 +60,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const result = await getMe()
       setUser(result.user)
+      setProfile(result.profile)
+      setActiveProfile(result.activeProfile)
       storeUser(result.user)
       setError(null)
     } catch (err) {
@@ -106,6 +118,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       getMe()
         .then((result) => {
           setUser(result.user)
+          setProfile(result.profile)
+          setActiveProfile(result.activeProfile)
           storeUser(result.user)
         })
         .catch((err) => {
@@ -125,18 +139,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await logout()
     clearSession()
     setUser(null)
+    setProfile(null)
+    setActiveProfile(null)
     router.replace("/login")
   }, [router])
 
   const value = React.useMemo<AuthContextValue | null>(() => {
-    if (!user) return null
+    if (!user || !profile || !activeProfile) return null
     return {
       user,
+      profile,
+      activeProfile,
+      isSuper: user.super === true,
       can: (permission: Permission) => canWithUser(user, permission),
       signOut,
       refresh: validate,
     }
-  }, [user, signOut, validate])
+  }, [user, profile, activeProfile, signOut, validate])
 
   if (!ready) {
     return (

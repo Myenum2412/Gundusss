@@ -45,6 +45,7 @@ const databaseId = (process.env.APPWRITE_DATABASE_ID ?? 'fees').trim();
 const dryRun = process.argv.includes('--dry-run');
 
 const tables = [
+  { tableId: 'profiles', name: 'Profiles' },
   { tableId: 'fees', name: 'Fees' },
   { tableId: 'users', name: 'Users' },
   { tableId: 'students', name: 'Students' },

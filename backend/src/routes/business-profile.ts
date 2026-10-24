@@ -5,6 +5,8 @@ import {
   getRecord,
   putRecord,
 } from '../appwrite.js';
+import { resolveProfileId } from '../profiles.js';
+import { scopedEntityId } from '../tenant.js';
 
 const str = (max = 500) => z.string().max(max).default('');
 const list = (maxItems = 30, maxLength = 200) =>
@@ -133,8 +135,12 @@ interface StoredProfile {
 const COLLECTION = APPWRITE_COLLECTIONS.businessProfiles;
 
 export async function businessProfileRoutes(app: FastifyInstance) {
-  app.get('/api/business-profile', async () => {
-    const record = await getRecord<StoredProfile>(COLLECTION, '1');
+  app.get('/api/business-profile', async (req) => {
+    const profileId = await resolveProfileId(req);
+    const record = await getRecord<StoredProfile>(
+      COLLECTION,
+      scopedEntityId(profileId, '1')
+    );
     if (!record) return { data: { profile: null, updatedAt: null } };
     return {
       data: {
@@ -153,11 +159,16 @@ export async function businessProfileRoutes(app: FastifyInstance) {
       });
     }
 
+    const profileId = await resolveProfileId(req);
     const updatedAt = new Date().toISOString();
-    await putRecord<StoredProfile>(COLLECTION, '1', {
-      profile: parsed.data.profile,
-      updatedAt,
-    });
+    await putRecord<StoredProfile>(
+      COLLECTION,
+      scopedEntityId(profileId, '1'),
+      {
+        profile: parsed.data.profile,
+        updatedAt,
+      }
+    );
 
     return { data: { updatedAt } };
   });

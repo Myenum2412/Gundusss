@@ -4,9 +4,19 @@ import {
   APPWRITE_COLLECTIONS,
   getRecord,
   listRecords,
+  listScopedRecords,
   putRecord,
 } from '../appwrite.js';
+import {
+  getProfile,
+  resolveProfileId,
+} from '../profiles.js';
 import type { Fee } from '../schemas.js';
+import {
+  SUPER_PROFILE_ID,
+  isValidProfileId,
+  scopedEntityId,
+} from '../tenant.js';
 import { ensureGatewayUpiSynced } from './payment-settings.js';
 
 const YOUPI_API = (process.env.YOUPI_PAYMENT_API_URL ?? 'http://localhost:6100').replace(/\/+$/, '');
@@ -51,6 +61,7 @@ const KNOWN_STATUSES = new Set([
 ]);
 
 interface LocalOrder {
+  profileId: string;
   orderId: string;
   paymentId: string | null;
   status: string;
@@ -74,6 +85,7 @@ interface GatewayPaymentView {
 }
 
 interface PaymentEventRow {
+  profileId?: string;
   id: string;
   orderId: string;
   status: string;
@@ -85,6 +97,7 @@ interface PaymentEventRow {
 }
 
 interface ReceiptRecord {
+  profileId?: string;
   receiptId: string;
   studentId: string;
   studentName: string;
@@ -160,33 +173,83 @@ async function fetchGatewayPayment(
   }
 }
 
-async function getLocalOrder(orderId: string): Promise<LocalOrder | null> {
-  const record = await getRecord<LocalOrder>(ORDERS, orderId);
-  return record?.data ?? null;
+/** Ensure an order loaded from storage always carries its workspace id. */
+function normalizeStoredOrder(
+  order: LocalOrder,
+  profileId: string
+): LocalOrder {
+  return {
+    ...order,
+    profileId: (order.profileId ?? '').trim() || profileId,
+  };
 }
 
-async function listOrders(): Promise<LocalOrder[]> {
-  const records = await listRecords<LocalOrder>(ORDERS);
+async function getLocalOrder(
+  profileId: string,
+  orderId: string
+): Promise<LocalOrder | null> {
+  const record = await getRecord<LocalOrder>(
+    ORDERS,
+    scopedEntityId(profileId, orderId)
+  );
+  return record ? normalizeStoredOrder(record.data, profileId) : null;
+}
+
+async function listOrders(profileId: string): Promise<LocalOrder[]> {
+  const records = await listScopedRecords<LocalOrder>(ORDERS, profileId);
   return records
-    .map((record) => record.data)
+    .map((record) => normalizeStoredOrder(record.data, profileId))
     .sort((a, b) =>
       String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
     );
 }
 
-async function findLocalOrder(id: string): Promise<LocalOrder | null> {
-  const direct = await getLocalOrder(id);
+async function findLocalOrder(
+  profileId: string,
+  id: string
+): Promise<LocalOrder | null> {
+  const direct = await getLocalOrder(profileId, id);
   if (direct) return direct;
-  const orders = await listOrders();
+  const orders = await listOrders(profileId);
   return orders.find((order) => order.paymentId === id) ?? null;
 }
 
-async function saveLocalOrder(order: LocalOrder): Promise<void> {
-  await putRecord(ORDERS, order.orderId, order);
+/**
+ * Webhook-only lookup: the gateway callback carries no user session, so the
+ * order (and therefore its profile) must be discovered from the order id.
+ */
+async function findOrderAcrossProfiles(
+  orderId: string
+): Promise<LocalOrder | null> {
+  const records = await listRecords<LocalOrder>(ORDERS);
+  for (const record of records) {
+    const order = record.data;
+    if (order.orderId !== orderId) continue;
+    const rowProfile =
+      (order.profileId ?? '').trim() ||
+      record.entityId.split(':')[0] ||
+      SUPER_PROFILE_ID;
+    return normalizeStoredOrder(order, rowProfile);
+  }
+  return null;
 }
 
-async function readPaymentEvents(orderId: string): Promise<PaymentEventRow[]> {
-  const records = await listRecords<PaymentEventRow>(EVENTS);
+async function saveLocalOrder(order: LocalOrder): Promise<void> {
+  if (!order.profileId) {
+    throw new Error('Cannot save a payment order without a profile id.');
+  }
+  await putRecord(
+    ORDERS,
+    scopedEntityId(order.profileId, order.orderId),
+    order
+  );
+}
+
+async function readPaymentEvents(
+  profileId: string,
+  orderId: string
+): Promise<PaymentEventRow[]> {
+  const records = await listScopedRecords<PaymentEventRow>(EVENTS, profileId);
   return records
     .map((record) => record.data)
     .filter((event) => event.orderId === orderId)
@@ -201,16 +264,19 @@ async function readPaymentEvents(orderId: string): Promise<PaymentEventRow[]> {
  * Append-only lifecycle log. Polling and webhook retries are noisy, so an
  * event is only written when the last known tuple actually changes.
  */
-async function recordPaymentEvent(input: {
-  orderId: string;
-  status: string;
-  gatewayStatus?: string;
-  method?: string;
-  source: string;
-  message?: string;
-}): Promise<void> {
+async function recordPaymentEvent(
+  profileId: string,
+  input: {
+    orderId: string;
+    status: string;
+    gatewayStatus?: string;
+    method?: string;
+    source: string;
+    message?: string;
+  }
+): Promise<void> {
   const gatewayStatus = input.gatewayStatus ?? '';
-  const events = await readPaymentEvents(input.orderId);
+  const events = await readPaymentEvents(profileId, input.orderId);
   const previous = events[events.length - 1];
   if (
     previous &&
@@ -222,6 +288,7 @@ async function recordPaymentEvent(input: {
   }
 
   const event: PaymentEventRow = {
+    profileId,
     id: randomUUID(),
     orderId: input.orderId,
     status: input.status,
@@ -231,16 +298,22 @@ async function recordPaymentEvent(input: {
     message: input.message ?? '',
     createdAt: nowIso(),
   };
-  await putRecord(EVENTS, event.id, event);
+  await putRecord(
+    EVENTS,
+    scopedEntityId(profileId, event.id),
+    event
+  );
 }
 
-async function listReceipts(): Promise<Array<{ entityId: string; data: ReceiptRecord }>> {
-  const records = await listRecords<ReceiptRecord>(RECEIPTS);
+async function listReceipts(
+  profileId: string
+): Promise<Array<{ entityId: string; data: ReceiptRecord }>> {
+  const records = await listScopedRecords<ReceiptRecord>(RECEIPTS, profileId);
   return records.map((record) => ({ entityId: record.entityId, data: record.data }));
 }
 
-async function nextReceiptId(): Promise<string> {
-  const receipts = await listReceipts();
+async function nextReceiptId(profileId: string): Promise<string> {
+  const receipts = await listReceipts(profileId);
   const max = receipts.reduce((current, receipt) => {
     const digits = String(receipt.data.receiptId ?? receipt.entityId).replace(/[^0-9]/g, '');
     return Math.max(current, Number(digits) || 0);
@@ -288,10 +361,11 @@ function paymentDate(completedAt?: string): string {
 }
 
 async function findFeeByStudentAndAmount(
+  profileId: string,
   studentName: string,
   amount: number
 ): Promise<Fee | null> {
-  const records = await listRecords<Fee>(FEES);
+  const records = await listScopedRecords<Fee>(FEES, profileId);
   const matches = records
     .map((record) => record.data)
     .filter(
@@ -308,6 +382,7 @@ export async function paymentRoutes(app: FastifyInstance) {
   // POST /api/payments/create — open a YOUPI PG checkout session for a fee.
   app.post('/api/payments/create', async (req, reply) => {
     const body = (req.body ?? {}) as CreatePaymentBody;
+    const profileId = await resolveProfileId(req);
 
     const amount = Number(body.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -341,6 +416,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       },
       description: body.description ?? `Fee payment for ${studentName}`,
       metadata: {
+        profileId,
         studentId: body.studentId ?? '',
         studentName,
         feeId: body.feeId ?? null,
@@ -349,11 +425,11 @@ export async function paymentRoutes(app: FastifyInstance) {
     };
 
     // A save made while YOUPI PG was offline is retried here, so the new
-    // checkout uses the UPI ID shown in the fees app.
-    const upiSync = await ensureGatewayUpiSynced();
+    // checkout uses the UPI ID shown in this workspace.
+    const upiSync = await ensureGatewayUpiSynced(profileId);
     if (upiSync?.error) {
       app.log.warn(
-        { gatewayError: upiSync.error },
+        { gatewayError: upiSync.error, profileId },
         'YOUPI PG UPI settings were not synced before checkout'
       );
     }
@@ -384,7 +460,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     }
 
     const initialStatus = json.status ?? 'INITIATED';
-    const existing = await getLocalOrder(orderId);
+    const existing = await getLocalOrder(profileId, orderId);
     const timestamp = nowIso();
     // Reusing an order id must not regress a settled/terminal local record if
     // the gateway returns the original session for the same idempotency key.
@@ -392,6 +468,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     const order: LocalOrder = existing
       ? {
           ...existing,
+          profileId,
           paymentId: json.paymentId ?? existing.paymentId,
           status: alreadyTerminal ? existing.status : initialStatus,
           gatewayStatus: alreadyTerminal ? existing.gatewayStatus : initialStatus,
@@ -400,6 +477,7 @@ export async function paymentRoutes(app: FastifyInstance) {
           updatedAt: timestamp,
         }
       : {
+          profileId,
           orderId,
           paymentId: json.paymentId ?? null,
           status: initialStatus,
@@ -417,7 +495,7 @@ export async function paymentRoutes(app: FastifyInstance) {
         };
     await saveLocalOrder(order);
 
-    await recordPaymentEvent({
+    await recordPaymentEvent(profileId, {
       orderId,
       status: initialStatus,
       gatewayStatus: initialStatus,
@@ -440,18 +518,26 @@ export async function paymentRoutes(app: FastifyInstance) {
     });
   });
 
-  // GET /api/payments — list payment sessions created through this app.
-  app.get('/api/payments', async () => {
-    return { data: await listOrders() };
+  // GET /api/payments — list payment sessions created in this workspace.
+  app.get('/api/payments', async (req) => {
+    const profileId = await resolveProfileId(req);
+    return { data: await listOrders(profileId) };
   });
 
   // GET /api/payments/:id — local record first, then reconcile display status
   // with the gateway. The webhook remains the only path that settles money.
   app.get('/api/payments/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    let order = await findLocalOrder(id);
+    const profileId = await resolveProfileId(req);
+    let order = await findLocalOrder(profileId, id);
 
-    if (order && !TERMINAL_STATUSES.has(order.status)) {
+    if (!order) {
+      // Never fall back to the gateway for an id this workspace does not own:
+      // that would expose another profile's payment details.
+      return reply.code(404).send({ error: 'Payment not found' });
+    }
+
+    if (!TERMINAL_STATUSES.has(order.status)) {
       const gateway = await fetchGatewayPayment(order.paymentId, order.orderId);
       const gatewayStatus = (gateway?.internalStatus ?? gateway?.status ?? '').toUpperCase();
 
@@ -485,7 +571,7 @@ export async function paymentRoutes(app: FastifyInstance) {
           };
           await saveLocalOrder(order);
 
-          await recordPaymentEvent({
+          await recordPaymentEvent(profileId, {
             orderId: order.orderId,
             status: order.status,
             gatewayStatus: order.gatewayStatus,
@@ -497,25 +583,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       }
     }
 
-    if (order) {
-      return { data: { ...order, events: await readPaymentEvents(order.orderId) } };
-    }
-
-    // Unknown locally: fall back to the gateway's public view.
-    try {
-      const headers: Record<string, string> = {};
-      if (YOUPI_WEBHOOK_SECRET) headers['X-Merchant-Key'] = YOUPI_WEBHOOK_SECRET;
-      const upstream = await fetch(`${YOUPI_API}/api/v1/payments/${encodeURIComponent(id)}`, {
-        headers,
-      });
-      const json = await upstream.json().catch(() => null);
-      if (!upstream.ok) {
-        return reply.code(upstream.status).send({ error: 'Payment not found', details: json });
-      }
-      return { data: { ...(json ?? {}), events: [] } };
-    } catch {
-      return reply.code(502).send({ error: 'Payment gateway unreachable' });
-    }
+    return { data: { ...order, events: await readPaymentEvents(profileId, order.orderId) } };
   });
 
   // POST /api/payments/:id/counter-confirm — the cashier confirms a cash or
@@ -524,7 +592,8 @@ export async function paymentRoutes(app: FastifyInstance) {
   app.post('/api/payments/:id/counter-confirm', async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = (req.body ?? {}) as { operatorId?: string };
-    const order = await findLocalOrder(id);
+    const profileId = await resolveProfileId(req);
+    const order = await findLocalOrder(profileId, id);
 
     if (!order) return reply.code(404).send({ error: 'Payment not found' });
     if (!COUNTER_METHODS.has(order.method)) {
@@ -582,7 +651,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     };
     await saveLocalOrder(refreshed);
 
-    await recordPaymentEvent({
+    await recordPaymentEvent(profileId, {
       orderId: order.orderId,
       status: refreshed.status,
       gatewayStatus: 'SUCCESS',
@@ -594,7 +663,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     });
 
     return {
-      data: { ...refreshed, events: await readPaymentEvents(order.orderId) },
+      data: { ...refreshed, events: await readPaymentEvents(profileId, order.orderId) },
     };
   });
 
@@ -603,7 +672,8 @@ export async function paymentRoutes(app: FastifyInstance) {
   app.post('/api/payments/:id/counter-decline', async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = (req.body ?? {}) as { operatorId?: string; reason?: string };
-    const order = await findLocalOrder(id);
+    const profileId = await resolveProfileId(req);
+    const order = await findLocalOrder(profileId, id);
 
     if (!order) return reply.code(404).send({ error: 'Payment not found' });
     if (!COUNTER_METHODS.has(order.method)) {
@@ -662,7 +732,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     };
     await saveLocalOrder(refreshed);
 
-    await recordPaymentEvent({
+    await recordPaymentEvent(profileId, {
       orderId: order.orderId,
       status: 'FAILED',
       gatewayStatus: 'FAILED',
@@ -672,7 +742,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     });
 
     return {
-      data: { ...refreshed, events: await readPaymentEvents(order.orderId) },
+      data: { ...refreshed, events: await readPaymentEvents(profileId, order.orderId) },
     };
   });
 
@@ -712,6 +782,28 @@ export async function paymentRoutes(app: FastifyInstance) {
     const metaFeeId = parseFeeId(meta.feeId);
     const metaStudentId = typeof meta.studentId === 'string' ? meta.studentId : '';
     const metaStudentName = typeof meta.studentName === 'string' ? meta.studentName : '';
+    const metaProfileId =
+      typeof meta.profileId === 'string' ? meta.profileId.trim() : '';
+
+    // Prefer the profile echoed in metadata, then any stored order. There is no
+    // user session on a webhook, so this is the only way to route the payment.
+    let existing: LocalOrder | null = null;
+    let profileId = '';
+    if (isValidProfileId(metaProfileId)) {
+      const profile = await getProfile(metaProfileId);
+      if (profile) {
+        profileId = metaProfileId;
+        existing = await getLocalOrder(profileId, orderId);
+      }
+    }
+    if (!existing) {
+      const across = await findOrderAcrossProfiles(orderId);
+      if (across) {
+        existing = across;
+        profileId = across.profileId;
+      }
+    }
+    if (!profileId) profileId = SUPER_PROFILE_ID;
 
     // Only receipt money that was actually received.
     const moneyReceived = event === 'SUCCESS';
@@ -721,11 +813,11 @@ export async function paymentRoutes(app: FastifyInstance) {
     const statusForOrder = moneyReceived ? 'PROCESSING' : event;
 
     // Idempotent order upsert (deliveries may be retried).
-    const existing = await getLocalOrder(orderId);
     const timestamp = nowIso();
     const order: LocalOrder = existing
       ? {
           ...existing,
+          profileId,
           paymentId: payload.paymentId ?? existing.paymentId,
           status:
             (existing.status === 'SUCCESS' || existing.status === 'REFUNDED') &&
@@ -746,6 +838,7 @@ export async function paymentRoutes(app: FastifyInstance) {
           updatedAt: timestamp,
         }
       : {
+          profileId,
           orderId,
           paymentId: payload.paymentId ?? null,
           status: statusForOrder,
@@ -763,7 +856,7 @@ export async function paymentRoutes(app: FastifyInstance) {
         };
     await saveLocalOrder(order);
 
-    await recordPaymentEvent({
+    await recordPaymentEvent(profileId, {
       orderId,
       status: order.status,
       gatewayStatus: order.gatewayStatus,
@@ -776,19 +869,24 @@ export async function paymentRoutes(app: FastifyInstance) {
     });
 
     if (moneyReceived) {
-      let current = (await getLocalOrder(orderId)) ?? order;
+      let current = (await getLocalOrder(profileId, orderId)) ?? order;
 
       // Resolve the fee to mark paid: explicit id, else a matching pending fee.
       let feeId: number | null = metaFeeId ?? current.feeId ?? null;
       const paidAmount = Number(payload.amount ?? current.amount ?? '');
       if (feeId === null && Number.isFinite(paidAmount)) {
-        const match = await findFeeByStudentAndAmount(current.studentName, paidAmount);
+        const match = await findFeeByStudentAndAmount(
+          profileId,
+          current.studentName,
+          paidAmount
+        );
         feeId = match ? match.id : null;
       }
       if (feeId !== null) {
-        const feeRecord = await getRecord<Fee>(FEES, String(feeId));
+        const feeEntityId = scopedEntityId(profileId, String(feeId));
+        const feeRecord = await getRecord<Fee>(FEES, feeEntityId);
         if (feeRecord && feeRecord.data.status !== 'paid') {
-          await putRecord<Fee>(FEES, String(feeId), {
+          await putRecord<Fee>(FEES, feeEntityId, {
             ...feeRecord.data,
             status: 'paid',
           });
@@ -804,10 +902,10 @@ export async function paymentRoutes(app: FastifyInstance) {
       // Create exactly one receipt per order, even across webhook retries.
       try {
         await withReceiptLock(async () => {
-          const latest = (await getLocalOrder(orderId)) ?? current;
+          const latest = (await getLocalOrder(profileId, orderId)) ?? current;
           if (latest.receiptId) return;
 
-          const receipts = await listReceipts();
+          const receipts = await listReceipts(profileId);
           const existingReceipt = receipts.find((receipt) =>
             String(receipt.data.notes ?? '').includes(orderId)
           );
@@ -821,9 +919,10 @@ export async function paymentRoutes(app: FastifyInstance) {
             return;
           }
 
-          const receiptId = await nextReceiptId();
+          const receiptId = await nextReceiptId(profileId);
           const notes = `YOUPI PG${utr ? ` · UTR ${utr}` : ''} · Order ${orderId}`;
           const receipt: ReceiptRecord = {
+            profileId,
             receiptId,
             studentId: latest.studentId || '',
             studentName: latest.studentName || metaStudentName,
@@ -833,7 +932,11 @@ export async function paymentRoutes(app: FastifyInstance) {
             status: 'Paid',
             notes,
           };
-          await putRecord<ReceiptRecord>(RECEIPTS, receiptId, receipt);
+          await putRecord<ReceiptRecord>(
+            RECEIPTS,
+            scopedEntityId(profileId, receiptId),
+            receipt
+          );
           await saveLocalOrder({
             ...latest,
             receiptId,
@@ -841,22 +944,23 @@ export async function paymentRoutes(app: FastifyInstance) {
           });
         });
       } catch (err) {
-        app.log.error({ err }, 'Failed to create receipt for YOUPI payment');
+        app.log.error({ err, profileId }, 'Failed to create receipt for YOUPI payment');
         // Ask the gateway to retry: the receipt has not been recorded yet.
         return reply.code(500).send({ error: 'Could not record receipt' });
       }
 
       // Receipt and fee are durable now: publish the authoritative SUCCESS.
-      const settled = (await getLocalOrder(orderId)) ?? current;
+      const settled = (await getLocalOrder(profileId, orderId)) ?? current;
       const finalOrder: LocalOrder = {
         ...settled,
+        profileId,
         status: event,
         gatewayStatus: event,
         updatedAt: nowIso(),
       };
       await saveLocalOrder(finalOrder);
 
-      await recordPaymentEvent({
+      await recordPaymentEvent(profileId, {
         orderId,
         status: event,
         gatewayStatus: event,

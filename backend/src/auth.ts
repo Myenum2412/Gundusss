@@ -155,6 +155,7 @@ function isPublicRoute(method: string, path: string): boolean {
   if (method === 'OPTIONS') return true;
   if (path === '/api/health') return true;
   if (path === '/api/auth/login' && method === 'POST') return true;
+  if (path === '/api/auth/signup' && method === 'POST') return true;
   if (path === '/api/auth/setup') return true;
   if (path === '/api/auth/logout') return true;
   // The payment gateway authenticates with an HMAC signature, not a user token.
@@ -245,6 +246,18 @@ export async function authGuard(
         user.role === 'viewer'
           ? 'Your account is read-only. Ask an administrator for access.'
           : 'You do not have permission to perform this action.',
+      code: 'forbidden',
+    });
+    return;
+  }
+
+  // The organization console is reserved for the fixed developer account.
+  if (
+    (path === '/api/profiles' || path.startsWith('/api/profiles/')) &&
+    user.super !== true
+  ) {
+    reply.code(403).send({
+      error: 'You do not have access to the organization console.',
       code: 'forbidden',
     });
     return;

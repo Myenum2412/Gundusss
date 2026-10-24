@@ -21,7 +21,7 @@ import { ROLE_LABELS } from "@/lib/session"
 const API_URL = API_BASE
 
 export default function ProfilePage() {
-  const { user: authUser, signOut, can } = useAuth()
+  const { user: authUser, signOut, can, activeProfile } = useAuth()
   const [counts, setCounts] = useState({
     students: 0,
     groups: 0,
@@ -121,8 +121,10 @@ export default function ProfilePage() {
           name: authUser.name,
           email: authUser.email,
           role: ROLE_LABELS[authUser.role],
-          workspace: "Seeds of Success",
+          workspace: activeProfile.name,
           userId: String(authUser.id),
+          profileId: activeProfile.profileId,
+          paymentUrl: activeProfile.paymentUrl,
         }}
         stats={[
           { label: "Students", value: String(counts.students) },

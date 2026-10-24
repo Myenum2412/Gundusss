@@ -15,7 +15,21 @@ export interface AuthUser {
   email: string
   role: Role
   active: boolean
+  /** Workspace this account belongs to. */
+  profile_id: string
+  /** True only for the fixed developer super admin. */
+  super: boolean
   created_at?: string
+}
+
+export interface ProfileInfo {
+  profileId: string
+  name: string
+  ownerName: string
+  ownerEmail: string
+  paymentUrl: string
+  createdAt: string
+  updatedAt?: string
 }
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -76,6 +90,13 @@ export function can(
 
 let currentUser: AuthUser | null = null
 
+/**
+ * The workspace a super admin is currently inspecting. This is only a view
+ * selection: the backend verifies `super` before honouring it, and regular
+ * accounts ignore it entirely.
+ */
+const ACTIVE_PROFILE_COOKIE = "fees_profile_view"
+
 function hasWindow(): boolean {
   return typeof window !== "undefined"
 }
@@ -120,6 +141,8 @@ export function clearSessionCookie() {
 
 export function storeSession(token: string, user: AuthUser) {
   currentUser = user
+  // Always start in the account's own workspace after a fresh sign-in.
+  clearActiveProfileId()
   writeCookie(token)
 }
 
@@ -130,6 +153,25 @@ export function storeUser(user: AuthUser) {
 export function clearSession() {
   currentUser = null
   clearSessionCookie()
+  clearActiveProfileId()
+}
+
+/** Workspace currently being viewed by a super admin, if any. */
+export function getActiveProfileId(): string | null {
+  return readCookie(ACTIVE_PROFILE_COOKIE)
+}
+
+export function setActiveProfileId(profileId: string) {
+  if (!hasWindow()) return
+  const secure = window.location.protocol === "https:" ? "; Secure" : ""
+  document.cookie = `${ACTIVE_PROFILE_COOKIE}=${encodeURIComponent(
+    profileId
+  )}; Path=/; Max-Age=${SESSION_MAX_AGE_SECONDS}; SameSite=Lax${secure}`
+}
+
+export function clearActiveProfileId() {
+  if (!hasWindow()) return
+  document.cookie = `${ACTIVE_PROFILE_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`
 }
 
 export function hasSessionCookie(): boolean {

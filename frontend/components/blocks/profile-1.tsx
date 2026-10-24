@@ -17,6 +17,7 @@ import {
   Database,
   RefreshCw,
   Building2,
+  Link2,
 } from "lucide-react"
 
 export interface ProfileUser {
@@ -25,6 +26,8 @@ export interface ProfileUser {
   role: string
   workspace: string
   userId: string
+  profileId: string
+  paymentUrl: string
 }
 
 export interface ProfileStat {
@@ -67,7 +70,7 @@ function Fact({
 }: {
   icon: React.ComponentType<{ className?: string }>
   label: string
-  value: string
+  value: React.ReactNode
 }) {
   return (
     <li className="flex items-center gap-2.5 text-sm">
@@ -142,9 +145,10 @@ export default function ProfileBlock({
           </div>
 
           <p className="mt-4 max-w-3xl text-sm/relaxed text-foreground/80">
-            {user.workspace} · Fees Manager — enrolments, groups, fee
-            structures, receipts, and announcements, stored in Appwrite and
-            synced live across every page.
+            {user.workspace} ·{" "}
+            <span className="font-mono text-[12px]">{user.profileId}</span> ·
+            Fees Manager — enrolments, groups, fee structures, receipts, and
+            announcements, stored in Appwrite and synced live across every page.
           </p>
 
           <div className="mt-4 flex flex-wrap gap-x-8 gap-y-2 text-sm">
@@ -245,6 +249,29 @@ export default function ProfileBlock({
                   <h2 className="text-[13px] font-semibold tracking-tight">Workspace</h2>
                   <ul className="mt-3 flex flex-col gap-3">
                     <Fact icon={Sprout} label="Organization" value={user.workspace} />
+                    <Fact
+                      icon={Hash}
+                      label="Profile ID"
+                      value={
+                        <code className="font-mono text-[12px]">
+                          {user.profileId}
+                        </code>
+                      }
+                    />
+                    <Fact
+                      icon={Link2}
+                      label="Payment link"
+                      value={
+                        <a
+                          href={user.paymentUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[12px] underline underline-offset-4"
+                        >
+                          {user.paymentUrl}
+                        </a>
+                      }
+                    />
                     <Fact icon={Building2} label="Product" value="Fees Manager" />
                     <Fact icon={Database} label="Database" value={system.database} />
                   </ul>

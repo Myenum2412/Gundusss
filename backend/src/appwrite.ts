@@ -17,6 +17,7 @@ const API_KEY = (process.env.APPWRITE_API_KEY ?? '').trim();
 const DATABASE_ID = (process.env.APPWRITE_DATABASE_ID ?? 'fees').trim();
 
 export const APPWRITE_COLLECTIONS = {
+  profiles: 'profiles',
   fees: 'fees',
   users: 'users',
   students: 'students',
@@ -260,6 +261,46 @@ export async function replaceAllRecords<T>(
   await mapLimit(stale, 4, (record) => deleteRecord(collection, record.entityId));
   await mapLimit(items, 4, (item) =>
     putRecord(collection, item.entityId, item.data)
+  );
+}
+
+/**
+ * List only the rows that belong to one profile. Returned entity ids have the
+ * `profileId:` namespace removed, so callers keep working with logical ids.
+ */
+export async function listScopedRecords<T>(
+  collection: AppwriteCollection,
+  profileId: string
+): Promise<StoredRecord<T>[]> {
+  const prefix = `${profileId}:`;
+  const records = await listRecords<T>(collection);
+  return records
+    .filter((record) => record.entityId.startsWith(prefix))
+    .map((record) => ({
+      ...record,
+      entityId: record.entityId.slice(prefix.length),
+    }));
+}
+
+/**
+ * Replace one profile's slice of a table. Rows belonging to other profiles are
+ * never read, deleted, or overwritten.
+ */
+export async function replaceScopedRecords<T>(
+  collection: AppwriteCollection,
+  profileId: string,
+  items: Array<{ entityId: string; data: T }>
+): Promise<void> {
+  requireConfig();
+  const prefix = `${profileId}:`;
+  const existing = await listRecords<T>(collection);
+  const scoped = existing.filter((record) => record.entityId.startsWith(prefix));
+  const wanted = new Set(items.map((item) => `${prefix}${item.entityId}`));
+  const stale = scoped.filter((record) => !wanted.has(record.entityId));
+
+  await mapLimit(stale, 4, (record) => deleteRecord(collection, record.entityId));
+  await mapLimit(items, 4, (item) =>
+    putRecord(collection, `${prefix}${item.entityId}`, item.data)
   );
 }
 

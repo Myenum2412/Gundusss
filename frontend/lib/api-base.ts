@@ -1,4 +1,4 @@
-import { clearSession, getToken } from "./session"
+import { clearSession, getActiveProfileId, getToken } from "./session"
 
 // The backend runs on port 4000. Derive its host from the page host so the app
 // works whether it was opened via localhost, 127.0.0.1, or a LAN address.
@@ -52,6 +52,13 @@ export async function apiFetch(
   const headers = new Headers(init.headers)
   const token = getToken()
   if (token) headers.set("Authorization", `Bearer ${token}`)
+
+  // Super admins can inspect another workspace. The header is always sent when
+  // a view is selected; the backend ignores it unless the caller is `super`.
+  const activeProfileId = getActiveProfileId()
+  if (activeProfileId && !path.startsWith("/api/profiles")) {
+    headers.set("X-Profile-Id", activeProfileId)
+  }
 
   const res = await fetch(`${API_BASE}${path}`, {
     cache: "no-store",

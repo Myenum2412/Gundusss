@@ -5,6 +5,8 @@ import {
   getRecord,
   putRecord,
 } from '../appwrite.js';
+import { resolveProfileId } from '../profiles.js';
+import { scopedEntityId } from '../tenant.js';
 
 /**
  * Merchant UPI profile for the in-app checkout preview.
@@ -63,8 +65,13 @@ function adminToken() {
 
 const COLLECTION = APPWRITE_COLLECTIONS.paymentSettings;
 
-async function readLocalSettings(): Promise<SettingsRow | null> {
-  const record = await getRecord<SettingsRow>(COLLECTION, '1');
+async function readLocalSettings(
+  profileId: string
+): Promise<SettingsRow | null> {
+  const record = await getRecord<SettingsRow>(
+    COLLECTION,
+    scopedEntityId(profileId, '1')
+  );
   return record?.data ?? null;
 }
 
@@ -152,8 +159,10 @@ async function syncGatewaySettings(upiId: string, payeeName: string): Promise<Ga
  * Make sure a saved UPI ID reaches the gateway before a new checkout starts.
  * This closes the gap where a save happened while YOUPI PG was offline.
  */
-export async function ensureGatewayUpiSynced(): Promise<GatewayInfo | null> {
-  const local = await readLocalSettings();
+export async function ensureGatewayUpiSynced(
+  profileId: string
+): Promise<GatewayInfo | null> {
+  const local = await readLocalSettings(profileId);
   const upiId = local?.upi_id?.trim() ?? '';
   if (!upiId) return null;
 
@@ -286,8 +295,9 @@ async function presentSettings(local: SettingsRow | null, gateway: GatewayInfo) 
 
 export async function paymentSettingsRoutes(app: FastifyInstance) {
   // GET /api/payments/settings — local merchant profile plus gateway sync state.
-  app.get('/api/payments/settings', async () => {
-    const local = await readLocalSettings();
+  app.get('/api/payments/settings', async (req) => {
+    const profileId = await resolveProfileId(req);
+    const local = await readLocalSettings(profileId);
     const gateway = await fetchGatewaySettings();
     return { data: await presentSettings(local, gateway) };
   });
@@ -309,8 +319,9 @@ export async function paymentSettingsRoutes(app: FastifyInstance) {
   });
 
   // POST /api/payments/settings/sync — retry a pending gateway sync.
-  app.post('/api/payments/settings/sync', async () => {
-    const local = await readLocalSettings();
+  app.post('/api/payments/settings/sync', async (req) => {
+    const profileId = await resolveProfileId(req);
+    const local = await readLocalSettings(profileId);
     const upiId = local?.upi_id?.trim() ?? '';
     const gateway = upiId
       ? await syncGatewaySettings(upiId, local?.payee_name?.trim() || DEFAULT_PAYEE_NAME)
@@ -333,7 +344,8 @@ export async function paymentSettingsRoutes(app: FastifyInstance) {
       });
     }
 
-    const existing = await readLocalSettings();
+    const profileId = await resolveProfileId(req);
+    const existing = await readLocalSettings(profileId);
     const qr = validateQrDataUrl(
       body.qrCodeDataUrl === undefined ? existing?.qr_code_data_url ?? '' : body.qrCodeDataUrl
     );
@@ -341,22 +353,26 @@ export async function paymentSettingsRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: qr.error });
     }
 
-    await putRecord<SettingsRow>(COLLECTION, '1', {
-      upi_id: upiId,
-      payee_name: payeeName,
-      qr_code_data_url: qr.value,
-      updated_at: new Date().toISOString(),
-    });
+    await putRecord<SettingsRow>(
+      COLLECTION,
+      scopedEntityId(profileId, '1'),
+      {
+        upi_id: upiId,
+        payee_name: payeeName,
+        qr_code_data_url: qr.value,
+        updated_at: new Date().toISOString(),
+      }
+    );
 
     const gateway = await syncGatewaySettings(upiId, payeeName);
     if (!gateway.synced) {
       app.log.warn(
-        { gatewayError: gateway.error },
+        { gatewayError: gateway.error, profileId },
         'UPI settings saved locally but could not be synced to YOUPI PG'
       );
     }
 
-    const saved = await readLocalSettings();
+    const saved = await readLocalSettings(profileId);
     return { data: await presentSettings(saved, gateway) };
   });
 }

@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { AppSidebar } from "@/components/app-sidebar"
+import { ViewingProfileBanner } from "@/components/viewing-profile-banner"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 
 // Rendered once by app/dashboard/layout.tsx so switching pages never remounts
@@ -16,7 +17,10 @@ export function DashboardFrame({
   return (
     <SidebarProvider defaultOpen={defaultOpen}>
       <AppSidebar />
-      <SidebarInset className="h-svh overflow-hidden">{children}</SidebarInset>
+      <SidebarInset className="h-svh overflow-hidden">
+        <ViewingProfileBanner />
+        {children}
+      </SidebarInset>
     </SidebarProvider>
   )
 }

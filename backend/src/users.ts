@@ -7,6 +7,7 @@ import {
   listRecords,
   putRecord,
 } from './appwrite.js';
+import { SUPER_ADMIN_EMAIL } from './tenant.js';
 
 /**
  * Application users live in the Appwrite `users` table.
@@ -34,6 +35,10 @@ export interface UserRecord {
   password_hash: string;
   role?: Role;
   active?: boolean;
+  /** Workspace this account belongs to. */
+  profile_id?: string;
+  /** True only for the fixed developer account. */
+  super?: boolean;
   created_at: string;
   updated_at?: string;
 }
@@ -45,6 +50,8 @@ export interface PublicUser {
   email: string;
   role: Role;
   active: boolean;
+  profile_id: string;
+  super: boolean;
   created_at: string;
 }
 
@@ -70,8 +77,14 @@ export function toPublicUser(user: UserRecord): PublicUser {
     email: normalizeEmail(user.email),
     role: normalizeRole(user.role),
     active: user.active !== false,
+    profile_id: (user.profile_id ?? '').trim(),
+    super: user.super === true,
     created_at: user.created_at,
   };
+}
+
+export function isSuperUser(user: Pick<UserRecord, 'super' | 'email'>): boolean {
+  return user.super === true || normalizeEmail(user.email) === SUPER_ADMIN_EMAIL;
 }
 
 export function hashPassword(password: string): Promise<string> {
@@ -88,6 +101,15 @@ export async function listUsers(): Promise<UserRecord[]> {
   return rows
     .map((row) => row.data)
     .sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+}
+
+/** List the accounts that belong to one workspace, oldest first. */
+export async function listUsersForProfile(
+  profileId: string
+): Promise<UserRecord[]> {
+  return (await listUsers()).filter(
+    (user) => (user.profile_id ?? '').trim() === profileId
+  );
 }
 
 export async function countUsers(): Promise<number> {
@@ -130,11 +152,26 @@ export interface CreateUserInput {
   email: string;
   password: string;
   role: Role;
+  profileId: string;
+  super?: boolean;
 }
 
 export async function createUser(input: CreateUserInput): Promise<UserRecord> {
   const run = async (): Promise<UserRecord> => {
     const email = normalizeEmail(input.email);
+    if (email === SUPER_ADMIN_EMAIL && input.super !== true) {
+      throw Object.assign(
+        new Error('This email is reserved for the system administrator.'),
+        { statusCode: 409 }
+      );
+    }
+    const profileId = (input.profileId ?? '').trim();
+    if (!profileId) {
+      throw Object.assign(new Error('A workspace profile id is required.'), {
+        statusCode: 400,
+      });
+    }
+
     const existing = await findUserByEmail(email);
     if (existing) {
       throw Object.assign(new Error('A user with this email already exists.'), {
@@ -152,6 +189,8 @@ export async function createUser(input: CreateUserInput): Promise<UserRecord> {
       password_hash: await hashPassword(input.password),
       role: normalizeRole(input.role),
       active: true,
+      profile_id: profileId,
+      super: input.super === true,
       created_at: now,
       updated_at: now,
     };

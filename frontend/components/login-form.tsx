@@ -76,7 +76,7 @@ export function LoginForm({
         ? await setup({ name, email, password })
         : await login({ email, password })
       storeSession(session.token, session.user)
-      router.replace("/dashboard")
+      router.replace(session.user.super ? "/orgmenu/dashboard" : "/dashboard")
     } catch (err) {
       setError(
         err instanceof Error
@@ -202,9 +202,17 @@ export function LoginForm({
           </Button>
         </Field>
 
-        <p className="text-center text-[13px] text-muted-foreground">
-          Accounts are created by an administrator. Ask an admin if you need access.
-        </p>
+        {!needsSetup && (
+          <p className="text-center text-[13px] text-muted-foreground">
+            New here?{" "}
+            <a
+              href="/signup"
+              className="font-medium text-foreground underline underline-offset-4"
+            >
+              Create a workspace
+            </a>
+          </p>
+        )}
       </FieldGroup>
     </form>
   )

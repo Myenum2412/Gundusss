@@ -3,19 +3,21 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { Readable } from 'node:stream';
 import {
-  APPWRITE_COLLECTIONS,
   assertAppwriteSetup,
   getAppwriteStatus,
   isAppwriteConfigured,
-  listRecords,
-  putRecord,
 } from './appwrite.js';
-import type { Fee } from './schemas.js';
 import { authGuard } from './auth.js';
-import { listUsers, saveUser } from './users.js';
+import {
+  ensureAccountsAndProfiles,
+  listProfiles,
+  migrateLegacyData,
+  seedProfileDefaults,
+} from './profiles.js';
 import { feeRoutes } from './routes/fees.js';
 import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/users.js';
+import { profileRoutes } from './routes/profiles.js';
 import { whatsappRoutes } from './routes/whatsapp.js';
 import { collectionsRoutes } from './routes/collections.js';
 import { paymentRoutes } from './routes/payments.js';
@@ -108,99 +110,38 @@ app.get('/api/appwrite/status', async () => ({ data: getAppwriteStatus() }));
 await app.register(feeRoutes);
 await app.register(authRoutes);
 await app.register(userRoutes);
+await app.register(profileRoutes);
 await app.register(whatsappRoutes);
 await app.register(collectionsRoutes);
 await app.register(paymentRoutes);
 await app.register(paymentSettingsRoutes);
 await app.register(businessProfileRoutes);
 
-function isoDateInDays(days: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
 async function ensureAppwriteSeed(): Promise<void> {
   await assertAppwriteSetup();
 
-  // Backfill roles for accounts created before RBAC existed: the oldest account
-  // becomes the administrator (so nobody is locked out) and the rest become
-  // read-only until an admin assigns their real role.
-  const users = await listUsers();
-  let hasAdmin = users.some((user) => user.role === 'admin');
-  for (const user of users) {
-    if (!user.role) {
-      const role = hasAdmin ? 'viewer' : 'admin';
-      await saveUser({ ...user, role, updated_at: new Date().toISOString() });
-      console.log(`Backfilled ${user.email} as ${role}`);
-      if (role === 'admin') hasAdmin = true;
-    }
-  }
-  if (users.length === 0) {
-    console.log(
-      'No users exist yet. The first administrator can be created from /login.'
-    );
+  // 1. Ensure the fixed super admin exists and owns the `orgmenu` profile.
+  // 2. Give every pre-multi-tenant account its own workspace and backfill the
+  //    admin role inside each workspace.
+  const legacyProfileId = await ensureAccountsAndProfiles();
+
+  // 3. Move rows written before multi-tenancy into the legacy owner's profile.
+  //    The developer profile deliberately never receives these rows.
+  if (legacyProfileId) {
+    await migrateLegacyData(legacyProfileId);
   }
 
-  const fees = await listRecords<Fee>(APPWRITE_COLLECTIONS.fees);
-  if (fees.length === 0) {
-    const demo: Fee[] = [
-      {
-        id: 1,
-        student_name: 'Aarav Sharma',
-        amount: '2500.00',
-        status: 'pending',
-        due_date: isoDateInDays(7),
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: 2,
-        student_name: 'Diya Patel',
-        amount: '3200.50',
-        status: 'paid',
-        due_date: isoDateInDays(-2),
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: 3,
-        student_name: 'Kabir Singh',
-        amount: '1800.00',
-        status: 'overdue',
-        due_date: isoDateInDays(-5),
-        created_at: new Date().toISOString(),
-      },
-    ];
-    for (const fee of demo) {
-      await putRecord<Fee>(APPWRITE_COLLECTIONS.fees, String(fee.id), fee);
-    }
+  // 4. Each workspace gets its own copy of the dropdown defaults.
+  const profiles = await listProfiles();
+  for (const profile of profiles) {
+    await seedProfileDefaults(profile.profileId);
   }
 
-  const dropdowns = await listRecords<string[]>(
-    APPWRITE_COLLECTIONS.dropdownOptions
+  console.log(
+    `Workspaces ready: ${profiles.length} (${profiles
+      .map((profile) => profile.profileId)
+      .join(', ')})`
   );
-  if (dropdowns.length === 0) {
-    const defaults: Record<string, string[]> = {
-      gender: ['Male', 'Female', 'Other'],
-      classGroup: ['Class 1', 'Class 2', 'Class 3', 'Group A', 'Group B'],
-      course: ['Science', 'Commerce', 'Arts', 'General'],
-      studentStatus: ['Active', 'Inactive'],
-      feeFrequency: ['Monthly', 'Quarterly', 'Half-Yearly', 'Yearly', 'One-Time'],
-      feeType: [
-        'Tuition Fee',
-        'Admission Fee',
-        'Exam Fee',
-        'Transport Fee',
-        'Library Fee',
-        'Hostel Fee',
-        'Other',
-      ],
-      paymentMethod: ['Cash', 'UPI', 'Bank Transfer'],
-      receiptStatus: ['Paid', 'Pending', 'Cancelled'],
-    };
-    for (const [key, options] of Object.entries(defaults)) {
-      await putRecord<string[]>(APPWRITE_COLLECTIONS.dropdownOptions, key, options);
-    }
-  }
 }
 
 const port = Number(process.env.PORT ?? 4000);

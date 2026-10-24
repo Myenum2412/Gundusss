@@ -2,9 +2,10 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   APPWRITE_COLLECTIONS,
-  listRecords,
-  replaceAllRecords,
+  listScopedRecords,
+  replaceScopedRecords,
 } from '../appwrite.js';
+import { resolveProfileId } from '../profiles.js';
 
 const str = (max = 500) => z.string().max(max).default('');
 const strArray = z.array(z.string().max(200)).default([]);
@@ -91,9 +92,10 @@ type Announcement = z.infer<typeof AnnouncementSchema>;
 
 async function listData<T>(
   collection: (typeof APPWRITE_COLLECTIONS)[keyof typeof APPWRITE_COLLECTIONS],
-  sortKey: (value: T) => string
+  sortKey: (value: T) => string,
+  profileId: string
 ): Promise<T[]> {
-  const records = await listRecords<T>(collection);
+  const records = await listScopedRecords<T>(collection, profileId);
   return records
     .map((record) => record.data)
     .sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
@@ -101,11 +103,13 @@ async function listData<T>(
 
 export async function collectionsRoutes(app: FastifyInstance) {
   // ---- Students ----
-  app.get('/api/students', async () => {
+  app.get('/api/students', async (req) => {
+    const profileId = await resolveProfileId(req);
     return {
       data: await listData<Student>(
         APPWRITE_COLLECTIONS.students,
-        (student) => student.studentId
+        (student) => student.studentId,
+        profileId
       ),
     };
   });
@@ -113,8 +117,10 @@ export async function collectionsRoutes(app: FastifyInstance) {
   app.put('/api/students', async (req, reply) => {
     const parsed = itemsSchema(StudentSchema).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
-    await replaceAllRecords(
+    const profileId = await resolveProfileId(req);
+    await replaceScopedRecords(
       APPWRITE_COLLECTIONS.students,
+      profileId,
       parsed.data.items.map((student) => ({
         entityId: student.studentId,
         data: student,
@@ -124,11 +130,13 @@ export async function collectionsRoutes(app: FastifyInstance) {
   });
 
   // ---- Student groups ----
-  app.get('/api/student-groups', async () => {
+  app.get('/api/student-groups', async (req) => {
+    const profileId = await resolveProfileId(req);
     return {
       data: await listData<Group>(
         APPWRITE_COLLECTIONS.studentGroups,
-        (group) => group.groupId
+        (group) => group.groupId,
+        profileId
       ),
     };
   });
@@ -136,8 +144,10 @@ export async function collectionsRoutes(app: FastifyInstance) {
   app.put('/api/student-groups', async (req, reply) => {
     const parsed = itemsSchema(GroupSchema).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
-    await replaceAllRecords(
+    const profileId = await resolveProfileId(req);
+    await replaceScopedRecords(
       APPWRITE_COLLECTIONS.studentGroups,
+      profileId,
       parsed.data.items.map((group) => ({
         entityId: group.groupId,
         data: group,
@@ -147,11 +157,13 @@ export async function collectionsRoutes(app: FastifyInstance) {
   });
 
   // ---- Fee structures ----
-  app.get('/api/fee-structures', async () => {
+  app.get('/api/fee-structures', async (req) => {
+    const profileId = await resolveProfileId(req);
     return {
       data: await listData<FeeStructure>(
         APPWRITE_COLLECTIONS.feeStructures,
-        (structure) => structure.structureId
+        (structure) => structure.structureId,
+        profileId
       ),
     };
   });
@@ -159,8 +171,10 @@ export async function collectionsRoutes(app: FastifyInstance) {
   app.put('/api/fee-structures', async (req, reply) => {
     const parsed = itemsSchema(FeeStructureSchema).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
-    await replaceAllRecords(
+    const profileId = await resolveProfileId(req);
+    await replaceScopedRecords(
       APPWRITE_COLLECTIONS.feeStructures,
+      profileId,
       parsed.data.items.map((structure) => ({
         entityId: structure.structureId,
         data: structure,
@@ -170,11 +184,13 @@ export async function collectionsRoutes(app: FastifyInstance) {
   });
 
   // ---- Receipts ----
-  app.get('/api/receipts', async () => {
+  app.get('/api/receipts', async (req) => {
+    const profileId = await resolveProfileId(req);
     return {
       data: await listData<Receipt>(
         APPWRITE_COLLECTIONS.receipts,
-        (receipt) => receipt.receiptId
+        (receipt) => receipt.receiptId,
+        profileId
       ),
     };
   });
@@ -182,8 +198,10 @@ export async function collectionsRoutes(app: FastifyInstance) {
   app.put('/api/receipts', async (req, reply) => {
     const parsed = itemsSchema(ReceiptSchema).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
-    await replaceAllRecords(
+    const profileId = await resolveProfileId(req);
+    await replaceScopedRecords(
       APPWRITE_COLLECTIONS.receipts,
+      profileId,
       parsed.data.items.map((receipt) => ({
         entityId: receipt.receiptId,
         data: receipt,
@@ -193,11 +211,13 @@ export async function collectionsRoutes(app: FastifyInstance) {
   });
 
   // ---- Announcements ----
-  app.get('/api/announcements', async () => {
+  app.get('/api/announcements', async (req) => {
+    const profileId = await resolveProfileId(req);
     return {
       data: await listData<Announcement>(
         APPWRITE_COLLECTIONS.announcements,
-        (announcement) => announcement.announcementId
+        (announcement) => announcement.announcementId,
+        profileId
       ),
     };
   });
@@ -205,8 +225,10 @@ export async function collectionsRoutes(app: FastifyInstance) {
   app.put('/api/announcements', async (req, reply) => {
     const parsed = itemsSchema(AnnouncementSchema).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
-    await replaceAllRecords(
+    const profileId = await resolveProfileId(req);
+    await replaceScopedRecords(
       APPWRITE_COLLECTIONS.announcements,
+      profileId,
       parsed.data.items.map((announcement) => ({
         entityId: announcement.announcementId,
         data: {
@@ -219,8 +241,12 @@ export async function collectionsRoutes(app: FastifyInstance) {
   });
 
   // ---- Dropdown options ----
-  app.get('/api/dropdowns', async () => {
-    const records = await listRecords<string[]>(APPWRITE_COLLECTIONS.dropdownOptions);
+  app.get('/api/dropdowns', async (req) => {
+    const profileId = await resolveProfileId(req);
+    const records = await listScopedRecords<string[]>(
+      APPWRITE_COLLECTIONS.dropdownOptions,
+      profileId
+    );
     const map: Record<string, string[]> = {};
     for (const record of records) {
       map[record.entityId] = Array.isArray(record.data) ? record.data : [];
@@ -231,8 +257,10 @@ export async function collectionsRoutes(app: FastifyInstance) {
   app.put('/api/dropdowns', async (req, reply) => {
     const parsed = DropdownsSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
-    await replaceAllRecords(
+    const profileId = await resolveProfileId(req);
+    await replaceScopedRecords(
       APPWRITE_COLLECTIONS.dropdownOptions,
+      profileId,
       Object.entries(parsed.data.dropdowns).map(([key, options]) => ({
         entityId: key,
         data: options,
