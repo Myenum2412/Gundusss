@@ -521,10 +521,8 @@ export default function SettingsPage() {
                   <span className="font-medium text-foreground">Monthly on 1st, 9:00 AM IST</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">API Key:</span>
-                  <span className="font-mono text-[11px] text-muted-foreground truncate max-w-[200px]">
-                    JmJ+4jtf...DjhU=
-                  </span>
+                  <span className="text-muted-foreground">API Authentication:</span>
+                  <span className="font-medium text-emerald-600">Configured & Connected</span>
                 </div>
               </div>
             </div>

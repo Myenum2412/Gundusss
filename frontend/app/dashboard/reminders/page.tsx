@@ -374,22 +374,6 @@ export default function RemindersPage() {
             </div>
 
             <div className="mt-4 space-y-3.5 text-xs">
-              <Field>
-                <FieldLabel className="text-xs font-semibold">
-                  cron-job.org REST API Key
-                </FieldLabel>
-                <div className="relative mt-1">
-                  <KeyIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
-                  <Input
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="Enter cron-job.org API Key"
-                    className="pl-8 font-mono text-xs"
-                  />
-                </div>
-              </Field>
-
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <Field>
                   <FieldLabel className="text-xs font-semibold">Day of Month</FieldLabel>
