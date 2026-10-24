@@ -180,7 +180,10 @@ export function hasSessionCookie(): boolean {
 
 /** Synchronous check used by data stores before attempting a write. */
 export function canWriteStored(): boolean {
-  return can(currentUser, "data:write")
+  if (currentUser) {
+    return can(currentUser, "data:write")
+  }
+  return hasSessionCookie()
 }
 
 // Remove data written by older builds. Appwrite is now the only source of

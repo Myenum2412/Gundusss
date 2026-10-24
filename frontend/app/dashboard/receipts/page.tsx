@@ -105,16 +105,24 @@ export default function ReceiptsPage() {
     if (hydrated) void saveReceipts(receipts)
   }, [receipts, hydrated])
 
+  const reloadDependencies = useCallback(() => {
+    loadStudents()
+      .then(setAvailableStudents)
+      .catch((error) => console.error("Failed to load students", error))
+    loadDropdowns()
+      .then(setDropdowns)
+      .catch((error) => console.error("Failed to load dropdown options", error))
+  }, [])
+
+  useEffect(() => {
+    reloadDependencies()
+  }, [reloadDependencies])
+
   useEffect(() => {
     if (open) {
-      loadStudents()
-        .then(setAvailableStudents)
-        .catch((error) => console.error("Failed to load students", error))
-      loadDropdowns()
-        .then(setDropdowns)
-        .catch((error) => console.error("Failed to load dropdown options", error))
+      reloadDependencies()
     }
-  }, [open])
+  }, [open, reloadDependencies])
 
   function set(key: keyof typeof initialForm) {
     return (

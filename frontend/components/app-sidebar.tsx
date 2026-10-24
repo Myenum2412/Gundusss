@@ -27,6 +27,7 @@ import {
   SettingsIcon,
   UsersIcon,
   Building2Icon,
+  GitBranchIcon,
 } from "lucide-react"
 import type { Permission } from "@/lib/session"
 
@@ -48,6 +49,12 @@ const navigation: { navMain: NavItem[]; navBottom: NavItem[] } = {
       title: "Dashboard",
       url: "/dashboard",
       icon: <LayoutDashboardIcon />,
+      permission: "data:read",
+    },
+    {
+      title: "Branches",
+      url: "/dashboard/branches",
+      icon: <GitBranchIcon />,
       permission: "data:read",
     },
     {

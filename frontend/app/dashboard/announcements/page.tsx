@@ -97,12 +97,21 @@ export default function AnnouncementsPage() {
     if (hydrated) void saveAnnouncements(items)
   }, [items, hydrated])
 
+  const reloadStudents = useCallback(() => {
+    loadStudents()
+      .then(setAvailableStudents)
+      .catch((error) => console.error("Failed to load students", error))
+  }, [])
+
   useEffect(() => {
-    if (open)
-      loadStudents()
-        .then(setAvailableStudents)
-        .catch((error) => console.error("Failed to load students", error))
-  }, [open])
+    reloadStudents()
+  }, [reloadStudents])
+
+  useEffect(() => {
+    if (open) {
+      reloadStudents()
+    }
+  }, [open, reloadStudents])
 
   function toggleStudent(id: string) {
     setForm((f) => ({

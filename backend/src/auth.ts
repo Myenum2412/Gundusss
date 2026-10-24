@@ -137,6 +137,23 @@ export function readBearerToken(req: FastifyRequest): string | null {
   }
   const alt = req.headers['x-auth-token'];
   if (typeof alt === 'string' && alt.trim()) return alt.trim();
+
+  const cookieHeader = req.headers.cookie;
+  if (cookieHeader) {
+    const entry = cookieHeader
+      .split(';')
+      .map((s) => s.trim())
+      .find((s) => s.startsWith('fees_session='));
+    if (entry) {
+      const raw = entry.slice('fees_session='.length).trim();
+      try {
+        return decodeURIComponent(raw) || null;
+      } catch {
+        return raw || null;
+      }
+    }
+  }
+
   return null;
 }
 

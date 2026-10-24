@@ -1018,6 +1018,28 @@ export async function paymentRoutes(app: FastifyInstance) {
 
     const biz = bizRecord?.data?.profile;
 
+    const studentRecords = await listScopedRecords<{
+      studentId: string;
+      studentName: string;
+      group?: string;
+      course?: string;
+      phone?: string;
+      email?: string;
+      status?: string;
+    }>(APPWRITE_COLLECTIONS.students, profile.profileId);
+
+    const students = studentRecords
+      .map((r) => r.data)
+      .filter((s) => (s.status ?? 'Active').toLowerCase() !== 'inactive')
+      .map((s) => ({
+        studentId: s.studentId,
+        studentName: s.studentName,
+        group: s.group || '',
+        course: s.course || '',
+        phone: s.phone || '',
+        email: s.email || '',
+      }));
+
     return {
       data: {
         profileId: profile.profileId,
@@ -1031,8 +1053,42 @@ export async function paymentRoutes(app: FastifyInstance) {
         phone: biz?.phone ?? '',
         email: biz?.email ?? profile.ownerEmail,
         description: biz?.description ?? '',
+        students,
       },
     };
+  });
+
+  // GET /api/public/students/:slug — list active students for payment page dropdown
+  app.get('/api/public/students/:slug', async (req, reply) => {
+    const { slug } = req.params as { slug: string };
+    const profile = await findProfileBySlug(slug);
+    if (!profile) {
+      return reply.code(404).send({ error: 'Organization not found' });
+    }
+
+    const studentRecords = await listScopedRecords<{
+      studentId: string;
+      studentName: string;
+      group?: string;
+      course?: string;
+      phone?: string;
+      email?: string;
+      status?: string;
+    }>(APPWRITE_COLLECTIONS.students, profile.profileId);
+
+    const students = studentRecords
+      .map((r) => r.data)
+      .filter((s) => (s.status ?? 'Active').toLowerCase() !== 'inactive')
+      .map((s) => ({
+        studentId: s.studentId,
+        studentName: s.studentName,
+        group: s.group || '',
+        course: s.course || '',
+        phone: s.phone || '',
+        email: s.email || '',
+      }));
+
+    return { data: students };
   });
 
   // POST /api/public/payments/create — public checkout creation by student/parent

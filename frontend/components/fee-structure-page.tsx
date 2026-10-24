@@ -114,19 +114,27 @@ export function FeeStructurePage() {
     if (hydrated) void saveFeeStructures(structures)
   }, [structures, hydrated])
 
+  const reloadDependencies = useCallback(() => {
+    loadStudents()
+      .then(setAvailableStudents)
+      .catch((error) => console.error("Failed to load students", error))
+    loadGroups()
+      .then(setAvailableGroups)
+      .catch((error) => console.error("Failed to load student groups", error))
+    loadDropdowns()
+      .then(setDropdowns)
+      .catch((error) => console.error("Failed to load dropdown options", error))
+  }, [])
+
+  useEffect(() => {
+    reloadDependencies()
+  }, [reloadDependencies])
+
   useEffect(() => {
     if (open) {
-      loadStudents()
-        .then(setAvailableStudents)
-        .catch((error) => console.error("Failed to load students", error))
-      loadGroups()
-        .then(setAvailableGroups)
-        .catch((error) => console.error("Failed to load student groups", error))
-      loadDropdowns()
-        .then(setDropdowns)
-        .catch((error) => console.error("Failed to load dropdown options", error))
+      reloadDependencies()
     }
-  }, [open])
+  }, [open, reloadDependencies])
 
   function set(key: Exclude<keyof typeof initialForm, "paymentMethods" | "studentIds">) {
     return (

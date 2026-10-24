@@ -32,7 +32,16 @@ import {
   type DropdownKey,
   type DropdownMap,
 } from "@/lib/dropdown-store"
-import { CheckCircle2Icon, PlugIcon, SendIcon, ShieldAlertIcon } from "lucide-react"
+import { PaymentSetup } from "@/components/payment-setup"
+import { cn } from "cn"
+import {
+  CheckCircle2Icon,
+  PlugIcon,
+  QrCodeIcon,
+  SendIcon,
+  ShieldAlertIcon,
+  SlidersHorizontalIcon,
+} from "lucide-react"
 
 const waLabel: Record<WaState["status"], string> = {
   idle: "Not started",
@@ -45,6 +54,7 @@ const waLabel: Record<WaState["status"], string> = {
 
 export default function SettingsPage() {
   const { can } = useAuth()
+  const [activeTab, setActiveTab] = useState<"all" | "upi" | "whatsapp" | "dropdowns">("upi")
   const [wa, setWa] = useState<WaState | null>(null)
   const [waError, setWaError] = useState("")
   const [to, setTo] = useState("")
@@ -183,25 +193,17 @@ export default function SettingsPage() {
     <DashboardShell trail={[{ label: "Dashboard", href: "/dashboard" }, { label: "Settings" }]}>
       <PageHeader
         title="Settings"
-        description="WhatsApp notifications via whatsapp-web.js, plus dropdown options used across all forms."
+        description="Configure UPI payment gateway, WhatsApp notifications, and custom dropdown options used across all forms."
         meta={<LiveBadge />}
       />
 
       <Stats01
         stats={[
           {
-            name: "Option lists",
-            value: String(DROPDOWN_KEYS.length),
-            change: "across all forms",
-            changeType: "neutral",
-          },
-          {
-            name: "Total options",
-            value: String(
-              dropdowns ? DROPDOWN_KEYS.reduce((sum, k) => sum + (dropdowns[k]?.length ?? 0), 0) : 0
-            ),
-            change: "forms update live",
-            changeType: "neutral",
+            name: "UPI Gateway",
+            value: "Online",
+            change: "instant payments",
+            changeType: "positive",
           },
           {
             name: "WhatsApp",
@@ -219,24 +221,99 @@ export default function SettingsPage() {
             changeType: wa?.status === "ready" ? "positive" : "neutral",
           },
           {
-            name: "Forms using options",
-            value: "4",
-            change: "auto-updated",
+            name: "Option lists",
+            value: String(DROPDOWN_KEYS.length),
+            change: "across all forms",
+            changeType: "neutral",
+          },
+          {
+            name: "Total options",
+            value: String(
+              dropdowns ? DROPDOWN_KEYS.reduce((sum, k) => sum + (dropdowns[k]?.length ?? 0), 0) : 0
+            ),
+            change: "forms update live",
             changeType: "neutral",
           },
         ]}
       />
 
-      <div className="grid shrink-0 gap-4 lg:grid-cols-2">
-        {/* Connection / QR */}
-        <section className="rounded-2xl border bg-card p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="flex items-center gap-2 text-[13px] font-semibold tracking-tight">
-              <PlugIcon className="size-4 text-muted-foreground" />
-              WhatsApp connection
-            </h2>
-            {wa && <StatusBadge value={waLabel[wa.status]} />}
-          </div>
+      {/* Settings Navigation Tabs */}
+      <div className="flex flex-wrap items-center gap-1.5 rounded-2xl border bg-card p-1.5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <button
+          type="button"
+          onClick={() => setActiveTab("upi")}
+          className={cn(
+            "flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition",
+            activeTab === "upi"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          )}
+        >
+          <QrCodeIcon className="size-4" />
+          <span>UPI Payment Setup</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("whatsapp")}
+          className={cn(
+            "flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition",
+            activeTab === "whatsapp"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          )}
+        >
+          <PlugIcon className="size-4" />
+          <span>WhatsApp Notifications</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("dropdowns")}
+          className={cn(
+            "flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition",
+            activeTab === "dropdowns"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          )}
+        >
+          <SlidersHorizontalIcon className="size-4" />
+          <span>Dropdown Options</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("all")}
+          className={cn(
+            "flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition",
+            activeTab === "all"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          )}
+        >
+          <span>All Settings</span>
+        </button>
+      </div>
+
+      {/* UPI Payment Setup Tab */}
+      {(activeTab === "upi" || activeTab === "all") && (
+        <section className="space-y-4">
+          <PaymentSetup />
+        </section>
+      )}
+
+      {/* WhatsApp Notifications Tab */}
+      {(activeTab === "whatsapp" || activeTab === "all") && (
+        <div className="grid shrink-0 gap-4 lg:grid-cols-2">
+          {/* Connection / QR */}
+          <section className="rounded-2xl border bg-card p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="flex items-center gap-2 text-[13px] font-semibold tracking-tight">
+                <PlugIcon className="size-4 text-muted-foreground" />
+                WhatsApp connection
+              </h2>
+              {wa && <StatusBadge value={waLabel[wa.status]} />}
+            </div>
 
           {waError && <p className="mt-3 text-sm text-destructive">{waError}</p>}
           {wa?.lastError && <p className="mt-3 text-sm text-destructive">{wa.lastError}</p>}
@@ -328,56 +405,59 @@ export default function SettingsPage() {
           </form>
         </section>
       </div>
+      )}
 
       {/* Dropdown options used by all forms */}
-      <section className="shrink-0 rounded-2xl border bg-card p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-        <h2 className="text-[13px] font-semibold tracking-tight">Dropdown options</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Add or remove items. Forms pick up changes when opened.</p>
-        <div className="mt-4 grid gap-6 md:grid-cols-2">
-          {DROPDOWN_KEYS.map((key) => (
-            <div key={key} className="rounded-xl border bg-background p-4">
-              <h3 className="text-[13px] font-medium">{DROPDOWN_LABELS[key]}</h3>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {(dropdowns?.[key] ?? []).map((o) => (
-                  <span
-                    key={o}
-                    className="inline-flex h-7 items-center gap-1.5 rounded-full border bg-card px-2.5 text-xs font-medium"
-                  >
-                    {o}
-                    <button
-                      type="button"
-                      aria-label={`Remove ${o}`}
-                      className="app-transition flex size-4 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-                      onClick={() => removeOption(key, o)}
+      {(activeTab === "dropdowns" || activeTab === "all") && (
+        <section className="shrink-0 rounded-2xl border bg-card p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+          <h2 className="text-[13px] font-semibold tracking-tight">Dropdown options</h2>
+          <p className="mt-1 text-xs text-muted-foreground">Add or remove items. Forms pick up changes when opened.</p>
+          <div className="mt-4 grid gap-6 md:grid-cols-2">
+            {DROPDOWN_KEYS.map((key) => (
+              <div key={key} className="rounded-xl border bg-background p-4">
+                <h3 className="text-[13px] font-medium">{DROPDOWN_LABELS[key]}</h3>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {(dropdowns?.[key] ?? []).map((o) => (
+                    <span
+                      key={o}
+                      className="inline-flex h-7 items-center gap-1.5 rounded-full border bg-card px-2.5 text-xs font-medium"
                     >
-                      ×
-                    </button>
-                  </span>
-                ))}
-                {(dropdowns?.[key] ?? []).length === 0 && (
-                  <span className="text-xs text-muted-foreground">No items — add one below.</span>
-                )}
+                      {o}
+                      <button
+                        type="button"
+                        aria-label={`Remove ${o}`}
+                        className="app-transition flex size-4 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                        onClick={() => removeOption(key, o)}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  {(dropdowns?.[key] ?? []).length === 0 && (
+                    <span className="text-xs text-muted-foreground">No items — add one below.</span>
+                  )}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <Input
+                    placeholder={`New ${DROPDOWN_LABELS[key].toLowerCase()} item`}
+                    value={newValues[key]}
+                    onChange={(e) => setNewValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        addOption(key)
+                      }
+                    }}
+                  />
+                  <Button type="button" variant="outline" size="sm" className="h-9 shrink-0 self-center" onClick={() => addOption(key)}>
+                    Add
+                  </Button>
+                </div>
               </div>
-              <div className="mt-3 flex gap-2">
-                <Input
-                  placeholder={`New ${DROPDOWN_LABELS[key].toLowerCase()} item`}
-                  value={newValues[key]}
-                  onChange={(e) => setNewValues((prev) => ({ ...prev, [key]: e.target.value }))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault()
-                      addOption(key)
-                    }
-                  }}
-                />
-                <Button type="button" variant="outline" size="sm" className="h-9 shrink-0 self-center" onClick={() => addOption(key)}>
-                  Add
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+            ))}
+          </div>
+        </section>
+      )}
     </DashboardShell>
   )
 }

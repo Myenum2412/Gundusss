@@ -59,7 +59,6 @@ const METHOD_OPTIONS: Array<{
 }> = [
   { value: "UPI", label: "UPI", icon: QrCodeIcon },
   { value: "CASH_COUNTER", label: "Cash at counter", icon: BanknoteIcon },
-  { value: "CARD_COUNTER", label: "Card at counter", icon: CreditCardIcon },
 ]
 
 function formatInr(value: string | number) {
@@ -198,12 +197,21 @@ export function PayWithGateway({
     notified.current = false
   }, [])
 
+  const [loadingStudents, setLoadingStudents] = useState(false)
+
   useEffect(() => {
-    if (!open || !requireForm) return
+    if (!open) return
+    setLoadingStudents(true)
     loadStudents()
-      .then(setStudents)
-      .catch(() => setStudents([]))
-  }, [open, requireForm])
+      .then((rows) => {
+        setStudents(rows)
+      })
+      .catch((err) => {
+        console.error("Failed to load students in payment dialog", err)
+        setStudents([])
+      })
+      .finally(() => setLoadingStudents(false))
+  }, [open])
 
   const orderId = order?.orderId
   const status = order?.status
@@ -236,8 +244,7 @@ export function PayWithGateway({
   }, [open, orderId, status, onCompleted])
 
   const activeMethod = (order?.method || method) as PaymentMethod
-  const isCounter =
-    activeMethod === "CASH_COUNTER" || activeMethod === "CARD_COUNTER"
+  const isCounter = activeMethod === "CASH_COUNTER"
   const methodLabel = paymentMethodLabel(activeMethod)
 
   const successful = order?.status === "SUCCESS"
@@ -336,47 +343,96 @@ export function PayWithGateway({
           {showForm ? (
             <form onSubmit={submitForm} className="flex flex-col">
               <div className="grid gap-4 px-6 py-5">
-                {students.length > 0 ? (
-                  <Field>
+                <Field>
+                  <div className="flex items-center justify-between">
                     <FieldLabel htmlFor="payment-student">Student</FieldLabel>
-                    <select
-                      id="payment-student"
-                      className={selectClassName}
-                      value={form.studentId}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, studentId: e.target.value }))
-                      }
-                      required
-                    >
-                      <option value="" disabled>
-                        Select student
-                      </option>
-                      {students.map((s) => (
-                        <option key={s.studentId} value={s.studentId}>
-                          {s.studentName} ({s.studentId})
+                    {loadingStudents ? (
+                      <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <Loader2Icon className="size-3 animate-spin" />
+                        Loading students...
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-muted-foreground">
+                        {students.length} student{students.length === 1 ? "" : "s"} found
+                      </span>
+                    )}
+                  </div>
+                  {students.length > 0 ? (
+                    <div className="space-y-2">
+                      <select
+                        id="payment-student"
+                        className={selectClassName}
+                        value={form.studentId}
+                        onChange={(e) => {
+                          const val = e.target.value
+                          const matched = students.find((s) => s.studentId === val)
+                          setForm((f) => ({
+                            ...f,
+                            studentId: val,
+                            manualName: matched?.studentName ?? f.manualName,
+                          }))
+                        }}
+                        required={!form.manualName}
+                      >
+                        <option value="">
+                          -- Select student from dropdown --
                         </option>
-                      ))}
-                    </select>
-                  </Field>
-                ) : (
-                  <Field>
-                    <FieldLabel htmlFor="payment-student-name">
-                      Student name
-                    </FieldLabel>
-                    <Input
-                      id="payment-student-name"
-                      placeholder="Enter student name"
-                      value={form.manualName}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, manualName: e.target.value }))
-                      }
-                      required
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      No students found. The receipt will use this name.
-                    </p>
-                  </Field>
-                )}
+                        {students.map((s) => (
+                          <option key={s.studentId} value={s.studentId}>
+                            {s.studentName} ({s.studentId}){s.group ? ` · ${s.group}` : ""}{s.course ? ` · ${s.course}` : ""}
+                          </option>
+                        ))}
+                        <option value="__custom__">
+                          + Other student / Enter name manually
+                        </option>
+                      </select>
+
+                      {form.studentId && form.studentId !== "__custom__" ? (
+                        (() => {
+                          const s = students.find((x) => x.studentId === form.studentId)
+                          if (!s) return null
+                          return (
+                            <div className="rounded-xl border bg-muted/40 p-2.5 text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+                              <span><strong>ID:</strong> {s.studentId}</span>
+                              <span><strong>Name:</strong> {s.studentName}</span>
+                              {s.group ? <span><strong>Group:</strong> {s.group}</span> : null}
+                              {s.course ? <span><strong>Course:</strong> {s.course}</span> : null}
+                              {s.phone ? <span><strong>Phone:</strong> {s.phone}</span> : null}
+                            </div>
+                          )
+                        })()
+                      ) : null}
+
+                      {form.studentId === "__custom__" ? (
+                        <div className="mt-2">
+                          <Input
+                            placeholder="Type student name manually"
+                            value={form.manualName}
+                            onChange={(e) =>
+                              setForm((f) => ({ ...f, manualName: e.target.value }))
+                            }
+                            required
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <Input
+                        id="payment-student-name"
+                        placeholder="Enter student name"
+                        value={form.manualName}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, manualName: e.target.value }))
+                        }
+                        required
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        No students enrolled yet. The payment will use this student name.
+                      </p>
+                    </div>
+                  )}
+                </Field>
 
                 <Field>
                   <FieldLabel htmlFor="payment-amount">Amount (₹)</FieldLabel>

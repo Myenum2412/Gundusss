@@ -84,11 +84,28 @@ function itemsSchema<T extends z.ZodTypeAny>(item: T) {
   return z.object({ items: z.array(item).max(10000) });
 }
 
+const BranchSchema = z.object({
+  branchId: z.string().min(1).max(30),
+  branchName: z.string().min(1).max(200),
+  code: str(50),
+  address: str(500),
+  city: str(100),
+  state: str(100),
+  pincode: str(20),
+  phone: str(30),
+  email: str(255),
+  managerName: str(200),
+  status: str(20).default("Active"),
+  isHeadBranch: z.boolean().default(false),
+  capacity: str(20).default(""),
+});
+
 type Student = z.infer<typeof StudentSchema>;
 type Group = z.infer<typeof GroupSchema>;
 type FeeStructure = z.infer<typeof FeeStructureSchema>;
 type Receipt = z.infer<typeof ReceiptSchema>;
 type Announcement = z.infer<typeof AnnouncementSchema>;
+type Branch = z.infer<typeof BranchSchema>;
 
 async function listData<T>(
   collection: (typeof APPWRITE_COLLECTIONS)[keyof typeof APPWRITE_COLLECTIONS],
@@ -267,5 +284,32 @@ export async function collectionsRoutes(app: FastifyInstance) {
       }))
     );
     return { data: { count: Object.keys(parsed.data.dropdowns).length } };
+  });
+
+  // ---- Branches ----
+  app.get('/api/branches', async (req) => {
+    const profileId = await resolveProfileId(req);
+    return {
+      data: await listData<Branch>(
+        APPWRITE_COLLECTIONS.branches,
+        (branch) => branch.branchId,
+        profileId
+      ),
+    };
+  });
+
+  app.put('/api/branches', async (req, reply) => {
+    const parsed = itemsSchema(BranchSchema).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
+    const profileId = await resolveProfileId(req);
+    await replaceScopedRecords(
+      APPWRITE_COLLECTIONS.branches,
+      profileId,
+      parsed.data.items.map((branch) => ({
+        entityId: branch.branchId,
+        data: branch,
+      }))
+    );
+    return { data: { count: parsed.data.items.length } };
   });
 }

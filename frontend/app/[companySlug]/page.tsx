@@ -57,6 +57,9 @@ function formatDate(isoString: string): string {
   })
 }
 
+const selectClassName =
+  "h-10 w-full min-w-0 rounded-xl border border-input bg-card px-3 py-1 text-sm shadow-[0_1px_2px_rgba(16,24,40,0.04)] outline-none transition-[border-color,box-shadow] duration-200 hover:border-foreground/20 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+
 export default function PublicPaymentPage() {
   const params = useParams()
   const router = useRouter()
@@ -67,6 +70,7 @@ export default function PublicPaymentPage() {
   const [profileError, setProfileError] = useState<string | null>(null)
 
   // Form states
+  const [selectedStudentId, setSelectedStudentId] = useState("")
   const [studentName, setStudentName] = useState("")
   const [studentId, setStudentId] = useState("")
   const [amount, setAmount] = useState("")
@@ -481,39 +485,115 @@ export default function PublicPaymentPage() {
             )}
 
             <form onSubmit={handleSubmit} className="space-y-5">
-              <div className="grid gap-4 sm:grid-cols-2">
+              {/* Student Dropdown Selector */}
+              {profile?.students && profile.students.length > 0 ? (
                 <Field>
-                  <FieldLabel htmlFor="pub-student-name">
-                    Student Full Name <span className="text-destructive">*</span>
-                  </FieldLabel>
-                  <Input
-                    id="pub-student-name"
-                    type="text"
-                    required
-                    placeholder="e.g. Rahul Sharma"
-                    value={studentName}
-                    onChange={(e) => setStudentName(e.target.value)}
-                    className="h-10 text-sm"
-                  />
-                </Field>
-
-                <Field>
-                  <FieldLabel htmlFor="pub-student-id">
-                    Student ID / Roll No{" "}
-                    <span className="text-xs font-normal text-muted-foreground">
-                      (Optional)
+                  <div className="flex items-center justify-between">
+                    <FieldLabel htmlFor="pub-student-select">
+                      Select Student <span className="text-destructive">*</span>
+                    </FieldLabel>
+                    <span className="text-xs text-muted-foreground">
+                      {profile.students.length} student{profile.students.length === 1 ? "" : "s"} enrolled
                     </span>
-                  </FieldLabel>
-                  <Input
-                    id="pub-student-id"
-                    type="text"
-                    placeholder="e.g. STU-2026-042"
-                    value={studentId}
-                    onChange={(e) => setStudentId(e.target.value)}
-                    className="h-10 text-sm"
-                  />
+                  </div>
+                  <div className="space-y-3">
+                    <select
+                      id="pub-student-select"
+                      className={selectClassName}
+                      value={selectedStudentId}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setSelectedStudentId(val)
+                        if (val === "__custom__") {
+                          setStudentName("")
+                          setStudentId("")
+                          return
+                        }
+                        const matched = (profile.students ?? []).find((s) => s.studentId === val)
+                        if (matched) {
+                          setStudentName(matched.studentName)
+                          setStudentId(matched.studentId)
+                          if (matched.phone) setPhone(matched.phone)
+                          if (matched.email) setEmail(matched.email)
+                        }
+                      }}
+                      required={!studentName}
+                    >
+                      <option value="">-- Select student from dropdown --</option>
+                      {profile.students.map((s) => (
+                        <option key={s.studentId} value={s.studentId}>
+                          {s.studentName} ({s.studentId}){s.group ? ` · ${s.group}` : ""}{s.course ? ` · ${s.course}` : ""}
+                        </option>
+                      ))}
+                      <option value="__custom__">+ Other student / Enter manually</option>
+                    </select>
+
+                    {/* Selected Student Details Card */}
+                    {selectedStudentId && selectedStudentId !== "__custom__" ? (
+                      (() => {
+                        const s = (profile.students ?? []).find((x) => x.studentId === selectedStudentId)
+                        if (!s) return null
+                        return (
+                          <div className="rounded-2xl border bg-primary/5 p-4 text-xs text-foreground space-y-2 shadow-sm border-primary/20">
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-sm text-primary flex items-center gap-1.5">
+                                <GraduationCapIcon className="size-4" />
+                                {s.studentName}
+                              </span>
+                              <span className="font-mono text-[11px] rounded bg-muted px-2 py-0.5 font-medium">
+                                {s.studentId}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
+                              {s.group ? <span><strong>Class / Group:</strong> {s.group}</span> : null}
+                              {s.course ? <span><strong>Course:</strong> {s.course}</span> : null}
+                              {s.phone ? <span><strong>Phone:</strong> {s.phone}</span> : null}
+                              {s.email ? <span><strong>Email:</strong> {s.email}</span> : null}
+                            </div>
+                          </div>
+                        )
+                      })()
+                    ) : null}
+                  </div>
                 </Field>
-              </div>
+              ) : null}
+
+              {/* Show Manual inputs if "__custom__" is chosen OR no enrolled students yet */}
+              {(!profile?.students?.length || selectedStudentId === "__custom__" || !selectedStudentId) && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="pub-student-name">
+                      Student Full Name <span className="text-destructive">*</span>
+                    </FieldLabel>
+                    <Input
+                      id="pub-student-name"
+                      type="text"
+                      required
+                      placeholder="e.g. Rahul Sharma"
+                      value={studentName}
+                      onChange={(e) => setStudentName(e.target.value)}
+                      className="h-10 text-sm"
+                    />
+                  </Field>
+
+                  <Field>
+                    <FieldLabel htmlFor="pub-student-id">
+                      Student ID / Roll No{" "}
+                      <span className="text-xs font-normal text-muted-foreground">
+                        (Optional)
+                      </span>
+                    </FieldLabel>
+                    <Input
+                      id="pub-student-id"
+                      type="text"
+                      placeholder="e.g. STU-001"
+                      value={studentId}
+                      onChange={(e) => setStudentId(e.target.value)}
+                      className="h-10 text-sm"
+                    />
+                  </Field>
+                </div>
+              )}
 
               {/* Amount field with chips */}
               <Field>

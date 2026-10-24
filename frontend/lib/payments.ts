@@ -2,7 +2,7 @@ import { API_BASE, apiFetch } from "./api-base"
 
 const BASE = API_BASE
 
-export type PaymentMethod = "UPI" | "CASH_COUNTER" | "CARD_COUNTER"
+export type PaymentMethod = "UPI" | "CASH_COUNTER"
 
 export interface PaymentEvent {
   id: number | string
@@ -48,13 +48,11 @@ export interface CreatePaymentInput {
 export const PAYMENT_METHOD_LABELS: Record<string, string> = {
   UPI: "UPI",
   CASH_COUNTER: "Cash at counter",
-  CARD_COUNTER: "Card at counter",
 }
 
 export const PAYMENT_METHOD_NOTES: Record<string, string> = {
   UPI: "Pay now with any UPI app using a single-use QR.",
   CASH_COUNTER: "Create a counter pass and collect cash at the office.",
-  CARD_COUNTER: "Create a counter pass and collect card payment at the office.",
 }
 
 export function paymentMethodLabel(method: string): string {
@@ -205,6 +203,15 @@ export function syncPaymentSettings(): Promise<PaymentSettings> {
   })
 }
 
+export interface PublicStudentOption {
+  studentId: string
+  studentName: string
+  group: string
+  course: string
+  phone: string
+  email: string
+}
+
 export interface PublicOrganizationProfile {
   profileId: string
   name: string
@@ -217,6 +224,7 @@ export interface PublicOrganizationProfile {
   phone: string
   email: string
   description: string
+  students?: PublicStudentOption[]
 }
 
 export async function getPublicProfile(slug: string): Promise<PublicOrganizationProfile> {
@@ -229,6 +237,15 @@ export async function getPublicProfile(slug: string): Promise<PublicOrganization
   }
   const json = (await res.json()) as { data: PublicOrganizationProfile }
   return json.data
+}
+
+export async function getPublicStudents(slug: string): Promise<PublicStudentOption[]> {
+  const res = await fetch(`${BASE}/api/public/students/${encodeURIComponent(slug)}`, {
+    cache: "no-store",
+  })
+  if (!res.ok) return []
+  const json = (await res.json()) as { data: PublicStudentOption[] }
+  return json.data ?? []
 }
 
 export async function createPublicPayment(input: {

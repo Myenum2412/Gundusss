@@ -7,7 +7,6 @@ import { StatusBadge } from "@/components/status-badge"
 import { EmptyState } from "@/components/empty-state"
 import { LiveBadge } from "@/components/live-badge"
 import { PayWithGateway } from "@/components/pay-with-gateway"
-import { PaymentSetup } from "@/components/payment-setup"
 import { PaymentTimeline } from "@/components/payment-timeline"
 import Stats01 from "@/components/stats-01"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -71,7 +70,6 @@ const STATUS_OPTIONS = [
 const METHOD_ICONS: Record<string, LucideIcon> = {
   UPI: QrCodeIcon,
   CASH_COUNTER: BanknoteIcon,
-  CARD_COUNTER: CreditCardIcon,
 }
 
 function formatAmount(value: string | number) {
@@ -267,7 +265,7 @@ export default function PaymentsPage() {
     >
       <PageHeader
         title="Payments"
-        description="Collect fees via UPI or cash/card at the counter. Verified payments create a receipt and mark the matching fee paid automatically."
+        description="Collect fees via UPI or cash at the counter. Verified payments create a receipt and mark the matching fee paid automatically."
         meta={
           <span className="flex items-center gap-2">
             <span className="inline-flex h-6 items-center rounded-full border bg-card px-2.5 text-xs font-medium text-muted-foreground">
@@ -340,8 +338,6 @@ export default function PaymentsPage() {
           </div>
         </div>
       ) : null}
-
-      {can("settings:manage") && <PaymentSetup onSaved={reload} />}
 
       <Stats01 stats={stats} />
 
