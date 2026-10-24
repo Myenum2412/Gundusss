@@ -23,6 +23,7 @@ import { collectionsRoutes } from './routes/collections.js';
 import { paymentRoutes } from './routes/payments.js';
 import { paymentSettingsRoutes } from './routes/payment-settings.js';
 import { businessProfileRoutes } from './routes/business-profile.js';
+import { reminderRoutes } from './routes/reminders.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -116,6 +117,7 @@ await app.register(collectionsRoutes);
 await app.register(paymentRoutes);
 await app.register(paymentSettingsRoutes);
 await app.register(businessProfileRoutes);
+await app.register(reminderRoutes);
 
 async function ensureAppwriteSeed(): Promise<void> {
   await assertAppwriteSetup();

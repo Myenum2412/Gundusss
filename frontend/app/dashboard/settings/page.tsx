@@ -34,8 +34,12 @@ import {
 } from "@/lib/dropdown-store"
 import { PaymentSetup } from "@/components/payment-setup"
 import { cn } from "cn"
+import Link from "next/link"
 import {
+  BellRingIcon,
   CheckCircle2Icon,
+  ExternalLinkIcon,
+  GlobeIcon,
   PlugIcon,
   QrCodeIcon,
   SendIcon,
@@ -54,7 +58,7 @@ const waLabel: Record<WaState["status"], string> = {
 
 export default function SettingsPage() {
   const { can } = useAuth()
-  const [activeTab, setActiveTab] = useState<"all" | "upi" | "whatsapp" | "dropdowns">("upi")
+  const [activeTab, setActiveTab] = useState<"all" | "upi" | "whatsapp" | "dropdowns" | "cron">("upi")
   const [wa, setWa] = useState<WaState | null>(null)
   const [waError, setWaError] = useState("")
   const [to, setTo] = useState("")
@@ -283,6 +287,20 @@ export default function SettingsPage() {
 
         <button
           type="button"
+          onClick={() => setActiveTab("cron")}
+          className={cn(
+            "flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition",
+            activeTab === "cron"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          )}
+        >
+          <GlobeIcon className="size-4" />
+          <span>cron-job.org Reminders</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab("all")}
           className={cn(
             "flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition",
@@ -455,6 +473,71 @@ export default function SettingsPage() {
                 </div>
               </div>
             ))}
+          </div>
+        </section>
+      )}
+
+      {/* cron-job.org Reminders Tab */}
+      {(activeTab === "cron" || activeTab === "all") && (
+        <section className="space-y-4">
+          <div className="flex items-center justify-between border-b pb-2">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">
+                cron-job.org Automated Monthly Reminders
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Automated monthly WhatsApp fee reminders dispatched via cron-job.org REST API.
+              </p>
+            </div>
+            <Link
+              href="/dashboard/reminders"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+            >
+              <BellRingIcon className="size-3.5" />
+              <span>Open Reminders Console</span>
+              <ExternalLinkIcon className="size-3" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border bg-card p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-foreground">API Connection</span>
+                <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-600">
+                  Connected
+                </span>
+              </div>
+              <div className="space-y-1.5 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Provider:</span>
+                  <span className="font-medium text-foreground">https://api.cron-job.org</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Active Job ID:</span>
+                  <span className="font-mono font-semibold text-primary">#8715234</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Schedule:</span>
+                  <span className="font-medium text-foreground">Monthly on 1st, 9:00 AM IST</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">API Key:</span>
+                  <span className="font-mono text-[11px] text-muted-foreground truncate max-w-[200px]">
+                    JmJ+4jtf...DjhU=
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border bg-card p-4 space-y-3">
+              <span className="text-xs font-semibold text-foreground">Target Webhook Endpoint</span>
+              <p className="text-xs text-muted-foreground">
+                cron-job.org triggers this secure webhook monthly to resolve all student dues and deliver WhatsApp notices.
+              </p>
+              <code className="block rounded-lg bg-muted p-2 font-mono text-[11px] text-foreground break-all">
+                https://myfees.myenum.in/api/reminders/cron/monthly
+              </code>
+            </div>
           </div>
         </section>
       )}

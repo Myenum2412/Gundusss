@@ -28,6 +28,7 @@ import {
   UsersIcon,
   Building2Icon,
   GitBranchIcon,
+  BellRingIcon,
 } from "lucide-react"
 import type { Permission } from "@/lib/session"
 
@@ -89,6 +90,12 @@ const navigation: { navMain: NavItem[]; navBottom: NavItem[] } = {
       title: "Payments",
       url: "/dashboard/payments",
       icon: <CreditCardIcon />,
+      permission: "data:read",
+    },
+    {
+      title: "Reminders",
+      url: "/dashboard/reminders",
+      icon: <BellRingIcon />,
       permission: "data:read",
     },
     {

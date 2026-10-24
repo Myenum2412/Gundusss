@@ -179,12 +179,19 @@ function isPublicRoute(method: string, path: string): boolean {
   if (path === '/api/payments/webhook') return true;
   // Public payment page endpoints for students/parents
   if (path.startsWith('/api/public/')) return true;
+  // cron-job.org automated reminder webhook
+  if (path.startsWith('/api/reminders/cron/')) return true;
   return false;
 }
 
 export function requiredPermission(method: string, path: string): Permission {
   if (path === '/api/users' || path.startsWith('/api/users/')) {
     return 'users:manage';
+  }
+  if (path === '/api/reminders' || path.startsWith('/api/reminders/')) {
+    return method === 'GET' || method === 'HEAD'
+      ? 'data:read'
+      : 'settings:manage';
   }
   if (path === '/api/business-profile') {
     return method === 'GET' || method === 'HEAD'
