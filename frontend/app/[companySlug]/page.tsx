@@ -12,7 +12,6 @@ import {
 } from "@/lib/payments"
 import { Button } from "@/components/ui/button"
 import {
-  BanknoteIcon,
   CheckCircle2Icon,
   CheckIcon,
   CopyIcon,
@@ -28,6 +27,15 @@ import {
   UserCheckIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import {
+  SvglGoogle,
+  SvglPhonePe,
+  SvglPaytm,
+  SvglPaytmIcon,
+  SvglUpi,
+  SvglBhim,
+  SvglCash,
+} from "@/components/icons/payment-icons"
 
 function formatInr(value: number | string): string {
   const n = Number(value)
@@ -444,7 +452,7 @@ export default function PublicPaymentPage() {
           <section className="rounded-3xl border bg-card p-6 shadow-md shadow-black/[0.04] sm:p-8 animate-in fade-in duration-300">
             <div className="flex flex-col items-center text-center">
               <div className="flex size-14 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                <BanknoteIcon className="size-7" />
+                <SvglCash className="size-7" />
               </div>
               <h2 className="mt-3 text-xl font-bold tracking-tight text-foreground">
                 Cash Counter Payment Pass
@@ -600,25 +608,27 @@ export default function PublicPaymentPage() {
                     type="button"
                     onClick={() => setActiveTab("UPI")}
                     className={cn(
-                      "rounded-lg px-3 py-1 transition",
+                      "flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition",
                       activeTab === "UPI"
                         ? "bg-card text-foreground shadow-xs font-semibold"
                         : "text-muted-foreground hover:text-foreground"
                     )}
                   >
-                    UPI / QR
+                    <SvglUpi className="size-3.5 shrink-0" />
+                    <span>UPI / QR</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setActiveTab("CASH")}
                     className={cn(
-                      "rounded-lg px-3 py-1 transition",
+                      "flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition",
                       activeTab === "CASH"
                         ? "bg-card text-foreground shadow-xs font-semibold"
                         : "text-muted-foreground hover:text-foreground"
                     )}
                   >
-                    Cash Counter
+                    <SvglCash className="size-3.5 shrink-0" />
+                    <span>Cash Counter</span>
                   </button>
                 </div>
               </div>
@@ -628,9 +638,10 @@ export default function PublicPaymentPage() {
                 <div className="mt-6 space-y-6">
                   {/* Dynamic QR Code Card (Generated specifically for this user & fee) */}
                   <div className="flex flex-col items-center justify-center rounded-2xl border bg-slate-50/80 dark:bg-zinc-900/60 p-6 shadow-inner text-center">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Scan to Pay with Any UPI App
-                    </span>
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      <SvglUpi className="size-3.5 shrink-0" />
+                      <span>Scan to Pay with Any UPI App</span>
+                    </div>
 
                     <div className="mt-3 relative flex items-center justify-center rounded-2xl border bg-white p-3 shadow-md">
                       {generatingQr || !qrDataUrl ? (
@@ -646,7 +657,23 @@ export default function PublicPaymentPage() {
                       )}
                     </div>
 
-                    <div className="mt-3 flex items-center justify-center gap-2">
+                    {/* Supported Apps Logo Bar */}
+                    <div className="mt-3 flex items-center justify-center gap-4 py-1 text-muted-foreground">
+                      <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+                        <SvglGoogle className="size-3.5" /> GPay
+                      </span>
+                      <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+                        <SvglPhonePe className="size-3.5 rounded-full" /> PhonePe
+                      </span>
+                      <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+                        <SvglPaytm className="h-3 w-auto" />
+                      </span>
+                      <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+                        <SvglBhim className="size-3.5 rounded-xs" /> BHIM
+                      </span>
+                    </div>
+
+                    <div className="mt-2 flex items-center justify-center gap-2">
                       <span className="text-xs text-muted-foreground">UPI ID:</span>
                       <code className="rounded bg-muted px-2 py-0.5 font-mono text-xs font-semibold text-foreground">
                         {upiId}
@@ -681,40 +708,43 @@ export default function PublicPaymentPage() {
                       type="button"
                       size="lg"
                       onClick={() => handleOpenUpiApp()}
-                      className="w-full h-12 text-base font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-600/20 gap-2"
+                      className="w-full h-12 text-base font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-600/20 gap-2.5"
                     >
-                      <SmartphoneIcon className="size-5" />
-                      <span>Pay {formatInr(fixedAmount)} via Any UPI App</span>
+                      <SvglUpi className="size-5 shrink-0" />
+                      <span>Pay {formatInr(fixedAmount)} via UPI</span>
                     </Button>
 
-                    {/* Quick Direct UPI App Launchers */}
+                    {/* Quick Direct UPI App Launchers with SVGL icons */}
                     <div className="grid grid-cols-3 gap-2">
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         onClick={() => handleOpenUpiApp("tez://upi/pay?")}
-                        className="h-10 text-xs font-semibold border-muted hover:border-foreground/30 gap-1.5"
+                        className="h-11 text-xs font-semibold border-muted/80 hover:border-foreground/30 bg-card shadow-2xs gap-2 hover:bg-muted/30"
                       >
-                        <span className="font-bold text-sky-600">G</span>Pay
+                        <SvglGoogle className="size-4 shrink-0" />
+                        <span className="font-semibold text-foreground">GPay</span>
                       </Button>
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         onClick={() => handleOpenUpiApp("phonepe://pay?")}
-                        className="h-10 text-xs font-semibold border-muted hover:border-foreground/30 gap-1.5"
+                        className="h-11 text-xs font-semibold border-muted/80 hover:border-foreground/30 bg-card shadow-2xs gap-2 hover:bg-muted/30"
                       >
-                        <span className="font-bold text-purple-600">Phone</span>Pe
+                        <SvglPhonePe className="size-4 shrink-0" />
+                        <span className="font-semibold text-foreground">PhonePe</span>
                       </Button>
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         onClick={() => handleOpenUpiApp("paytmmp://pay?")}
-                        className="h-10 text-xs font-semibold border-muted hover:border-foreground/30 gap-1.5"
+                        className="h-11 text-xs font-semibold border-muted/80 hover:border-foreground/30 bg-card shadow-2xs gap-2 hover:bg-muted/30"
                       >
-                        <span className="font-bold text-sky-500">Pay</span>tm
+                        <SvglPaytmIcon className="size-4 shrink-0 rounded-xs" />
+                        <span className="font-semibold text-foreground">Paytm</span>
                       </Button>
                     </div>
                   </div>
@@ -748,7 +778,7 @@ export default function PublicPaymentPage() {
                 <div className="mt-6 space-y-5 text-center">
                   <div className="rounded-2xl border bg-muted/20 p-5">
                     <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary mb-3">
-                      <BanknoteIcon className="size-6" />
+                      <SvglCash className="size-6" />
                     </div>
                     <h3 className="font-semibold text-sm text-foreground">
                       Pay Cash at Counter Desk
