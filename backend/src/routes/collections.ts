@@ -21,6 +21,7 @@ const StudentSchema = z.object({
   address: str(500),
   group: str(100),
   course: str(100),
+  branch: str(100),
   joiningDate: str(20),
   status: str(20),
 });

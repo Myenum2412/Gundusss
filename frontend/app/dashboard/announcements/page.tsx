@@ -33,6 +33,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { loadStudents, type StoredStudent } from "@/lib/students-store"
+import { loadGroups, type StoredGroup } from "@/lib/groups-store"
 import {
   loadAnnouncements,
   saveAnnouncements,
@@ -65,6 +66,7 @@ export default function AnnouncementsPage() {
   const [availableStudents, setAvailableStudents] = useState<StoredStudent[]>(
     []
   )
+  const [groups, setGroups] = useState<StoredGroup[]>([])
   const [viewItem, setViewItem] = useState<StoredAnnouncement | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
@@ -97,21 +99,24 @@ export default function AnnouncementsPage() {
     if (hydrated) void saveAnnouncements(items)
   }, [items, hydrated])
 
-  const reloadStudents = useCallback(() => {
+  const reloadDependencies = useCallback(() => {
     loadStudents()
       .then(setAvailableStudents)
       .catch((error) => console.error("Failed to load students", error))
+    loadGroups()
+      .then(setGroups)
+      .catch((error) => console.error("Failed to load student groups", error))
   }, [])
 
   useEffect(() => {
-    reloadStudents()
-  }, [reloadStudents])
+    reloadDependencies()
+  }, [reloadDependencies])
 
   useEffect(() => {
     if (open) {
-      reloadStudents()
+      reloadDependencies()
     }
-  }, [open, reloadStudents])
+  }, [open, reloadDependencies])
 
   function toggleStudent(id: string) {
     setForm((f) => ({
@@ -315,8 +320,8 @@ export default function AnnouncementsPage() {
                     />
                   </Field>
                   <Field>
-                    <FieldLabel>Students ({form.studentIds.length} selected)</FieldLabel>
-                    <div className="flex gap-2">
+                    <FieldLabel>Students ({form.studentIds.length} of {availableStudents.length} selected)</FieldLabel>
+                    <div className="flex flex-wrap items-center gap-2">
                       <Button
                         type="button"
                         variant="outline"
@@ -328,8 +333,39 @@ export default function AnnouncementsPage() {
                           }))
                         }
                       >
-                        Select all
+                        Select all ({availableStudents.length})
                       </Button>
+                      {groups.length > 0 && (
+                        <select
+                          className="h-8 rounded-lg border border-input bg-card px-2.5 text-xs shadow-xs outline-none focus-visible:border-ring"
+                          defaultValue=""
+                          onChange={(e) => {
+                            const val = e.target.value
+                            if (!val) return
+                            const matched = groups.find((g) => g.groupName === val || g.groupId === val)
+                            if (matched) {
+                              // Select students enrolled in this group or matching group name
+                              const targetIds = availableStudents
+                                .filter((s) => matched.studentIds.includes(s.studentId) || s.group === matched.groupName)
+                                .map((s) => s.studentId)
+                              setForm((f) => ({
+                                ...f,
+                                studentIds: Array.from(new Set([...f.studentIds, ...targetIds])),
+                              }))
+                            }
+                            e.target.value = ""
+                          }}
+                        >
+                          <option value="" disabled>
+                            + Select by Student Group
+                          </option>
+                          {groups.map((g) => (
+                            <option key={g.groupId} value={g.groupName}>
+                              {g.groupName} ({g.studentIds.length} students)
+                            </option>
+                          ))}
+                        </select>
+                      )}
                       <Button
                         type="button"
                         variant="ghost"
@@ -339,7 +375,7 @@ export default function AnnouncementsPage() {
                         Clear
                       </Button>
                     </div>
-                    <div className="max-h-44 overflow-y-auto rounded-[10px] border border-input bg-card p-1.5">
+                    <div className="max-h-52 overflow-y-auto rounded-[10px] border border-input bg-card p-1.5 custom-scroll">
                       {availableStudents.length === 0 ? (
                         <p className="px-2 py-4 text-center text-sm text-muted-foreground">
                           No students found. Add students first on the Students page.
@@ -348,16 +384,26 @@ export default function AnnouncementsPage() {
                         availableStudents.map((s) => (
                           <label
                             key={s.studentId}
-                            className="app-transition flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-muted"
+                            className="app-transition flex cursor-pointer items-center justify-between rounded-lg px-2.5 py-1.5 text-sm hover:bg-muted"
                           >
-                            <input
-                              type="checkbox"
-                              className="size-4 accent-primary"
-                              checked={form.studentIds.includes(s.studentId)}
-                              onChange={() => toggleStudent(s.studentId)}
-                            />
-                            <span className="font-medium">{s.studentName}</span>
-                            <span className="font-mono text-xs text-muted-foreground">{s.studentId}</span>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <input
+                                type="checkbox"
+                                className="size-4 accent-primary"
+                                checked={form.studentIds.includes(s.studentId)}
+                                onChange={() => toggleStudent(s.studentId)}
+                              />
+                              <span className="font-medium text-foreground">{s.studentName}</span>
+                              <span className="font-mono text-xs text-muted-foreground">{s.studentId}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
+                              {s.course && <span>{s.course}</span>}
+                              {s.group ? (
+                                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">
+                                  {s.group}
+                                </span>
+                              ) : null}
+                            </div>
                           </label>
                         ))
                       )}

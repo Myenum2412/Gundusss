@@ -33,6 +33,12 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { loadStudents, type StoredStudent } from "@/lib/students-store"
+import { loadGroups, type StoredGroup } from "@/lib/groups-store"
+import {
+  loadFeeStructures,
+  type StoredFeeStructure,
+} from "@/lib/fee-structures-store"
+import { resolveStudentFee } from "@/lib/fee-lookup"
 import {
   loadDropdowns,
   type DropdownMap,
@@ -72,6 +78,8 @@ export default function ReceiptsPage() {
   const [availableStudents, setAvailableStudents] = useState<StoredStudent[]>(
     []
   )
+  const [feeStructures, setFeeStructures] = useState<StoredFeeStructure[]>([])
+  const [groups, setGroups] = useState<StoredGroup[]>([])
   const [dropdowns, setDropdowns] = useState<DropdownMap | null>(null)
   const [viewReceipt, setViewReceipt] = useState<StoredReceipt | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
@@ -109,6 +117,12 @@ export default function ReceiptsPage() {
     loadStudents()
       .then(setAvailableStudents)
       .catch((error) => console.error("Failed to load students", error))
+    loadGroups()
+      .then(setGroups)
+      .catch((error) => console.error("Failed to load student groups", error))
+    loadFeeStructures()
+      .then(setFeeStructures)
+      .catch((error) => console.error("Failed to load fee structures", error))
     loadDropdowns()
       .then(setDropdowns)
       .catch((error) => console.error("Failed to load dropdown options", error))
@@ -123,6 +137,27 @@ export default function ReceiptsPage() {
       reloadDependencies()
     }
   }, [open, reloadDependencies])
+
+  function handleStudentChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const sId = e.target.value
+    const student = availableStudents.find((s) => s.studentId === sId)
+    if (!student) {
+      setForm((f) => ({ ...f, studentId: sId }))
+      return
+    }
+    const fee = resolveStudentFee(student, feeStructures, groups)
+    const today = new Date().toISOString().split("T")[0]
+    setForm((f) => ({
+      ...f,
+      studentId: sId,
+      amount: f.amount && editingIndex !== null ? f.amount : fee.amount,
+      paymentDate: f.paymentDate || today,
+      notes:
+        f.notes && editingIndex !== null
+          ? f.notes
+          : `Fee payment for ${student.course || "Course"} (${student.group || "Regular"})`,
+    }))
+  }
 
   function set(key: keyof typeof initialForm) {
     return (
@@ -276,7 +311,7 @@ export default function ReceiptsPage() {
                       id="studentId"
                       className={selectClassName}
                       value={form.studentId}
-                      onChange={set("studentId")}
+                      onChange={handleStudentChange}
                       required
                     >
                       <option value="" disabled>
@@ -284,7 +319,7 @@ export default function ReceiptsPage() {
                       </option>
                       {availableStudents.map((s) => (
                         <option key={s.studentId} value={s.studentId}>
-                          {s.studentName} ({s.studentId})
+                          {s.studentName} ({s.studentId}){s.group ? ` · ${s.group}` : ""}{s.course ? ` · ${s.course}` : ""}
                         </option>
                       ))}
                     </select>
@@ -294,6 +329,35 @@ export default function ReceiptsPage() {
                       </p>
                     )}
                   </Field>
+
+                  {/* Connected Student & Fee Details Preview */}
+                  {(() => {
+                    const student = availableStudents.find((s) => s.studentId === form.studentId)
+                    if (!student) return null
+                    const fee = resolveStudentFee(student, feeStructures, groups)
+                    return (
+                      <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs md:col-span-2">
+                        <div className="flex items-center justify-between font-semibold text-primary">
+                          <span>Connected Student & Fee Overview</span>
+                          <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-mono">
+                            {fee.source}
+                          </span>
+                        </div>
+                        <div className="mt-2.5 grid grid-cols-2 gap-2 text-muted-foreground sm:grid-cols-4">
+                          <div><strong className="text-foreground">Name:</strong> {student.studentName}</div>
+                          <div><strong className="text-foreground">ID:</strong> {student.studentId}</div>
+                          <div><strong className="text-foreground">Course:</strong> {student.course || "—"}</div>
+                          <div><strong className="text-foreground">Group:</strong> {student.group || "—"}</div>
+                          <div><strong className="text-foreground">Phone:</strong> {student.phone || "—"}</div>
+                          <div><strong className="text-foreground">Branch:</strong> {student.branch || "—"}</div>
+                          <div className="col-span-2">
+                            <strong className="text-foreground">Standard Fee:</strong> ₹{fee.amount} ({fee.frequency || "Monthly"})
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })()}
+
                   <Field>
                     <FieldLabel htmlFor="amount">Amount (₹)</FieldLabel>
                     <Input

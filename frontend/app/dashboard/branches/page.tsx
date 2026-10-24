@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { loadBranches, saveBranches, type StoredBranch } from "@/lib/branches-store"
+import { loadStudents, type StoredStudent } from "@/lib/students-store"
 import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
 import { StatusBadge } from "@/components/status-badge"
 import { EmptyState } from "@/components/empty-state"
@@ -78,6 +79,7 @@ export default function BranchesPage() {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState(initialForm)
   const [branches, setBranches] = useState<Branch[]>([])
+  const [students, setStudents] = useState<StoredStudent[]>([])
   const [nextId, setNextId] = useState(1)
   const [hydrated, setHydrated] = useState(false)
   const [search, setSearch] = useState("")
@@ -106,6 +108,9 @@ export default function BranchesPage() {
       .catch((error) => {
         console.error("Failed to load branches", error)
       })
+    loadStudents()
+      .then(setStudents)
+      .catch((err) => console.error("Failed to load students in branches", err))
   }, [])
 
   useEffect(() => {
@@ -556,9 +561,16 @@ export default function BranchesPage() {
                     </TableCell>
 
                     <TableCell>
-                      <span className="text-sm text-foreground">
-                        {b.capacity ? `${b.capacity} seats` : "—"}
-                      </span>
+                      <div className="text-sm">
+                        <span className="font-medium text-foreground">
+                          {students.filter((s) => s.branch === b.branchName).length} enrolled
+                        </span>
+                        {b.capacity ? (
+                          <span className="ml-1 text-xs text-muted-foreground">
+                            / {b.capacity} cap
+                          </span>
+                        ) : null}
+                      </div>
                     </TableCell>
 
                     <TableCell>
@@ -612,8 +624,16 @@ export default function BranchesPage() {
               <DetailItem label="Branch Email">
                 {viewBranch.email || "—"}
               </DetailItem>
-              <DetailItem label="Capacity">
-                {viewBranch.capacity ? `${viewBranch.capacity} seats` : "—"}
+              <DetailItem label="Capacity & Enrollment">
+                {students.filter((s) => s.branch === viewBranch.branchName).length} students enrolled
+                {viewBranch.capacity ? ` (Capacity: ${viewBranch.capacity})` : ""}
+              </DetailItem>
+              <DetailItem label="Enrolled Students">
+                {(() => {
+                  const enrolled = students.filter((s) => s.branch === viewBranch.branchName)
+                  if (enrolled.length === 0) return "No students assigned to this branch"
+                  return `${enrolled.length} students (${enrolled.slice(0, 3).map((s) => s.studentName).join(", ")}${enrolled.length > 3 ? `, +${enrolled.length - 3} more` : ""})`
+                })()}
               </DetailItem>
               <DetailItem label="City & State">
                 {viewBranch.city} {viewBranch.state ? `, ${viewBranch.state}` : ""}

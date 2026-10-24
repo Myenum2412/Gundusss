@@ -12,6 +12,7 @@ import {
 
 import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
 import { useAuth } from "@/components/auth-provider"
+import { RowActions } from "@/components/row-actions"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -327,37 +328,13 @@ export default function UsersPage() {
                       <TableCell className="text-xs text-muted-foreground">
                         {formatDate(row.created_at)}
                       </TableCell>
-                      <TableCell className="pr-4">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            title="Edit user"
-                            aria-label={`Edit ${row.name}`}
-                            onClick={() => openEdit(row)}
-                          >
-                            <PencilIcon />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            title={
-                              self
-                                ? "You cannot delete your own account"
-                                : "Delete user"
-                            }
-                            aria-label={`Delete ${row.name}`}
-                            disabled={self || deletingId === row.id}
-                            onClick={() => void onDelete(row)}
-                            className="text-muted-foreground hover:text-destructive"
-                          >
-                            {deletingId === row.id ? (
-                              <Loader2Icon className="animate-spin" />
-                            ) : (
-                              <Trash2Icon />
-                            )}
-                          </Button>
-                        </div>
+                      <TableCell className="pr-4 text-right">
+                        <RowActions
+                          onEdit={() => openEdit(row)}
+                          onDelete={self ? undefined : () => void onDelete(row)}
+                          editLabel="Edit user"
+                          deleteLabel="Delete user"
+                        />
                       </TableCell>
                     </TableRow>
                   )

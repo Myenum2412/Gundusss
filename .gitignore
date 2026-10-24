@@ -8,3 +8,4 @@ postgres-data
 backend/.pgdata
 .wwebjs_auth
 backend/.pgdata.corrupt-*
+*.tsbuildinfo

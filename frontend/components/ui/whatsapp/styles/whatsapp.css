@@ -1,0 +1,418 @@
+/*
+ * WhatsApp UI Design Tokens
+ * Extracted from web.whatsapp.com WDS (WhatsApp Design System)
+ */
+
+@theme inline {
+  /* === Primary Brand Colors === */
+  --color-wa-green-50: var(--wa-green-50);
+  --color-wa-green-75: var(--wa-green-75);
+  --color-wa-green-100: var(--wa-green-100);
+  --color-wa-green-200: var(--wa-green-200);
+  --color-wa-green-300: var(--wa-green-300);
+  --color-wa-green-400: var(--wa-green-400);
+  --color-wa-green-450: var(--wa-green-450);
+  --color-wa-green-500: var(--wa-green-500);
+  --color-wa-green-600: var(--wa-green-600);
+  --color-wa-green-700: var(--wa-green-700);
+  --color-wa-green-750: var(--wa-green-750);
+  --color-wa-green-800: var(--wa-green-800);
+
+  /* === Emerald (Teal) === */
+  --color-wa-emerald-400: var(--wa-emerald-400);
+  --color-wa-emerald-500: var(--wa-emerald-500);
+  --color-wa-emerald-600: var(--wa-emerald-600);
+
+  /* === Neutral Gray === */
+  --color-wa-gray-50: var(--wa-gray-50);
+  --color-wa-gray-75: var(--wa-gray-75);
+  --color-wa-gray-100: var(--wa-gray-100);
+  --color-wa-gray-200: var(--wa-gray-200);
+  --color-wa-gray-300: var(--wa-gray-300);
+  --color-wa-gray-400: var(--wa-gray-400);
+  --color-wa-gray-500: var(--wa-gray-500);
+  --color-wa-gray-600: var(--wa-gray-600);
+  --color-wa-gray-700: var(--wa-gray-700);
+  --color-wa-gray-800: var(--wa-gray-800);
+  --color-wa-gray-850: var(--wa-gray-850);
+  --color-wa-gray-900: var(--wa-gray-900);
+  --color-wa-gray-1000: var(--wa-gray-1000);
+
+  /* === Sky Blue (Read Receipts) === */
+  --color-wa-sky-blue-300: var(--wa-sky-blue-300);
+  --color-wa-sky-blue-400: var(--wa-sky-blue-400);
+
+  /* === Red (Destructive/Negative) === */
+  --color-wa-red-300: var(--wa-red-300);
+  --color-wa-red-400: var(--wa-red-400);
+
+  /* === Cobalt === */
+  --color-wa-cobalt-300: var(--wa-cobalt-300);
+  --color-wa-cobalt-400: var(--wa-cobalt-400);
+
+  /* === Persistent/Brand === */
+  --color-wa-verified: var(--wa-verified);
+  --color-wa-always-white: var(--wa-always-white);
+  --color-wa-always-black: var(--wa-always-black);
+
+  /* === Profile Photo Avatars === */
+  --color-wa-avatar-brown: var(--wa-avatar-brown);
+  --color-wa-avatar-cobalt: var(--wa-avatar-cobalt);
+  --color-wa-avatar-green: var(--wa-avatar-green);
+  --color-wa-avatar-orange: var(--wa-avatar-orange);
+  --color-wa-avatar-pink: var(--wa-avatar-pink);
+  --color-wa-avatar-purple: var(--wa-avatar-purple);
+  --color-wa-avatar-red: var(--wa-avatar-red);
+  --color-wa-avatar-sky-blue: var(--wa-avatar-sky-blue);
+  --color-wa-avatar-teal: var(--wa-avatar-teal);
+  --color-wa-avatar-yellow: var(--wa-avatar-yellow);
+
+  /* === Semantic Colors (theme-aware) === */
+  --color-wa-bg: var(--wa-bg);
+  --color-wa-bg-deeper: var(--wa-bg-deeper);
+  --color-wa-bg-wash: var(--wa-bg-wash);
+  --color-wa-panel-bg: var(--wa-panel-bg);
+  --color-wa-panel-header-bg: var(--wa-panel-header-bg);
+  --color-wa-conversation-bg: var(--wa-conversation-bg);
+  --color-wa-compose-bg: var(--wa-compose-bg);
+
+  --color-wa-text-primary: var(--wa-text-primary);
+  --color-wa-text-secondary: var(--wa-text-secondary);
+  --color-wa-text-deemphasized: var(--wa-text-deemphasized);
+
+  --color-wa-bubble-outgoing: var(--wa-bubble-outgoing);
+  --color-wa-bubble-incoming: var(--wa-bubble-incoming);
+  --color-wa-bubble-system: var(--wa-bubble-system);
+  --color-wa-bubble-meta: var(--wa-bubble-meta);
+
+  --color-wa-border: var(--wa-border);
+  --color-wa-divider: var(--wa-divider);
+
+  --color-wa-primary: var(--wa-primary);
+  --color-wa-primary-hover: var(--wa-primary-hover);
+  --color-wa-icon-default: var(--wa-icon-default);
+  --color-wa-icon-lighter: var(--wa-icon-lighter);
+  --color-wa-hover: var(--wa-hover);
+  --color-wa-active: var(--wa-active);
+
+  --color-wa-read: var(--wa-read);
+  --color-wa-delivered: var(--wa-delivered);
+
+  --color-wa-unread-marker: var(--wa-unread-marker);
+  --color-wa-typing-dot: var(--wa-typing-dot);
+  --color-wa-input-bg: var(--wa-input-bg);
+  --color-wa-input-border: var(--wa-input-border);
+
+  --color-wa-wallpaper-bg: var(--wa-wallpaper-bg);
+  --color-wa-wallpaper-fg: var(--wa-wallpaper-fg);
+
+  /* === Additional Color Scales === */
+  --color-wa-teal-300: var(--wa-teal-300);
+  --color-wa-teal-400: var(--wa-teal-400);
+  --color-wa-teal-500: var(--wa-teal-500);
+
+  --color-wa-purple-300: var(--wa-purple-300);
+  --color-wa-purple-400: var(--wa-purple-400);
+
+  --color-wa-orange-300: var(--wa-orange-300);
+  --color-wa-orange-400: var(--wa-orange-400);
+
+  --color-wa-yellow-300: var(--wa-yellow-300);
+  --color-wa-yellow-400: var(--wa-yellow-400);
+
+  --color-wa-pink-300: var(--wa-pink-300);
+  --color-wa-pink-400: var(--wa-pink-400);
+
+  /* === Attachment Type Colors === */
+  --color-wa-attachment-document: var(--wa-attachment-document);
+  --color-wa-attachment-audio: var(--wa-attachment-audio);
+  --color-wa-attachment-photo: var(--wa-attachment-photo);
+  --color-wa-attachment-contact: var(--wa-attachment-contact);
+  --color-wa-attachment-camera: var(--wa-attachment-camera);
+  --color-wa-attachment-sticker: var(--wa-attachment-sticker);
+  --color-wa-attachment-poll: var(--wa-attachment-poll);
+  --color-wa-attachment-catalog: var(--wa-attachment-catalog);
+
+  /* === Semantic Text === */
+  --color-wa-text-disabled: var(--wa-text-disabled);
+  --color-wa-text-critical: var(--wa-text-critical);
+  --color-wa-text-success: var(--wa-text-success);
+  --color-wa-text-action: var(--wa-text-action);
+  --color-wa-system-msg: var(--wa-system-msg);
+  --color-wa-primary-title: var(--wa-primary-title);
+
+  /* === Typography === */
+  --font-wa: "Segoe UI", "Helvetica Neue", Helvetica, "Lucida Grande", Arial,
+    Ubuntu, Cantarell, "Fira Sans", sans-serif;
+
+  /* === Layout Constants === */
+  --spacing-wa-sidebar-width: var(--wa-sidebar-width);
+  --spacing-wa-sidebar-min-width: var(--wa-sidebar-min-width);
+  --spacing-wa-header-height: var(--wa-header-height);
+  --spacing-wa-compose-height: var(--wa-compose-height);
+  --spacing-wa-chat-spacing: var(--wa-chat-spacing);
+  --spacing-wa-avatar-sm: var(--wa-avatar-size-sm);
+  --spacing-wa-avatar-md: var(--wa-avatar-size-md);
+  --spacing-wa-avatar-lg: var(--wa-avatar-size-lg);
+
+  /* === Border Radius === */
+  --radius-wa-bubble: var(--wa-bubble-radius);
+
+  /* === Animation === */
+  --animate-wa-typing-bounce: wa-typing-bounce 1.2s ease-in-out infinite;
+}
+
+@keyframes wa-typing-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-4px);
+  }
+}
+
+:root {
+  /* === Primary Brand Colors === */
+  --wa-green-50: #f2fdf0;
+  --wa-green-75: #e7fce3;
+  --wa-green-100: #d9fdd3;
+  --wa-green-200: #acfcac;
+  --wa-green-300: #71eb85;
+  --wa-green-400: #25d366;
+  --wa-green-450: #21c063;
+  --wa-green-500: #1daa61;
+  --wa-green-600: #1b8755;
+  --wa-green-700: #15603e;
+  --wa-green-750: #144d37;
+  --wa-green-800: #103529;
+
+  /* === Emerald (Teal) === */
+  --wa-emerald-400: #06cf9c;
+  --wa-emerald-500: #00a884;
+  --wa-emerald-600: #008069;
+
+  /* === Neutral Gray === */
+  --wa-gray-50: #fafafa;
+  --wa-gray-75: #f4f4f4;
+  --wa-gray-100: #eeeeee;
+  --wa-gray-200: #d8d8d8;
+  --wa-gray-300: #bdbdbd;
+  --wa-gray-400: #959393;
+  --wa-gray-500: #757778;
+  --wa-gray-600: #606263;
+  --wa-gray-700: #424445;
+  --wa-gray-800: #242626;
+  --wa-gray-850: #1d1f1f;
+  --wa-gray-900: #161717;
+  --wa-gray-1000: #0a0a0a;
+
+  /* === Sky Blue (Read Receipts) === */
+  --wa-sky-blue-300: #53bdeb;
+  --wa-sky-blue-400: #009de2;
+
+  /* === Red (Destructive/Negative) === */
+  --wa-red-300: #fb5061;
+  --wa-red-400: #f53947;
+
+  /* === Cobalt === */
+  --wa-cobalt-300: #53a6fd;
+  --wa-cobalt-400: #007bfc;
+
+  /* === Persistent/Brand === */
+  --wa-verified: #0085f4;
+  --wa-always-white: #ffffff;
+  --wa-always-black: #000000;
+
+  /* === Profile Photo Avatars === */
+  --wa-avatar-brown: #dba685;
+  --wa-avatar-cobalt: #53a6fd;
+  --wa-avatar-green: #25d366;
+  --wa-avatar-orange: #fc9775;
+  --wa-avatar-pink: #ff72a1;
+  --wa-avatar-purple: #a791ff;
+  --wa-avatar-red: #fb5061;
+  --wa-avatar-sky-blue: #53bdeb;
+  --wa-avatar-teal: #42c7b8;
+  --wa-avatar-yellow: #ffd279;
+}
+
+/* === Light Mode (WhatsApp Default) === */
+:root,
+[data-theme="light"] {
+  /* Surfaces */
+  --wa-bg: #ffffff;
+  --wa-bg-deeper: #f0f2f5;
+  --wa-bg-wash: #f7f8fa;
+  --wa-panel-bg: #ffffff;
+  --wa-panel-header-bg: #ffffff;
+  --wa-conversation-bg: #f5f0e8;
+  --wa-compose-bg: #f0f2f5;
+
+  /* Content */
+  --wa-text-primary: #111b21;
+  --wa-text-secondary: #667781;
+  --wa-text-deemphasized: rgba(17, 27, 33, 0.4);
+
+  /* Chat Bubbles */
+  --wa-bubble-outgoing: #e7ffdb;
+  --wa-bubble-incoming: #ffffff;
+  --wa-bubble-system: #ffecd2;
+  --wa-bubble-radius: 7.5px;
+  --wa-bubble-meta: rgba(17, 27, 33, 0.45);
+
+  /* Lines */
+  --wa-border: #e9edef;
+  --wa-divider: rgba(134, 150, 160, 0.15);
+
+  /* Interactive */
+  --wa-primary: #008069;
+  --wa-primary-hover: #017561;
+  --wa-icon-default: #54656f;
+  --wa-icon-lighter: #8696a0;
+  --wa-hover: rgba(17, 27, 33, 0.05);
+  --wa-active: rgba(17, 27, 33, 0.1);
+
+  /* Read Receipts */
+  --wa-read: #53bdeb;
+  --wa-delivered: #8696a0;
+
+  /* Misc */
+  --wa-unread-marker: #25d366;
+  --wa-typing-dot: #8696a0;
+  --wa-input-bg: #ffffff;
+  --wa-input-border: #e4e6eb;
+
+  /* Chat Wallpaper */
+  --wa-wallpaper-bg: #f5f0e8;
+  --wa-wallpaper-fg: rgba(17, 27, 33, 0.05);
+  --wa-wallpaper-tint: rgba(229, 221, 213, 0.85);
+
+  /* Template header placeholder */
+  --wa-placeholder-bg: #ccd0d5;
+
+  /* === Additional Color Scales === */
+  --wa-teal-300: #42c7b8;
+  --wa-teal-400: #02a698;
+  --wa-teal-500: #028377;
+
+  --wa-purple-300: #a791ff;
+  --wa-purple-400: #7f66ff;
+
+  --wa-orange-300: #fc9775;
+  --wa-orange-400: #fa6533;
+
+  --wa-yellow-300: #ffd279;
+  --wa-yellow-400: #ffb938;
+
+  --wa-pink-300: #ff72a1;
+  --wa-pink-400: #ff2e74;
+
+  /* === Attachment Type Colors === */
+  --wa-attachment-document: #7f66ff;
+  --wa-attachment-audio: #fa6533;
+  --wa-attachment-photo: #007bfc;
+  --wa-attachment-contact: #009de2;
+  --wa-attachment-camera: #ff2e74;
+  --wa-attachment-sticker: #02a698;
+  --wa-attachment-poll: #ffbc38;
+  --wa-attachment-catalog: #3a5564;
+
+  /* === Semantic Text === */
+  --wa-text-disabled: #d1d7db;
+  --wa-text-critical: #ea0038;
+  --wa-text-success: #1fa855;
+  --wa-text-action: #008069;
+  --wa-system-msg: #54656f;
+  --wa-primary-title: #41525d;
+
+  /* === Shadows === */
+  --wa-shadow-light: rgba(11, 20, 26, .08);
+  --wa-shadow-medium: rgba(11, 20, 26, .15);
+  --wa-border-bubble: rgba(17, 27, 33, .06);
+
+  /* === Button States === */
+  --wa-button-primary-hover: #017561;
+  --wa-filter-text: #54656f;
+  --wa-filter-active: #008069;
+  --wa-filter-bg-active: #d9fdd3;
+
+  /* === Spacing === */
+  --wa-text-size-small: 12.6px;
+  --wa-bubble-padding-start: 9px;
+  --wa-bubble-padding-end: 7px;
+}
+
+/* === Dark Mode === */
+[data-theme="dark"],
+.dark {
+  /* Surfaces */
+  --wa-bg: #111b21;
+  --wa-bg-deeper: #0b141a;
+  --wa-bg-wash: #161717;
+  --wa-panel-bg: #111b21;
+  --wa-panel-header-bg: #202c33;
+  --wa-conversation-bg: #0b141a;
+  --wa-compose-bg: #202c33;
+
+  /* Content */
+  --wa-text-primary: #e9edef;
+  --wa-text-secondary: #8696a0;
+  --wa-text-deemphasized: rgba(233, 237, 239, 0.4);
+
+  /* Chat Bubbles */
+  --wa-bubble-outgoing: #005c4b;
+  --wa-bubble-incoming: #202c33;
+  --wa-bubble-system: #182229;
+  --wa-bubble-meta: rgba(255, 255, 255, 0.6);
+
+  /* Lines */
+  --wa-border: rgba(233, 237, 239, 0.12);
+  --wa-divider: rgba(134, 150, 160, 0.15);
+
+  /* Interactive */
+  --wa-primary: #00a884;
+  --wa-primary-hover: #06cf9c;
+  --wa-icon-default: #aebac1;
+  --wa-icon-lighter: #8696a0;
+  --wa-hover: rgba(233, 237, 239, 0.05);
+  --wa-active: rgba(233, 237, 239, 0.1);
+
+  /* Read Receipts */
+  --wa-read: #53bdeb;
+  --wa-delivered: #aebac1;
+
+  /* Misc */
+  --wa-unread-marker: #00a884;
+  --wa-typing-dot: #8696a0;
+  --wa-input-bg: #2a3942;
+  --wa-input-border: rgba(233, 237, 239, 0.12);
+
+  /* Chat Wallpaper */
+  --wa-wallpaper-bg: #0b141a;
+  --wa-wallpaper-fg: rgba(255, 255, 255, 0.06);
+  --wa-wallpaper-tint: rgba(11, 20, 26, 0.88);
+
+  /* Template header placeholder */
+  --wa-placeholder-bg: #2a3942;
+
+  /* === Semantic Text (dark) === */
+  --wa-text-disabled: #3b4a54;
+  --wa-text-critical: #ff6b7a;
+  --wa-text-success: #25d366;
+  --wa-text-action: #00a884;
+  --wa-system-msg: #8696a0;
+  --wa-primary-title: #8696a0;
+
+  /* === Shadows (dark) === */
+  --wa-shadow-light: rgba(0, 0, 0, .3);
+  --wa-shadow-medium: rgba(0, 0, 0, .4);
+  --wa-border-bubble: rgba(255, 255, 255, .06);
+
+  /* === Button States (dark) === */
+  --wa-button-primary-hover: #06cf9c;
+  --wa-filter-text: #8696a0;
+  --wa-filter-active: #00a884;
+  --wa-filter-bg-active: #005c4b;
+}

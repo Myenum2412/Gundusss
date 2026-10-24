@@ -7,6 +7,7 @@ import {
   Building2Icon,
   CheckIcon,
   CopyIcon,
+  EllipsisIcon,
   ExternalLinkIcon,
   LayoutDashboardIcon,
   Loader2Icon,
@@ -18,6 +19,12 @@ import {
 import { useAuth } from "@/components/auth-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Table,
   TableBody,
@@ -344,14 +351,44 @@ export default function OrgMenuDashboardPage() {
                           {formatDate(item.createdAt)}
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            variant={isViewing ? "secondary" : "outline"}
-                            size="sm"
-                            onClick={() => openWorkspace(item.profileId)}
-                          >
-                            {isViewing ? "Viewing" : "Open workspace"}
-                            <ArrowRightIcon />
-                          </Button>
+                          <div className="flex items-center justify-end">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger
+                                render={
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label={`Actions for ${item.name}`}
+                                    title="Actions"
+                                    className="size-8 text-muted-foreground hover:text-foreground"
+                                  />
+                                }
+                              >
+                                <EllipsisIcon className="size-4" />
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" side="bottom" className="w-48">
+                                <DropdownMenuItem onClick={() => openWorkspace(item.profileId)}>
+                                  <ArrowRightIcon className="size-4 text-primary" />
+                                  <span>{isViewing ? "Viewing Workspace" : "Open Workspace"}</span>
+                                </DropdownMenuItem>
+                                {item.paymentUrl && (
+                                  <>
+                                    <DropdownMenuItem onClick={() => window.open(item.paymentUrl, "_blank")}>
+                                      <ExternalLinkIcon className="size-4 text-muted-foreground" />
+                                      <span>Visit Payment Link</span>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => void navigator.clipboard.writeText(item.paymentUrl)}
+                                    >
+                                      <CopyIcon className="size-4 text-muted-foreground" />
+                                      <span>Copy Payment Link</span>
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
                         </TableCell>
                       </TableRow>
                     )

@@ -15,6 +15,9 @@ import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { StatusBadge } from "@/components/status-badge"
 import { loadStudents, type StoredStudent } from "@/lib/students-store"
+import { loadFeeStructures, type StoredFeeStructure } from "@/lib/fee-structures-store"
+import { loadGroups, type StoredGroup } from "@/lib/groups-store"
+import { resolveStudentFee } from "@/lib/fee-lookup"
 import {
   createPayment,
   getPayment,
@@ -127,6 +130,8 @@ export function PayWithGateway({
   disabled,
   label = "Collect payment",
   requireForm = false,
+  open: controlledOpen,
+  onOpenChange: setControlledOpen,
   onCompleted,
 }: {
   studentId?: string
@@ -137,9 +142,23 @@ export function PayWithGateway({
   disabled?: boolean
   label?: string
   requireForm?: boolean
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   onCompleted?: (order: PaymentOrder) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const isControlled = controlledOpen !== undefined
+  const open = isControlled ? controlledOpen : internalOpen
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (isControlled) {
+        setControlledOpen?.(next)
+      } else {
+        setInternalOpen(next)
+      }
+    },
+    [isControlled, setControlledOpen]
+  )
   const [order, setOrder] = useState<PaymentOrder | null>(null)
   const [method, setMethod] = useState<PaymentMethod>("UPI")
   const [loading, setLoading] = useState(false)
@@ -149,6 +168,8 @@ export function PayWithGateway({
 
   // Form mode state (used on the Payments page).
   const [students, setStudents] = useState<StoredStudent[]>([])
+  const [feeStructures, setFeeStructures] = useState<StoredFeeStructure[]>([])
+  const [groups, setGroups] = useState<StoredGroup[]>([])
   const [form, setForm] = useState({
     studentId: "",
     manualName: "",
@@ -202,13 +223,14 @@ export function PayWithGateway({
   useEffect(() => {
     if (!open) return
     setLoadingStudents(true)
-    loadStudents()
-      .then((rows) => {
-        setStudents(rows)
+    Promise.allSettled([loadStudents(), loadFeeStructures(), loadGroups()])
+      .then(([stuRes, feeRes, grpRes]) => {
+        if (stuRes.status === "fulfilled") setStudents(stuRes.value)
+        if (feeRes.status === "fulfilled") setFeeStructures(feeRes.value)
+        if (grpRes.status === "fulfilled") setGroups(grpRes.value)
       })
       .catch((err) => {
-        console.error("Failed to load students in payment dialog", err)
-        setStudents([])
+        console.error("Failed to load dependency data in payment dialog", err)
       })
       .finally(() => setLoadingStudents(false))
   }, [open])
@@ -298,10 +320,12 @@ export function PayWithGateway({
 
   return (
     <>
-      <Button onClick={start} disabled={disabled}>
-        <WalletIcon />
-        {label}
-      </Button>
+      {!isControlled && (
+        <Button onClick={start} disabled={disabled}>
+          <WalletIcon />
+          {label}
+        </Button>
+      )}
 
       <Dialog
         open={open}
@@ -366,11 +390,22 @@ export function PayWithGateway({
                         onChange={(e) => {
                           const val = e.target.value
                           const matched = students.find((s) => s.studentId === val)
-                          setForm((f) => ({
-                            ...f,
-                            studentId: val,
-                            manualName: matched?.studentName ?? f.manualName,
-                          }))
+                          if (matched) {
+                            const fee = resolveStudentFee(matched, feeStructures, groups)
+                            setForm((f) => ({
+                              ...f,
+                              studentId: val,
+                              manualName: matched.studentName,
+                              amount: fee.amount || f.amount,
+                              note: f.note || `Fee payment for ${matched.course || "Course"} (${matched.group || "Regular"})`,
+                            }))
+                          } else {
+                            setForm((f) => ({
+                              ...f,
+                              studentId: val,
+                              manualName: val === "__custom__" ? "" : f.manualName,
+                            }))
+                          }
                         }}
                         required={!form.manualName}
                       >
@@ -391,13 +426,17 @@ export function PayWithGateway({
                         (() => {
                           const s = students.find((x) => x.studentId === form.studentId)
                           if (!s) return null
+                          const fee = resolveStudentFee(s, feeStructures, groups)
                           return (
-                            <div className="rounded-xl border bg-muted/40 p-2.5 text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
-                              <span><strong>ID:</strong> {s.studentId}</span>
-                              <span><strong>Name:</strong> {s.studentName}</span>
-                              {s.group ? <span><strong>Group:</strong> {s.group}</span> : null}
-                              {s.course ? <span><strong>Course:</strong> {s.course}</span> : null}
-                              {s.phone ? <span><strong>Phone:</strong> {s.phone}</span> : null}
+                            <div className="rounded-xl border border-primary/20 bg-primary/5 p-2.5 text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1.5 items-center">
+                              <span><strong className="text-foreground">ID:</strong> {s.studentId}</span>
+                              <span><strong className="text-foreground">Name:</strong> {s.studentName}</span>
+                              {s.group ? <span><strong className="text-foreground">Group:</strong> {s.group}</span> : null}
+                              {s.course ? <span><strong className="text-foreground">Course:</strong> {s.course}</span> : null}
+                              {s.phone ? <span><strong className="text-foreground">Phone:</strong> {s.phone}</span> : null}
+                              <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary font-medium">
+                                Standard Due: ₹{fee.amount} ({fee.frequency || "Monthly"})
+                              </span>
                             </div>
                           )
                         })()

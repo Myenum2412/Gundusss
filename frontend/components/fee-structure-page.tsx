@@ -146,6 +146,29 @@ export function FeeStructurePage() {
     }
   }
 
+  function handleCourseGroupChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const val = e.target.value
+    const matchedGroup = availableGroups.find(
+      (g) => `${g.groupName} (${g.groupId})` === val || g.groupName === val || g.groupId === val
+    )
+    setForm((f) => {
+      // Find students matching this course/group
+      const autoStudentIds = matchedGroup
+        ? matchedGroup.studentIds
+        : availableStudents
+            .filter((s) => (s.course && val.toLowerCase().includes(s.course.toLowerCase())) || (s.group && val.toLowerCase().includes(s.group.toLowerCase())))
+            .map((s) => s.studentId)
+
+      return {
+        ...f,
+        courseGroup: val,
+        amount: matchedGroup?.feeAmount && (!f.amount || f.amount === "0") ? matchedGroup.feeAmount : f.amount,
+        frequency: matchedGroup?.feeFrequency && f.frequency === "Monthly" ? matchedGroup.feeFrequency : f.frequency,
+        studentIds: f.studentIds.length === 0 && autoStudentIds.length > 0 ? autoStudentIds : f.studentIds,
+      }
+    })
+  }
+
   function toggleMethod(method: string) {
     setForm((f) => ({
       ...f,
@@ -298,7 +321,7 @@ export function FeeStructurePage() {
                       id="courseGroup"
                       className={selectClassName}
                       value={form.courseGroup}
-                      onChange={set("courseGroup")}
+                      onChange={handleCourseGroupChange}
                       required
                     >
                       <option value="" disabled>
@@ -322,6 +345,39 @@ export function FeeStructurePage() {
                       )}
                     </select>
                   </Field>
+
+                  {/* Connected Course / Group Preview */}
+                  {(() => {
+                    const matchedGroup = availableGroups.find(
+                      (g) => `${g.groupName} (${g.groupId})` === form.courseGroup || g.groupName === form.courseGroup || g.groupId === form.courseGroup
+                    )
+                    if (!matchedGroup) return null
+                    return (
+                      <div className="rounded-xl border border-primary/20 bg-primary/5 p-2.5 text-xs md:col-span-2 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <span className="font-semibold text-primary">Connected Group:</span>
+                          <span><strong>Course:</strong> {matchedGroup.course}</span>
+                          {matchedGroup.batch ? <span><strong>Batch:</strong> {matchedGroup.batch}</span> : null}
+                          <span><strong>Group Fee:</strong> ₹{matchedGroup.feeAmount} ({matchedGroup.feeFrequency})</span>
+                          <span><strong>Enrolled:</strong> {matchedGroup.studentIds.length} students</span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="xs"
+                          onClick={() => {
+                            setForm((f) => ({
+                              ...f,
+                              studentIds: Array.from(new Set([...f.studentIds, ...matchedGroup.studentIds])),
+                            }))
+                          }}
+                          className="h-6 text-[11px]"
+                        >
+                          Select all {matchedGroup.studentIds.length} group students
+                        </Button>
+                      </div>
+                    )
+                  })()}
                   <Field>
                     <FieldLabel htmlFor="feeType">Fee Type</FieldLabel>
                     <select
@@ -435,7 +491,7 @@ export function FeeStructurePage() {
                   </Field>
                   <Field className="md:col-span-2">
                     <FieldLabel>Students ({form.studentIds.length} selected)</FieldLabel>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Button
                         type="button"
                         variant="outline"
@@ -447,8 +503,27 @@ export function FeeStructurePage() {
                           }))
                         }
                       >
-                        Select all
+                        Select all ({availableStudents.length})
                       </Button>
+                      {form.courseGroup && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const cg = form.courseGroup.toLowerCase()
+                            const matchingIds = availableStudents
+                              .filter((s) => (s.course && cg.includes(s.course.toLowerCase())) || (s.group && cg.includes(s.group.toLowerCase())))
+                              .map((s) => s.studentId)
+                            setForm((f) => ({
+                              ...f,
+                              studentIds: Array.from(new Set([...f.studentIds, ...matchingIds])),
+                            }))
+                          }}
+                        >
+                          Select matching students
+                        </Button>
+                      )}
                       <Button
                         type="button"
                         variant="ghost"
@@ -458,7 +533,7 @@ export function FeeStructurePage() {
                         Clear
                       </Button>
                     </div>
-                    <div className="max-h-44 overflow-y-auto rounded-[10px] border border-input bg-card p-1.5">
+                    <div className="max-h-52 overflow-y-auto rounded-[10px] border border-input bg-card p-1.5 custom-scroll">
                       {availableStudents.length === 0 ? (
                         <p className="px-2 py-4 text-center text-sm text-muted-foreground">
                           No students found. Add students first on the Students page.
@@ -467,16 +542,26 @@ export function FeeStructurePage() {
                         availableStudents.map((s) => (
                           <label
                             key={s.studentId}
-                            className="app-transition flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-muted"
+                            className="app-transition flex cursor-pointer items-center justify-between rounded-lg px-2.5 py-1.5 text-sm hover:bg-muted"
                           >
-                            <input
-                              type="checkbox"
-                              className="size-4 accent-primary"
-                              checked={form.studentIds.includes(s.studentId)}
-                              onChange={() => toggleStudent(s.studentId)}
-                            />
-                            <span className="font-medium">{s.studentName}</span>
-                            <span className="font-mono text-xs text-muted-foreground">{s.studentId}</span>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <input
+                                type="checkbox"
+                                className="size-4 accent-primary"
+                                checked={form.studentIds.includes(s.studentId)}
+                                onChange={() => toggleStudent(s.studentId)}
+                              />
+                              <span className="font-medium text-foreground">{s.studentName}</span>
+                              <span className="font-mono text-xs text-muted-foreground">{s.studentId}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
+                              {s.course && <span>{s.course}</span>}
+                              {s.group ? (
+                                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">
+                                  {s.group}
+                                </span>
+                              ) : null}
+                            </div>
                           </label>
                         ))
                       )}

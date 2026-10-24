@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { loadStudents, type StoredStudent } from "@/lib/students-store"
+import { loadStudents, saveStudents, type StoredStudent } from "@/lib/students-store"
 import { loadGroups, saveGroups } from "@/lib/groups-store"
 import {
   loadDropdowns,
@@ -158,6 +158,26 @@ export default function StudentGroupsPage() {
       setGroups((g) => [...g, group])
       setNextId((n) => n + 1)
     }
+    // Bidirectional sync: update assigned students' group and course in students-store
+    if (form.groupName && form.studentIds.length > 0) {
+      loadStudents().then((currStudents) => {
+        let changed = false
+        const nextStudents = currStudents.map((s) => {
+          const isAssigned = form.studentIds.includes(s.studentId)
+          if (isAssigned && (s.group !== form.groupName || (form.course && s.course !== form.course))) {
+            changed = true
+            return {
+              ...s,
+              group: form.groupName,
+              course: form.course || s.course,
+            }
+          }
+          return s
+        })
+        if (changed) void saveStudents(nextStudents)
+      }).catch(console.error)
+    }
+
     setForm(initialForm)
     setOpen(false)
   }
@@ -368,7 +388,7 @@ export default function StudentGroupsPage() {
                     <FieldLabel>
                       Students ({form.studentIds.length} selected)
                     </FieldLabel>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Button
                         type="button"
                         variant="outline"
@@ -382,6 +402,24 @@ export default function StudentGroupsPage() {
                       >
                         Select all
                       </Button>
+                      {form.course && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const matchCourseIds = availableStudents
+                              .filter((s) => (s.course || "").toLowerCase() === form.course.toLowerCase())
+                              .map((s) => s.studentId)
+                            setForm((f) => ({
+                              ...f,
+                              studentIds: Array.from(new Set([...f.studentIds, ...matchCourseIds])),
+                            }))
+                          }}
+                        >
+                          Select all {form.course} students
+                        </Button>
+                      )}
                       <Button
                         type="button"
                         variant="ghost"
@@ -391,7 +429,7 @@ export default function StudentGroupsPage() {
                         Clear
                       </Button>
                     </div>
-                    <div className="max-h-44 overflow-y-auto rounded-[10px] border border-input bg-card p-1.5">
+                    <div className="max-h-52 overflow-y-auto rounded-[10px] border border-input bg-card p-1.5 custom-scroll">
                       {availableStudents.length === 0 ? (
                         <p className="px-2 py-4 text-center text-sm text-muted-foreground">
                           No students found. Add students first on the Students page.
@@ -400,16 +438,28 @@ export default function StudentGroupsPage() {
                         availableStudents.map((s) => (
                           <label
                             key={s.studentId}
-                            className="app-transition flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-muted"
+                            className="app-transition flex cursor-pointer items-center justify-between rounded-lg px-2.5 py-1.5 text-sm hover:bg-muted"
                           >
-                            <input
-                              type="checkbox"
-                              className="size-4 accent-primary"
-                              checked={form.studentIds.includes(s.studentId)}
-                              onChange={() => toggleStudent(s.studentId)}
-                            />
-                            <span className="font-medium">{s.studentName}</span>
-                            <span className="font-mono text-xs text-muted-foreground">{s.studentId}</span>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <input
+                                type="checkbox"
+                                className="size-4 accent-primary"
+                                checked={form.studentIds.includes(s.studentId)}
+                                onChange={() => toggleStudent(s.studentId)}
+                              />
+                              <span className="font-medium text-foreground">{s.studentName}</span>
+                              <span className="font-mono text-xs text-muted-foreground">{s.studentId}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
+                              {s.course && <span>{s.course}</span>}
+                              {s.group ? (
+                                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">
+                                  Current: {s.group}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-muted-foreground/70">Unassigned</span>
+                              )}
+                            </div>
                           </label>
                         ))
                       )}

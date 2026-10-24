@@ -1,8 +1,9 @@
 "use client";
 
 import { EllipsisIcon, EyeIcon, PencilIcon, Trash2Icon } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { useAuth } from "@/components/auth-provider";
+import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,18 +41,15 @@ export function RowActions({
     <div className="flex items-center justify-end">
       <DropdownMenu>
         <DropdownMenuTrigger
-          render={
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Row actions"
-              title="Row actions"
-              className="text-muted-foreground hover:text-foreground"
-            />
-          }
+          type="button"
+          className={cn(
+            buttonVariants({ variant: "ghost", size: "icon-sm" }),
+            "size-8 text-muted-foreground hover:text-foreground cursor-pointer focus-visible:ring-2"
+          )}
+          aria-label="Row actions"
+          title="Row actions"
         >
-          <EllipsisIcon />
+          <EllipsisIcon className="size-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" side="bottom">
           {onView && (

@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
 import { useAuth } from "@/components/auth-provider"
 import { StatusBadge } from "@/components/status-badge"
@@ -11,6 +12,23 @@ import { PaymentTimeline } from "@/components/payment-timeline"
 import Stats01 from "@/components/stats-01"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { useLiveReload } from "@/hooks/use-live-reload"
+import { cn } from "@/lib/utils"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Field, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Table,
   TableBody,
@@ -26,18 +44,39 @@ import {
   paymentMethodLabel,
   type PaymentOrder,
 } from "@/lib/payments"
+import { loadStudents, type StoredStudent } from "@/lib/students-store"
+import { loadReceipts, type StoredReceipt } from "@/lib/receipts-store"
+import { loadFeeStructures, type StoredFeeStructure } from "@/lib/fee-structures-store"
+import { getWaStatus, sendWaMessage, type WaState } from "@/lib/api"
+import {
+  InteractiveButtonBubble,
+  type InteractiveButton,
+} from "@/components/ui/whatsapp/interactive-button-bubble"
+import "@/components/ui/whatsapp/styles/whatsapp.css"
 import {
   BanknoteIcon,
+  BellRingIcon,
   CheckIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   Clock3Icon,
   CopyIcon,
   CreditCardIcon,
+  EllipsisIcon,
   ExternalLinkIcon,
+  FilterIcon,
   Link2Icon,
   Loader2Icon,
+  MessageSquareIcon,
+  PhoneIcon,
   QrCodeIcon,
+  ReceiptIcon,
   RefreshCwIcon,
+  SearchIcon,
+  SendIcon,
+  SparklesIcon,
   TriangleAlertIcon,
+  UsersIcon,
   XIcon,
   type LucideIcon,
 } from "lucide-react"
@@ -54,22 +93,155 @@ const TERMINAL = new Set([
 ])
 
 const STATUS_OPTIONS = [
+  "SUCCESS",
+  "PROCESSING",
   "INITIATED",
   "QUEUED",
   "ACTIVE",
-  "PROCESSING",
-  "SUCCESS",
   "FAILED",
-  "EXPIRED",
   "CANCELLED",
+  "EXPIRED",
+  "REFUNDED",
   "SUSPICIOUS",
   "BLOCKED",
-  "REFUNDED",
 ]
+
+const STATUS_CONFIG: Record<
+  string,
+  {
+    label: string
+    dotClass: string
+    barClass: string
+    activeClass: string
+    badgeClass: string
+    description: string
+  }
+> = {
+  SUCCESS: {
+    label: "Success",
+    dotClass: "bg-emerald-500",
+    barClass: "bg-emerald-500",
+    activeClass:
+      "border-emerald-500 bg-emerald-50 text-emerald-950 ring-2 ring-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-500",
+    badgeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+    description: "Paid & verified with receipt",
+  },
+  PROCESSING: {
+    label: "Processing",
+    dotClass: "bg-amber-500 animate-pulse",
+    barClass: "bg-amber-500",
+    activeClass:
+      "border-amber-500 bg-amber-50 text-amber-950 ring-2 ring-amber-500/30 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-500",
+    badgeClass: "bg-amber-500/15 text-amber-800 dark:text-amber-300",
+    description: "Gateway captured / pending confirmation",
+  },
+  INITIATED: {
+    label: "Initiated",
+    dotClass: "bg-amber-400",
+    barClass: "bg-amber-400",
+    activeClass:
+      "border-amber-400 bg-amber-50/70 text-amber-950 ring-2 ring-amber-400/30 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-500",
+    badgeClass: "bg-amber-400/15 text-amber-700 dark:text-amber-300",
+    description: "Awaiting payment / ready to collect",
+  },
+  QUEUED: {
+    label: "Queued",
+    dotClass: "bg-amber-500",
+    barClass: "bg-amber-500",
+    activeClass:
+      "border-amber-500 bg-amber-50/70 text-amber-950 ring-2 ring-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-500",
+    badgeClass: "bg-amber-500/15 text-amber-800 dark:text-amber-300",
+    description: "Queued by payment gateway",
+  },
+  ACTIVE: {
+    label: "Active",
+    dotClass: "bg-emerald-400",
+    barClass: "bg-emerald-400",
+    activeClass:
+      "border-emerald-500 bg-emerald-50/70 text-emerald-950 ring-2 ring-emerald-500/30 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-500",
+    badgeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+    description: "Live session ready to scan and pay",
+  },
+  FAILED: {
+    label: "Failed",
+    dotClass: "bg-red-500",
+    barClass: "bg-red-500",
+    activeClass:
+      "border-red-500 bg-red-50 text-red-950 ring-2 ring-red-500/30 dark:bg-red-950/40 dark:text-red-200 dark:border-red-500",
+    badgeClass: "bg-red-500/15 text-red-700 dark:text-red-300",
+    description: "Declined by bank or gateway",
+  },
+  CANCELLED: {
+    label: "Cancelled",
+    dotClass: "bg-rose-500",
+    barClass: "bg-rose-500",
+    activeClass:
+      "border-rose-500 bg-rose-50 text-rose-950 ring-2 ring-rose-500/30 dark:bg-rose-950/40 dark:text-rose-200 dark:border-rose-500",
+    badgeClass: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+    description: "Cancelled by student or counter",
+  },
+  EXPIRED: {
+    label: "Expired",
+    dotClass: "bg-orange-500",
+    barClass: "bg-orange-500",
+    activeClass:
+      "border-orange-500 bg-orange-50 text-orange-950 ring-2 ring-orange-500/30 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-500",
+    badgeClass: "bg-orange-500/15 text-orange-800 dark:text-orange-300",
+    description: "Payment session timed out",
+  },
+  REFUNDED: {
+    label: "Refunded",
+    dotClass: "bg-sky-500",
+    barClass: "bg-sky-500",
+    activeClass:
+      "border-sky-500 bg-sky-50 text-sky-950 ring-2 ring-sky-500/30 dark:bg-sky-950/40 dark:text-sky-200 dark:border-sky-500",
+    badgeClass: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
+    description: "Refunded back to student",
+  },
+  SUSPICIOUS: {
+    label: "Suspicious",
+    dotClass: "bg-purple-500",
+    barClass: "bg-purple-500",
+    activeClass:
+      "border-purple-500 bg-purple-50 text-purple-950 ring-2 ring-purple-500/30 dark:bg-purple-950/40 dark:text-purple-200 dark:border-purple-500",
+    badgeClass: "bg-purple-500/15 text-purple-700 dark:text-purple-300",
+    description: "Flagged for manual security review",
+  },
+  BLOCKED: {
+    label: "Blocked",
+    dotClass: "bg-zinc-600",
+    barClass: "bg-zinc-600",
+    activeClass:
+      "border-zinc-500 bg-zinc-100 text-zinc-950 ring-2 ring-zinc-500/30 dark:bg-zinc-800 dark:text-zinc-200 dark:border-zinc-500",
+    badgeClass: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300",
+    description: "Blocked by risk or compliance policy",
+  },
+}
+
+function getStatusConfig(status: string) {
+  const norm = normalizeStatus(status)
+  return (
+    STATUS_CONFIG[norm] ?? {
+      label: norm,
+      dotClass: "bg-muted-foreground",
+      barClass: "bg-muted-foreground",
+      activeClass:
+        "border-foreground/30 bg-muted text-foreground ring-2 ring-foreground/10",
+      badgeClass: "bg-muted text-muted-foreground",
+      description: "Payment status",
+    }
+  )
+}
 
 const METHOD_ICONS: Record<string, LucideIcon> = {
   UPI: QrCodeIcon,
   CASH_COUNTER: BanknoteIcon,
+  CASH: BanknoteIcon,
+  Cash: BanknoteIcon,
+  CARD_COUNTER: CreditCardIcon,
+  CARD: CreditCardIcon,
+  Card: CreditCardIcon,
+  "Bank Transfer": CreditCardIcon,
 }
 
 function formatAmount(value: string | number) {
@@ -90,25 +262,572 @@ function formatDate(value: string) {
   })
 }
 
-function normalizeStatus(status: string) {
-  return status === "CANCELED" ? "CANCELLED" : status
+function normalizeStatus(status?: string | null) {
+  if (!status) return ""
+  const s = status.trim().toUpperCase()
+  return s === "CANCELED" ? "CANCELLED" : s
 }
 
-function isCounterMethod(method: string) {
-  return method === "CASH_COUNTER" || method === "CARD_COUNTER"
+function isCounterMethod(method?: string) {
+  if (!method) return false
+  const m = method.toUpperCase()
+  return m === "CASH_COUNTER" || m === "CARD_COUNTER" || m === "CASH" || m === "CARD"
 }
 
-function isPaid(order: PaymentOrder) {
-  return order.status === "SUCCESS" && !!order.receiptId
+function cleanPhoneNumber(raw?: string): string {
+  if (!raw) return ""
+  const digits = raw.replace(/\D/g, "")
+  if (digits.length === 10) return `91${digits}`
+  return digits
+}
+
+function formatWhatsAppLink(phone: string, text: string): string {
+  const cleaned = cleanPhoneNumber(phone)
+  return `https://wa.me/${cleaned}?text=${encodeURIComponent(text)}`
 }
 
 function MethodCell({ method }: { method: string }) {
-  const Icon = METHOD_ICONS[method] ?? QrCodeIcon
+  const Icon = METHOD_ICONS[method] ?? METHOD_ICONS[method.toUpperCase()] ?? QrCodeIcon
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
       <Icon className="size-3.5 text-muted-foreground" />
       {paymentMethodLabel(method)}
     </span>
+  )
+}
+
+export interface UnifiedPaymentRecord {
+  id: string
+  orderId: string
+  paymentId?: string | null
+  studentId: string
+  studentName: string
+  course: string
+  group: string
+  phone: string
+  email: string
+  amount: string | number
+  method: string
+  status: string
+  gatewayStatus?: string
+  paymentUrl?: string
+  utr?: string
+  receiptId?: string | null
+  createdAt: string
+  source: "gateway" | "receipt" | "student"
+  rawOrder?: PaymentOrder
+  rawReceipt?: StoredReceipt
+  rawStudent?: StoredStudent
+}
+
+function generateReminderText({
+  record,
+  companyName,
+  workspacePaymentUrl,
+}: {
+  record: UnifiedPaymentRecord
+  companyName: string
+  workspacePaymentUrl: string
+}) {
+  const org = companyName ? companyName.trim() : "Institute Office"
+  const isPaid = normalizeStatus(record.status) === "SUCCESS"
+  const payUrl = record.paymentUrl || workspacePaymentUrl || ""
+
+  if (isPaid) {
+    const lines = [
+      `*Payment Acknowledgment - ${org}*`,
+      ``,
+      `Dear Parent / Student ${record.studentName},`,
+      `Thank you for completing your fee payment.`,
+      ``,
+      `• *Student ID:* ${record.studentId || "—"}`,
+      `• *Course:* ${record.course || "General"} (${record.group || "Regular"})`,
+      `• *Amount Paid:* ${formatAmount(record.amount)}`,
+      `• *Receipt ID:* ${record.receiptId || record.orderId}`,
+      `• *Status:* Verified & Paid`,
+      ``,
+      `For any questions, feel free to contact our administrative desk.`,
+      `Thank you!`,
+    ]
+    return lines.join("\n")
+  }
+
+  const lines = [
+    `*Fee Payment Reminder - ${org}*`,
+    ``,
+    `Dear Parent / Student ${record.studentName},`,
+    `This is a gentle reminder regarding the pending fee payment for *${record.course || "General Course"}* (${record.group || "Batch"}).`,
+    ``,
+    `• *Student ID:* ${record.studentId || "—"}`,
+    `• *Amount Due:* ${formatAmount(record.amount)}`,
+    `• *Reference ID:* ${record.orderId}`,
+  ]
+
+  if (payUrl) {
+    lines.push(``)
+    lines.push(`👉 *Click to Pay Now:*`)
+    lines.push(`${payUrl}`)
+  }
+
+  lines.push(``)
+  lines.push(`You can pay securely with any UPI app (GPay, PhonePe, Paytm) or at the counter. If already paid, please ignore this message.`)
+  lines.push(`Thank you,`)
+  lines.push(`${org}`)
+
+  return lines.join("\n")
+}
+
+// Single Student Fee Reminder Dialog using interactive-button-bubble
+function FeeReminderDialog({
+  record,
+  open,
+  onOpenChange,
+  companyName,
+  workspacePaymentUrl,
+}: {
+  record: UnifiedPaymentRecord | null
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  companyName: string
+  workspacePaymentUrl: string
+}) {
+  const [phone, setPhone] = useState("")
+  const [message, setMessage] = useState("")
+  const [copied, setCopied] = useState(false)
+  const [sendingBot, setSendingBot] = useState(false)
+  const [botSent, setBotSent] = useState(false)
+  const [botError, setBotError] = useState<string | null>(null)
+  const [waState, setWaState] = useState<WaState | null>(null)
+
+  useEffect(() => {
+    if (!record || !open) return
+    const initialPhone = record.phone && record.phone !== "—" ? record.phone : ""
+    setPhone(initialPhone)
+    setMessage(generateReminderText({ record, companyName, workspacePaymentUrl }))
+    setCopied(false)
+    setBotSent(false)
+    setBotError(null)
+
+    getWaStatus()
+      .then(setWaState)
+      .catch(() => setWaState(null))
+  }, [record, open, companyName, workspacePaymentUrl])
+
+  if (!record) return null
+
+  const isPaid = normalizeStatus(record.status) === "SUCCESS"
+  const paymentLink = record.paymentUrl || workspacePaymentUrl || ""
+  const waUrl = formatWhatsAppLink(phone, message)
+  const canSendWa = Boolean(cleanPhoneNumber(phone))
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(message)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleSendViaBot() {
+    const cleaned = cleanPhoneNumber(phone)
+    if (!cleaned) {
+      setBotError("Please provide a valid 10-digit mobile number")
+      return
+    }
+
+    setSendingBot(true)
+    setBotError(null)
+    setBotSent(false)
+    try {
+      await sendWaMessage({ to: cleaned, message })
+      setBotSent(true)
+      window.setTimeout(() => setBotSent(false), 3000)
+    } catch (err) {
+      setBotError(
+        err instanceof Error
+          ? err.message
+          : "Failed to send through WhatsApp bot. Use direct WhatsApp button instead."
+      )
+    } finally {
+      setSendingBot(false)
+    }
+  }
+
+  function handlePayNowClick(button: InteractiveButton) {
+    if (paymentLink) {
+      window.open(paymentLink, "_blank")
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg p-0 overflow-hidden sm:max-w-xl">
+        {/* Header */}
+        <div className="flex items-start justify-between border-b bg-muted/40 p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
+              <BellRingIcon className="size-5" />
+            </div>
+            <div>
+              <DialogTitle className="text-base font-semibold">
+                Send Fee Reminder
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground">
+                Preview WhatsApp interactive message bubble with direct Pay Now button.
+              </DialogDescription>
+            </div>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="space-y-4 p-5 text-xs max-h-[75vh] overflow-y-auto custom-scroll">
+          {/* WhatsApp Interactive Message Preview with ONLY Pay Now Button */}
+          <div className="rounded-2xl border bg-[#e5ddd5]/60 dark:bg-[#0b141a] p-4 flex flex-col items-center justify-center shadow-inner">
+            <span className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80">
+              WhatsApp Message Preview (with Pay Now Button)
+            </span>
+
+            <InteractiveButtonBubble
+              variant="outgoing"
+              header={
+                <div className="flex items-center gap-1.5 text-[13px] font-semibold text-emerald-800 dark:text-emerald-300">
+                  <SparklesIcon className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span>{isPaid ? "Payment Acknowledgment" : "Fee Payment Reminder"}</span>
+                </div>
+              }
+              body={`Dear Parent / Student ${record.studentName},\n\nThis is a fee payment notice for *${record.course || "Course"}* (${record.group || "Regular"}).\n\n• Student ID: ${record.studentId || "—"}\n• Amount Due: ${formatAmount(record.amount)}\n• Reference: ${record.orderId}`}
+              footer={`${companyName || "Institute Office"} · Tap Pay Now below to complete payment via UPI`}
+              buttons={[
+                {
+                  id: "pay-now",
+                  title: "Pay Now",
+                },
+              ]}
+              timestamp="Just now"
+              status="delivered"
+              showTail={true}
+              onButtonClick={handlePayNowClick}
+            />
+
+            <span className="mt-2 text-[10px] text-muted-foreground">
+              Clicking &ldquo;Pay Now&rdquo; in WhatsApp opens the live UPI payment checkout.
+            </span>
+          </div>
+
+          {/* Student Overview Card */}
+          <div className="flex flex-col gap-2 rounded-xl border bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-foreground text-sm">
+                  {record.studentName}
+                </span>
+                {record.studentId && record.studentId !== "—" ? (
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                    {record.studentId}
+                  </span>
+                ) : null}
+              </div>
+              <p className="text-muted-foreground">
+                {record.course} · {record.group}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="text-right">
+                <span className="block text-[10px] uppercase font-semibold text-muted-foreground">
+                  {isPaid ? "Paid Amount" : "Pending Amount"}
+                </span>
+                <span className="font-bold text-foreground tabular-nums text-sm">
+                  {formatAmount(record.amount)}
+                </span>
+              </div>
+              <StatusBadge value={record.status} />
+            </div>
+          </div>
+
+          {/* Recipient Phone Field */}
+          <Field>
+            <FieldLabel className="text-xs font-semibold">
+              Recipient WhatsApp Mobile Number
+            </FieldLabel>
+            <div className="relative mt-1">
+              <PhoneIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
+              <Input
+                type="tel"
+                placeholder="e.g. 9812758346 or +91 9812758346"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="pl-8 text-xs font-mono"
+              />
+            </div>
+            {!canSendWa && (
+              <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                Please enter a 10-digit mobile number with or without +91 country code.
+              </p>
+            )}
+          </Field>
+
+          {/* Text Message Content */}
+          <Field>
+            <div className="flex items-center justify-between">
+              <FieldLabel className="text-xs font-semibold">
+                Message Content (WhatsApp / SMS)
+              </FieldLabel>
+              <button
+                type="button"
+                onClick={() =>
+                  setMessage(generateReminderText({ record, companyName, workspacePaymentUrl }))
+                }
+                className="text-[11px] text-primary hover:underline"
+              >
+                Reset template
+              </button>
+            </div>
+            <textarea
+              rows={6}
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              className="mt-1 w-full rounded-xl border border-input bg-card p-3 font-mono text-xs shadow-xs outline-none transition-[border-color,box-shadow] hover:border-foreground/20 focus-visible:border-ring custom-scroll"
+            />
+          </Field>
+
+          {/* Status notices */}
+          {botError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400">
+              {botError}
+            </div>
+          )}
+
+          {botSent && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2.5 text-xs text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400">
+              Message successfully delivered via WhatsApp bot!
+            </div>
+          )}
+        </div>
+
+        {/* Footer actions */}
+        <div className="flex flex-col gap-2 border-t bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleCopy}
+            className="gap-1.5"
+          >
+            {copied ? (
+              <>
+                <CheckIcon className="size-3.5 text-emerald-600" />
+                <span>Copied!</span>
+              </>
+            ) : (
+              <>
+                <CopyIcon className="size-3.5" />
+                <span>Copy Message</span>
+              </>
+            )}
+          </Button>
+
+          <div className="flex items-center gap-2">
+            {/* Optional Automated WhatsApp Bot Delivery if bot is connected */}
+            {waState?.status === "ready" && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={sendingBot || !canSendWa}
+                onClick={handleSendViaBot}
+                className="gap-1.5 border-emerald-600/30 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400"
+              >
+                {sendingBot ? (
+                  <Loader2Icon className="size-3.5 animate-spin" />
+                ) : (
+                  <SendIcon className="size-3.5" />
+                )}
+                <span>Send via Bot</span>
+              </Button>
+            )}
+
+            {/* Direct WhatsApp Web/App Link */}
+            <a
+              href={canSendWa ? waUrl : "#"}
+              target={canSendWa ? "_blank" : undefined}
+              rel="noreferrer"
+              onClick={(e) => {
+                if (!canSendWa) {
+                  e.preventDefault()
+                  setBotError("Please enter a valid mobile number first.")
+                }
+              }}
+              className={buttonVariants({
+                variant: "default",
+                size: "sm",
+                className: cn(
+                  "gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold",
+                  !canSendWa && "opacity-60 cursor-not-allowed"
+                ),
+              })}
+            >
+              <MessageSquareIcon className="size-3.5" />
+              <span>Send Reminder to Them</span>
+              <ExternalLinkIcon className="size-3" />
+            </a>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// Bulk Reminder Dialog for All Awaiting Students
+function BulkReminderDialog({
+  records,
+  open,
+  onOpenChange,
+  onSelectRecord,
+}: {
+  records: UnifiedPaymentRecord[]
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onSelectRecord: (record: UnifiedPaymentRecord) => void
+}) {
+  const pendingRecords = useMemo(
+    () => records.filter((r) => !TERMINAL.has(r.status)),
+    [records]
+  )
+  const totalDue = useMemo(
+    () => pendingRecords.reduce((sum, r) => sum + (Number(r.amount) || 0), 0),
+    [pendingRecords]
+  )
+  const [copiedAll, setCopiedAll] = useState(false)
+
+  async function handleCopyList() {
+    const lines = [
+      `Pending Fee Reminders Summary (${pendingRecords.length} Students):`,
+      `Total Pending Volume: ${formatAmount(totalDue)}`,
+      ``,
+    ]
+    pendingRecords.forEach((r, idx) => {
+      lines.push(
+        `${idx + 1}. ${r.studentName} (${r.studentId || "No ID"}) - ${r.course || "General"} - ${formatAmount(r.amount)} - Phone: ${r.phone || "No phone"}`
+      )
+    })
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"))
+      setCopiedAll(true)
+      window.setTimeout(() => setCopiedAll(false), 2000)
+    } catch {
+      // ignore
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl p-0 overflow-hidden sm:max-w-2xl">
+        <div className="flex items-start justify-between border-b bg-muted/40 p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
+              <UsersIcon className="size-5" />
+            </div>
+            <div>
+              <DialogTitle className="text-base font-semibold">
+                Send Fee Reminders
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground">
+                {pendingRecords.length} students currently have pending or initiated fees ({formatAmount(totalDue)} total).
+              </DialogDescription>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 space-y-3 max-h-[60vh] overflow-y-auto custom-scroll text-xs">
+          {pendingRecords.length === 0 ? (
+            <div className="py-8 text-center text-muted-foreground">
+              All students have settled their payments! No pending fees.
+            </div>
+          ) : (
+            <div className="divide-y rounded-xl border">
+              {pendingRecords.map((r, i) => (
+                <div
+                  key={r.id}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 hover:bg-muted/30 transition"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="size-6 rounded-full bg-muted flex items-center justify-center text-[10px] font-semibold text-muted-foreground shrink-0">
+                      {i + 1}
+                    </span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-foreground">
+                          {r.studentName}
+                        </span>
+                        {r.studentId && (
+                          <span className="rounded bg-muted px-1.5 py-0.2 font-mono text-[10px] text-muted-foreground">
+                            {r.studentId}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        {r.course} · {r.group} · {r.phone && r.phone !== "—" ? r.phone : "No phone"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 self-end sm:self-center">
+                    <span className="font-bold text-foreground tabular-nums">
+                      {formatAmount(r.amount)}
+                    </span>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => {
+                        onOpenChange(false)
+                        onSelectRecord(r)
+                      }}
+                      className="gap-1.5 border-emerald-600/40 text-emerald-800 hover:bg-emerald-50 dark:text-emerald-300"
+                    >
+                      <BellRingIcon className="size-3" />
+                      <span>Send Reminder to Them</span>
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between border-t bg-muted/20 p-4">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleCopyList}
+            className="gap-1.5"
+          >
+            {copiedAll ? (
+              <>
+                <CheckIcon className="size-3.5 text-emerald-600" />
+                <span>Copied Pending Roster!</span>
+              </>
+            ) : (
+              <>
+                <CopyIcon className="size-3.5" />
+                <span>Copy Pending List</span>
+              </>
+            )}
+          </Button>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => onOpenChange(false)}
+          >
+            Close
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -128,14 +847,40 @@ export default function PaymentsPage() {
     }
     return activeProfile?.paymentUrl || profile?.paymentUrl || ""
   }, [companyName, activeProfile?.paymentUrl, profile?.paymentUrl])
+
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [orders, setOrders] = useState<PaymentOrder[]>([])
+  const [students, setStudents] = useState<StoredStudent[]>([])
+  const [receipts, setReceipts] = useState<StoredReceipt[]>([])
+  const [feeStructures, setFeeStructures] = useState<StoredFeeStructure[]>([])
+
   const [hydrated, setHydrated] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState("ALL")
+  const [searchQuery, setSearchQuery] = useState("")
+
   const [timelineOrder, setTimelineOrder] = useState<PaymentOrder | null>(null)
+  const [reminderRecord, setReminderRecord] = useState<UnifiedPaymentRecord | null>(null)
+  const [collectRecord, setCollectRecord] = useState<UnifiedPaymentRecord | null>(null)
+  const [bulkReminderOpen, setBulkReminderOpen] = useState(false)
+
   const [actionId, setActionId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+
+  const filterTabsRef = useRef<HTMLDivElement>(null)
+  const tableScrollRef = useRef<HTMLDivElement>(null)
+
+  const scrollFilterTabs = useCallback((direction: "left" | "right") => {
+    if (!filterTabsRef.current) return
+    const offset = direction === "left" ? -220 : 220
+    filterTabsRef.current.scrollBy({ left: offset, behavior: "smooth" })
+  }, [])
+
+  const scrollTable = useCallback((direction: "left" | "right") => {
+    if (!tableScrollRef.current) return
+    const offset = direction === "left" ? -320 : 320
+    tableScrollRef.current.scrollBy({ left: offset, behavior: "smooth" })
+  }, [])
 
   const copyToClipboard = useCallback(async (text: string, key: string) => {
     try {
@@ -150,13 +895,41 @@ export default function PaymentsPage() {
   }, [])
 
   const reload = useCallback(() => {
-    listPayments()
-      .then((rows) => {
-        setOrders(rows)
+    Promise.allSettled([
+      listPayments(),
+      loadStudents(),
+      loadReceipts(),
+      loadFeeStructures(),
+    ])
+      .then(([ordersRes, studentsRes, receiptsRes, feesRes]) => {
+        if (ordersRes.status === "fulfilled") {
+          setOrders(ordersRes.value)
+        } else {
+          console.warn("Could not load gateway orders", ordersRes.reason)
+        }
+
+        if (studentsRes.status === "fulfilled") {
+          setStudents(studentsRes.value)
+        } else {
+          console.warn("Could not load students", studentsRes.reason)
+        }
+
+        if (receiptsRes.status === "fulfilled") {
+          setReceipts(receiptsRes.value)
+        } else {
+          console.warn("Could not load receipts", receiptsRes.reason)
+        }
+
+        if (feesRes.status === "fulfilled") {
+          setFeeStructures(feesRes.value)
+        } else {
+          console.warn("Could not load fee structures", feesRes.reason)
+        }
+
         setError(null)
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : "Could not load payments")
+        setError(err instanceof Error ? err.message : "Could not load payments data")
       })
       .finally(() => setHydrated(true))
   }, [])
@@ -167,19 +940,248 @@ export default function PaymentsPage() {
 
   useLiveReload(reload, 5000)
 
-  const filteredOrders = useMemo(() => {
-    if (statusFilter === "ALL") return orders
-    return orders.filter((order) => normalizeStatus(order.status) === statusFilter)
-  }, [orders, statusFilter])
+  // Unified payment records combining gateway orders, receipts, and enrolled students
+  const unifiedRecords = useMemo<UnifiedPaymentRecord[]>(() => {
+    const records: UnifiedPaymentRecord[] = []
+    const coveredReceiptIds = new Set<string>()
+    const studentsWithPayments = new Set<string>()
 
-  const paid = orders.filter(isPaid)
-  const awaiting = orders.filter((order) => !TERMINAL.has(order.status)).length
-  const receipts = paid.length
+    // 1. Build student lookup maps
+    const studentById = new Map<string, StoredStudent>()
+    const studentByName = new Map<string, StoredStudent>()
+    for (const s of students) {
+      if (s.studentId) studentById.set(s.studentId.trim().toLowerCase(), s)
+      if (s.studentName) studentByName.set(s.studentName.trim().toLowerCase(), s)
+    }
+
+    // Default fee lookup helper
+    const getStudentFee = (student: StoredStudent) => {
+      for (const f of feeStructures) {
+        if (f.studentIds?.includes(student.studentId)) {
+          return f.amount
+        }
+      }
+      for (const f of feeStructures) {
+        if (
+          (student.course && f.courseGroup?.toLowerCase().includes(student.course.toLowerCase())) ||
+          (student.group && f.courseGroup?.toLowerCase().includes(student.group.toLowerCase()))
+        ) {
+          return f.amount
+        }
+      }
+      return "4500"
+    }
+
+    // 2. Add online gateway orders
+    for (const order of orders) {
+      const stu =
+        studentById.get(order.studentId?.trim().toLowerCase()) ||
+        studentByName.get(order.studentName?.trim().toLowerCase())
+
+      if (order.receiptId) {
+        coveredReceiptIds.add(order.receiptId.trim().toLowerCase())
+      }
+      if (stu?.studentId) {
+        studentsWithPayments.add(stu.studentId.trim().toLowerCase())
+      } else if (order.studentName) {
+        studentsWithPayments.add(order.studentName.trim().toLowerCase())
+      }
+
+      records.push({
+        id: `ord-${order.orderId}`,
+        orderId: order.orderId,
+        paymentId: order.paymentId,
+        studentId: order.studentId || stu?.studentId || "—",
+        studentName: order.studentName || stu?.studentName || "—",
+        course: stu?.course || "—",
+        group: stu?.group || "—",
+        phone: stu?.phone || "—",
+        email: stu?.email || "—",
+        amount: order.amount,
+        method: order.method || "UPI",
+        status: normalizeStatus(order.status) || "INITIATED",
+        gatewayStatus: order.gatewayStatus,
+        paymentUrl: order.paymentUrl || order.checkoutUrl || "",
+        utr: order.utr || "—",
+        receiptId: order.receiptId,
+        createdAt: order.createdAt || new Date().toISOString(),
+        source: "gateway",
+        rawOrder: order,
+      })
+    }
+
+    // 3. Add Appwrite receipts not already tied to an order
+    for (const receipt of receipts) {
+      const rcpId = receipt.receiptId.trim().toLowerCase()
+      if (coveredReceiptIds.has(rcpId)) continue
+
+      const stu =
+        studentById.get(receipt.studentId?.trim().toLowerCase()) ||
+        studentByName.get(receipt.studentName?.trim().toLowerCase())
+
+      if (stu?.studentId) {
+        studentsWithPayments.add(stu.studentId.trim().toLowerCase())
+      } else if (receipt.studentName) {
+        studentsWithPayments.add(receipt.studentName.trim().toLowerCase())
+      }
+
+      const rStatus = receipt.status?.trim().toLowerCase()
+      let mappedStatus = "SUCCESS"
+      if (rStatus === "paid" || rStatus === "success" || rStatus === "settled") {
+        mappedStatus = "SUCCESS"
+      } else if (rStatus === "pending" || rStatus === "processing") {
+        mappedStatus = "PROCESSING"
+      } else if (rStatus === "cancelled" || rStatus === "canceled") {
+        mappedStatus = "CANCELLED"
+      } else if (rStatus === "failed") {
+        mappedStatus = "FAILED"
+      } else if (rStatus === "refunded") {
+        mappedStatus = "REFUNDED"
+      } else if (rStatus) {
+        mappedStatus = normalizeStatus(receipt.status)
+      }
+
+      let mappedMethod = receipt.method || "Cash"
+      if (mappedMethod.toLowerCase() === "cash") mappedMethod = "CASH_COUNTER"
+      else if (mappedMethod.toLowerCase() === "upi") mappedMethod = "UPI"
+      else if (mappedMethod.toLowerCase() === "card") mappedMethod = "CARD_COUNTER"
+
+      records.push({
+        id: `rcp-${receipt.receiptId}`,
+        orderId: receipt.receiptId,
+        paymentId: null,
+        studentId: receipt.studentId || stu?.studentId || "—",
+        studentName: receipt.studentName || stu?.studentName || "—",
+        course: stu?.course || "—",
+        group: stu?.group || "—",
+        phone: stu?.phone || "—",
+        email: stu?.email || "—",
+        amount: receipt.amount,
+        method: mappedMethod,
+        status: mappedStatus,
+        gatewayStatus: mappedStatus === "SUCCESS" ? "SUCCESS" : undefined,
+        paymentUrl: "",
+        utr: receipt.notes || "—",
+        receiptId: receipt.receiptId,
+        createdAt: receipt.paymentDate
+          ? `${receipt.paymentDate}T00:00:00.000Z`
+          : new Date().toISOString(),
+        source: "receipt",
+        rawReceipt: receipt,
+        rawStudent: stu,
+      })
+    }
+
+    // 4. Add enrolled students awaiting payment
+    for (const student of students) {
+      const sId = student.studentId?.trim().toLowerCase()
+      const sName = student.studentName?.trim().toLowerCase()
+      if (
+        (sId && studentsWithPayments.has(sId)) ||
+        (sName && studentsWithPayments.has(sName))
+      ) {
+        continue
+      }
+
+      const feeAmount = getStudentFee(student)
+
+      records.push({
+        id: `stu-${student.studentId}`,
+        orderId: `INV-${student.studentId}`,
+        paymentId: null,
+        studentId: student.studentId,
+        studentName: student.studentName,
+        course: student.course || "—",
+        group: student.group || "—",
+        phone: student.phone || "—",
+        email: student.email || "—",
+        amount: feeAmount,
+        method: "UPI",
+        status: "INITIATED",
+        gatewayStatus: undefined,
+        paymentUrl: "",
+        utr: "Awaiting fee payment",
+        receiptId: null,
+        createdAt: student.joiningDate
+          ? `${student.joiningDate}T00:00:00.000Z`
+          : new Date().toISOString(),
+        source: "student",
+        rawStudent: student,
+      })
+    }
+
+    return records.sort((a, b) =>
+      String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? ""))
+    )
+  }, [orders, receipts, students, feeStructures])
+
+  const allStatuses = useMemo(() => {
+    const list = [...STATUS_OPTIONS]
+    for (const r of unifiedRecords) {
+      const s = normalizeStatus(r.status)
+      if (s && !list.includes(s)) {
+        list.push(s)
+      }
+    }
+    return list
+  }, [unifiedRecords])
+
+  const statusStats = useMemo(() => {
+    const map: Record<string, { count: number; totalAmount: number }> = {}
+    for (const status of allStatuses) {
+      map[status] = { count: 0, totalAmount: 0 }
+    }
+    for (const r of unifiedRecords) {
+      const s = normalizeStatus(r.status)
+      if (!map[s]) {
+        map[s] = { count: 0, totalAmount: 0 }
+      }
+      map[s].count += 1
+      map[s].totalAmount += Number(r.amount) || 0
+    }
+    return map
+  }, [unifiedRecords, allStatuses])
+
+  // Filtered payment records by status and search query
+  const filteredRecords = useMemo(() => {
+    return unifiedRecords.filter((record) => {
+      if (statusFilter !== "ALL" && normalizeStatus(record.status) !== statusFilter) {
+        return false
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim()
+        const matchName = record.studentName.toLowerCase().includes(q)
+        const matchId = record.studentId.toLowerCase().includes(q)
+        const matchOrderId = record.orderId.toLowerCase().includes(q)
+        const matchCourse = record.course.toLowerCase().includes(q)
+        const matchGroup = record.group.toLowerCase().includes(q)
+        const matchPhone = record.phone.toLowerCase().includes(q)
+        const matchReceipt = (record.receiptId || "").toLowerCase().includes(q)
+        if (
+          !matchName &&
+          !matchId &&
+          !matchOrderId &&
+          !matchCourse &&
+          !matchGroup &&
+          !matchPhone &&
+          !matchReceipt
+        ) {
+          return false
+        }
+      }
+      return true
+    })
+  }, [unifiedRecords, statusFilter, searchQuery])
+
+  // Statistics calculation across all student records
+  const paid = unifiedRecords.filter((r) => r.status === "SUCCESS")
+  const awaiting = unifiedRecords.filter((r) => !TERMINAL.has(r.status)).length
+  const receiptsCount = unifiedRecords.filter((r) => Boolean(r.receiptId)).length
   const collected = paid.reduce(
-    (sum, order) => sum + (Number(order.amount) || 0),
+    (sum, record) => sum + (Number(record.amount) || 0),
     0
   )
-  const decided = orders.filter((order) => TERMINAL.has(order.status)).length
+  const decided = unifiedRecords.filter((r) => TERMINAL.has(r.status)).length
   const successRate =
     decided === 0 ? 0 : Math.round((paid.length / decided) * 100)
 
@@ -193,24 +1195,26 @@ export default function PaymentsPage() {
     {
       name: "Awaiting payment",
       value: String(awaiting),
-      change: "live",
+      change: `${students.length} students enrolled`,
       changeType: "neutral" as const,
     },
     {
       name: "Receipts created",
-      value: String(receipts),
+      value: String(receiptsCount),
       change: "auto-recorded",
-      changeType: "neutral" as const,
+      changeType: "positive" as const,
     },
     {
-      name: "Success rate",
+      name: "Settlement rate",
       value: `${successRate}%`,
-      change: `${orders.length} orders`,
+      change: `${decided} total closed`,
       changeType: "neutral" as const,
     },
   ]
 
-  async function handleConfirm(order: PaymentOrder) {
+  async function handleConfirm(record: UnifiedPaymentRecord) {
+    if (!record.rawOrder) return
+    const order = record.rawOrder
     const label = paymentMethodLabel(order.method)
     const confirmed = window.confirm(
       `Confirm ${label} payment of ${formatAmount(order.amount)} for ${order.studentName || "this student"}?`
@@ -233,7 +1237,9 @@ export default function PaymentsPage() {
     }
   }
 
-  async function handleDecline(order: PaymentOrder) {
+  async function handleDecline(record: UnifiedPaymentRecord) {
+    if (!record.rawOrder) return
+    const order = record.rawOrder
     const reason = window.prompt(
       "Reason for declining this counter payment?",
       "Cash not received"
@@ -259,27 +1265,81 @@ export default function PaymentsPage() {
     }
   }
 
+  function openHistory(record: UnifiedPaymentRecord) {
+    if (record.rawOrder) {
+      setTimelineOrder(record.rawOrder)
+    } else {
+      const syntheticOrder: PaymentOrder = {
+        orderId: record.orderId,
+        paymentId: record.paymentId ?? null,
+        status: record.status,
+        gatewayStatus: record.gatewayStatus || record.status,
+        method: record.method,
+        utr: record.utr || "",
+        amount: String(record.amount),
+        studentId: record.studentId,
+        studentName: record.studentName,
+        feeId: null,
+        checkoutUrl: record.paymentUrl || "",
+        paymentUrl: record.paymentUrl || "",
+        receiptId: record.receiptId ?? null,
+        createdAt: record.createdAt,
+        updatedAt: record.createdAt,
+        events: [
+          {
+            id: `evt-${record.id}`,
+            orderId: record.orderId,
+            status: record.status,
+            gatewayStatus: record.gatewayStatus || record.status,
+            method: record.method,
+            source: record.source === "receipt" ? "receipt" : "student",
+            message:
+              record.source === "receipt"
+                ? `Receipt ${record.receiptId || record.orderId} recorded in system for ${record.studentName}.`
+                : `Student ${record.studentName} (${record.studentId}) enrolled in ${record.course || "course"}. Fee payment pending collection.`,
+            createdAt: record.createdAt,
+          },
+        ],
+      }
+      setTimelineOrder(syntheticOrder)
+    }
+  }
+
   return (
     <DashboardShell
       trail={[{ label: "Dashboard", href: "/dashboard" }, { label: "Payments" }]}
     >
       <PageHeader
         title="Payments"
-        description="Collect fees via UPI or cash at the counter. Verified payments create a receipt and mark the matching fee paid automatically."
+        description="Complete fee management and student payment records. Collect fees via UPI QR or counter pass, send interactive WhatsApp reminders with Pay Now button, and manage all enrolled students."
         meta={
           <span className="flex items-center gap-2">
             <span className="inline-flex h-6 items-center rounded-full border bg-card px-2.5 text-xs font-medium text-muted-foreground">
-              {orders.length} orders
+              {unifiedRecords.length} records · {students.length} students
             </span>
             <LiveBadge />
           </span>
         }
         actions={
-          <PayWithGateway
-            requireForm
-            label="Collect payment"
-            onCompleted={reload}
-          />
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setBulkReminderOpen(true)}
+              className="gap-1.5 shadow-xs border-emerald-600/30 text-emerald-800 hover:bg-emerald-50 hover:text-emerald-900 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+              title="View and send fee reminders to all students awaiting payment"
+            >
+              <BellRingIcon className="size-4 text-emerald-600 dark:text-emerald-400" />
+              <span>Send Reminder to Them</span>
+              <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.2 text-[10px] font-semibold text-emerald-800 dark:text-emerald-300">
+                {awaiting}
+              </span>
+            </Button>
+            <PayWithGateway
+              requireForm
+              label="Collect payment"
+              onCompleted={reload}
+            />
+          </div>
         }
       />
 
@@ -384,222 +1444,456 @@ export default function PaymentsPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <label
-            htmlFor="payment-status-filter"
-            className="text-xs font-medium text-muted-foreground"
-          >
-            Status
-          </label>
-          <select
-            id="payment-status-filter"
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-            className="h-8 rounded-lg border border-input bg-card px-2 text-xs shadow-[0_1px_2px_rgba(16,24,40,0.04)] outline-none transition-[border-color,box-shadow] duration-200 hover:border-foreground/20 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
-          >
-            <option value="ALL">All statuses</option>
-            {STATUS_OPTIONS.map((status) => (
-              <option key={status} value={status}>
-                {status}
-              </option>
-            ))}
-          </select>
+      {/* Filter and Search Bar with horizontal scrolling status tabs */}
+      <div className="flex flex-col gap-3 rounded-xl border bg-card p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        {/* Search Input and Controls */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative flex-1 sm:max-w-md">
+            <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search by student name, ID, course, or ref..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-8 w-full rounded-lg border border-input bg-card pl-8 pr-7 text-xs shadow-xs outline-none transition-[border-color,box-shadow] hover:border-foreground/20 focus-visible:border-ring"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <XIcon className="size-3" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between gap-2 sm:justify-end">
+            <div className="flex items-center gap-1.5">
+              <select
+                id="payment-status-filter"
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+                className="h-8 rounded-lg border border-input bg-card px-2.5 text-xs shadow-xs outline-none transition-[border-color,box-shadow] hover:border-foreground/20 focus-visible:border-ring"
+              >
+                <option value="ALL">All statuses ({unifiedRecords.length})</option>
+                {allStatuses.map((status) => (
+                  <option key={status} value={status}>
+                    {status} ({statusStats[status]?.count ?? 0})
+                  </option>
+                ))}
+              </select>
+
+              {(statusFilter !== "ALL" || searchQuery) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => {
+                    setStatusFilter("ALL")
+                    setSearchQuery("")
+                  }}
+                  className="h-8 gap-1 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <XIcon className="size-3" />
+                  Clear
+                </Button>
+              )}
+            </div>
+
+            <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">
+              {filteredRecords.length} of {unifiedRecords.length} shown
+            </span>
+          </div>
         </div>
-        <p className="text-xs text-muted-foreground">
-          {filteredOrders.length} of {orders.length} shown
-        </p>
+
+        {/* Status Filter Tabs */}
+        <div className="flex items-center gap-1.5 border-t pt-2.5">
+          <span className="hidden shrink-0 items-center gap-1 text-xs font-medium text-muted-foreground lg:inline-flex">
+            <FilterIcon className="size-3.5" />
+            Status:
+          </span>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => scrollFilterTabs("left")}
+            title="Scroll filter tabs left"
+            className="hidden shrink-0 text-muted-foreground hover:text-foreground sm:inline-flex"
+          >
+            <ChevronLeftIcon className="size-3.5" />
+          </Button>
+
+          <div
+            ref={filterTabsRef}
+            className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pb-1 custom-scroll scroll-smooth"
+          >
+            <Button
+              type="button"
+              variant={statusFilter === "ALL" ? "default" : "outline"}
+              size="xs"
+              onClick={() => setStatusFilter("ALL")}
+              className="rounded-lg gap-1.5 text-xs font-medium shrink-0"
+            >
+              <span>All Statuses</span>
+              <span
+                className={cn(
+                  "rounded-full px-1.5 text-[10px] font-semibold tabular-nums",
+                  statusFilter === "ALL"
+                    ? "bg-primary-foreground/20 text-primary-foreground"
+                    : "bg-muted text-muted-foreground"
+                )}
+              >
+                {unifiedRecords.length}
+              </span>
+            </Button>
+
+            {allStatuses.map((status) => {
+              const count = statusStats[status]?.count ?? 0
+              const cfg = getStatusConfig(status)
+              const isSelected = statusFilter === status
+
+              return (
+                <Button
+                  key={status}
+                  type="button"
+                  variant={isSelected ? "default" : "outline"}
+                  size="xs"
+                  onClick={() => setStatusFilter((curr) => (curr === status ? "ALL" : status))}
+                  className={cn(
+                    "rounded-lg gap-1.5 text-xs font-medium whitespace-nowrap shrink-0",
+                    !isSelected && count > 0 && "hover:border-foreground/30",
+                    !isSelected && count === 0 && "opacity-60 hover:opacity-100"
+                  )}
+                >
+                  <span className={cn("size-1.5 rounded-full", isSelected ? "bg-primary-foreground" : cfg.dotClass)} />
+                  <span>{status}</span>
+                  <span
+                    className={cn(
+                      "rounded-full px-1.5 text-[10px] font-semibold tabular-nums",
+                      isSelected
+                        ? "bg-primary-foreground/20 text-primary-foreground"
+                        : count > 0
+                        ? cfg.badgeClass
+                        : "bg-muted text-muted-foreground"
+                    )}
+                  >
+                    {count}
+                  </span>
+                </Button>
+              )
+            })}
+          </div>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => scrollFilterTabs("right")}
+            title="Scroll filter tabs right"
+            className="hidden shrink-0 text-muted-foreground hover:text-foreground sm:inline-flex"
+          >
+            <ChevronRightIcon className="size-3.5" />
+          </Button>
+        </div>
       </div>
 
-      <div className="data-table-surface">
-        <div className="data-table-scroll">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-14">#</TableHead>
-                <TableHead>Order</TableHead>
-                <TableHead>Student</TableHead>
-                <TableHead>Amount (₹)</TableHead>
-                <TableHead>Method</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Payment URL</TableHead>
-                <TableHead>UTR</TableHead>
-                <TableHead>Receipt</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+      {/* Scrollable Data Table Container */}
+      <div className="data-table-surface flex flex-col rounded-2xl border bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)] min-h-[460px] overflow-hidden">
+        {/* Table scroll helper toolbar */}
+        <div className="flex shrink-0 items-center justify-between border-b bg-muted/20 px-4 py-2.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-foreground">Student Payment Records</span>
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+              {filteredRecords.length} of {unifiedRecords.length} shown
+            </span>
+          </div>
+          <div className="flex items-center gap-3 text-[11px]">
+            <span className="hidden sm:inline text-muted-foreground/80">
+              Scroll horizontally for all columns
+            </span>
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-xs"
+                onClick={() => scrollTable("left")}
+                title="Scroll table left"
+                className="size-6 text-muted-foreground hover:text-foreground"
+              >
+                <ChevronLeftIcon className="size-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-xs"
+                onClick={() => scrollTable("right")}
+                title="Scroll table right"
+                className="size-6 text-muted-foreground hover:text-foreground"
+              >
+                <ChevronRightIcon className="size-3.5" />
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div
+          ref={tableScrollRef}
+          className="data-table-scroll custom-scroll flex-1 overflow-x-auto overflow-y-auto scroll-smooth"
+        >
+          <Table className="w-full min-w-[960px] border-collapse text-sm">
+            <TableHeader className="sticky top-0 z-20 bg-card/95 backdrop-blur-xs">
+              <TableRow className="border-b hover:bg-transparent">
+                <TableHead className="w-12 whitespace-nowrap">#</TableHead>
+                <TableHead className="min-w-[150px] whitespace-nowrap">Order / Ref</TableHead>
+                <TableHead className="min-w-[200px] whitespace-nowrap">Student</TableHead>
+                <TableHead className="min-w-[160px] whitespace-nowrap">Course & Group</TableHead>
+                <TableHead className="min-w-[120px] whitespace-nowrap">Amount (₹)</TableHead>
+                <TableHead className="min-w-[130px] whitespace-nowrap">Method</TableHead>
+                <TableHead className="min-w-[160px] whitespace-nowrap">Status</TableHead>
+                <TableHead className="min-w-[120px] whitespace-nowrap">Receipt</TableHead>
+                <TableHead className="min-w-[140px] whitespace-nowrap">Date</TableHead>
+                <TableHead className="w-16 min-w-[64px] whitespace-nowrap text-right sticky right-0 bg-card z-20 border-l border-border/40 shadow-[-4px_0_8px_-2px_rgba(0,0,0,0.04)]">
+                  Actions
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {!hydrated ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={11} className="p-0">
+                  <TableCell colSpan={10} className="p-0">
                     <EmptyState
                       icon={QrCodeIcon}
-                      title="Loading payments…"
-                      hint="Fetching payment orders from the backend."
+                      title="Loading student payments…"
+                      hint="Fetching records from student roster, receipts, and payment gateway."
                     />
                   </TableCell>
                 </TableRow>
-              ) : orders.length === 0 ? (
+              ) : unifiedRecords.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={11} className="p-0">
+                  <TableCell colSpan={10} className="p-0">
                     <EmptyState
                       icon={QrCodeIcon}
-                      title="No payments yet"
-                      hint="Click Collect payment above to start a UPI or counter checkout."
+                      title="No payment records found"
+                      hint="Enrolled students will appear here automatically for fee collection."
                     />
                   </TableCell>
                 </TableRow>
-              ) : filteredOrders.length === 0 ? (
+              ) : filteredRecords.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={11} className="p-0">
+                  <TableCell colSpan={10} className="p-0">
                     <EmptyState
                       icon={QrCodeIcon}
-                      title="No payments match this filter"
-                      hint="Choose All statuses to see every order."
+                      title="No records match this filter"
+                      hint="Clear your search or select All Statuses to see every student."
                     />
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredOrders.map((order, index) => {
-                  const busy = actionId === order.orderId
-                  const counter = isCounterMethod(order.method)
-                  const paymentUrl = order.paymentUrl || order.checkoutUrl || ""
-                  const isCopied = copiedKey === order.orderId
+                filteredRecords.map((record, index) => {
+                  const isBusy = actionId === record.orderId
+                  const isCounter = isCounterMethod(record.method)
+                  const paymentUrl = record.paymentUrl || ""
+                  const isCopied = copiedKey === record.orderId
 
                   return (
-                    <TableRow key={order.orderId}>
-                      <TableCell className="text-muted-foreground">
+                    <TableRow key={record.id} className="group hover:bg-muted/30">
+                      <TableCell className="w-12 whitespace-nowrap text-muted-foreground">
                         {index + 1}
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {order.orderId}
+                      <TableCell className="min-w-[150px] whitespace-nowrap font-mono text-xs text-muted-foreground select-all">
+                        <div className="flex items-center gap-1.5">
+                          <span>{record.orderId}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            onClick={() => void copyToClipboard(record.orderId, record.orderId)}
+                            title={isCopied ? "Copied" : "Copy ID"}
+                            className="size-5 text-muted-foreground hover:text-foreground opacity-60 group-hover:opacity-100"
+                          >
+                            {isCopied ? (
+                              <CheckIcon className="size-3 text-emerald-600" />
+                            ) : (
+                              <CopyIcon className="size-3" />
+                            )}
+                          </Button>
+                        </div>
                       </TableCell>
-                      <TableCell
-                        className="font-medium text-foreground"
-                        title={order.studentId}
-                      >
-                        {order.studentName || "—"}
-                        {order.studentId ? (
-                          <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
-                            ({order.studentId})
+                      <TableCell className="min-w-[200px] whitespace-nowrap">
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-semibold text-foreground">
+                              {record.studentName}
+                            </span>
+                            {record.studentId && record.studentId !== "—" ? (
+                              <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                                {record.studentId}
+                              </span>
+                            ) : null}
+                          </div>
+                          {record.phone && record.phone !== "—" ? (
+                            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                              <PhoneIcon className="size-3" />
+                              {record.phone}
+                            </span>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="min-w-[160px] whitespace-nowrap">
+                        <div className="flex flex-col">
+                          <span className="font-medium text-foreground text-xs">
+                            {record.course || "General"}
                           </span>
-                        ) : null}
+                          {record.group && record.group !== "—" ? (
+                            <span className="text-[11px] text-muted-foreground">
+                              {record.group}
+                            </span>
+                          ) : null}
+                        </div>
                       </TableCell>
-                      <TableCell className="tabular-nums">
-                        {formatAmount(order.amount)}
+                      <TableCell className="min-w-[120px] whitespace-nowrap tabular-nums font-semibold text-foreground">
+                        {formatAmount(record.amount)}
                       </TableCell>
-                      <TableCell>
-                        <MethodCell method={order.method} />
+                      <TableCell className="min-w-[130px] whitespace-nowrap">
+                        <MethodCell method={record.method} />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="min-w-[160px] whitespace-nowrap">
                         <div className="flex flex-col items-start gap-1">
-                          <StatusBadge value={order.status} />
-                          {order.status === "PROCESSING" &&
-                          order.gatewayStatus === "SUCCESS" ? (
-                            <span className="text-[10px] leading-tight text-muted-foreground">
+                          <StatusBadge value={record.status} />
+                          {record.source === "student" && record.status === "INITIATED" ? (
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400">
+                              Awaiting fee collection
+                            </span>
+                          ) : null}
+                          {record.gatewayStatus &&
+                          normalizeStatus(record.gatewayStatus) !==
+                            normalizeStatus(record.status) ? (
+                            <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                              <span className="text-[10px] font-medium text-muted-foreground/80">
+                                Gateway:
+                              </span>
+                              <StatusBadge
+                                value={record.gatewayStatus}
+                                className="h-5 px-1.5 py-0 text-[10px]"
+                              />
+                            </div>
+                          ) : null}
+                          {record.status === "PROCESSING" &&
+                          record.gatewayStatus === "SUCCESS" ? (
+                            <span className="text-[10px] leading-tight text-emerald-600 dark:text-emerald-400">
                               Gateway confirmed · receipt pending
                             </span>
                           ) : null}
-                          {counter && !TERMINAL.has(order.status) ? (
-                            <span className="text-[10px] leading-tight text-muted-foreground">
+                          {isCounter && !TERMINAL.has(record.status) ? (
+                            <span className="text-[10px] leading-tight text-amber-600 dark:text-amber-400">
                               Awaiting counter confirmation
                             </span>
                           ) : null}
                         </div>
                       </TableCell>
-                      <TableCell>
-                        {paymentUrl ? (
-                          <div className="flex items-center gap-1.5">
-                            <a
-                              href={paymentUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              title={paymentUrl}
-                              className="inline-flex max-w-[130px] items-center gap-1 truncate font-mono text-xs text-primary underline-offset-4 hover:underline"
-                            >
-                              <span className="truncate">{paymentUrl}</span>
-                              <ExternalLinkIcon className="size-3 shrink-0" />
-                            </a>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-xs"
-                              onClick={() => void copyToClipboard(paymentUrl, order.orderId)}
-                              title={isCopied ? "Copied" : "Copy payment URL"}
-                              className="text-muted-foreground hover:text-foreground"
-                            >
-                              {isCopied ? (
-                                <CheckIcon className="size-3 text-emerald-600" />
-                              ) : (
-                                <CopyIcon className="size-3" />
-                              )}
-                            </Button>
-                          </div>
+                      <TableCell className="min-w-[120px] whitespace-nowrap">
+                        {record.receiptId ? (
+                          <Link
+                            href="/dashboard/receipts"
+                            className="inline-flex items-center gap-1 rounded bg-muted/60 px-2 py-0.5 font-mono text-xs text-foreground hover:bg-muted"
+                          >
+                            <ReceiptIcon className="size-3 text-muted-foreground" />
+                            <span>{record.receiptId}</span>
+                          </Link>
                         ) : (
-                          <span className="text-xs text-muted-foreground">
-                            {counter ? "Counter pass" : "—"}
-                          </span>
+                          <span className="font-mono text-xs text-muted-foreground">—</span>
                         )}
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {order.utr || "—"}
+                      <TableCell className="min-w-[140px] whitespace-nowrap tabular-nums text-xs text-muted-foreground">
+                        {formatDate(record.createdAt)}
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {order.receiptId || "—"}
-                      </TableCell>
-                      <TableCell className="tabular-nums text-muted-foreground">
-                        {formatDate(order.createdAt)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex flex-wrap items-center justify-end gap-1">
-                          {can("data:write") && counter && !TERMINAL.has(order.status) && (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={busy}
-                                onClick={() => void handleConfirm(order)}
-                              >
-                                {busy ? (
-                                  <Loader2Icon className="animate-spin" />
-                                ) : (
-                                  <CheckIcon />
-                                )}
-                                Confirm
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void handleDecline(order)}
-                              >
-                                <XIcon />
-                                Decline
-                              </Button>
-                            </>
-                          )}
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setTimelineOrder(order)}
-                          >
-                            <Clock3Icon />
-                            History
-                          </Button>
-                          {paymentUrl &&
-                          !TERMINAL.has(order.status) &&
-                          !counter ? (
-                            <a
-                              href={paymentUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex h-7 items-center gap-1 rounded-[10px] px-2 text-[0.8rem] font-medium text-foreground underline-offset-4 hover:bg-muted hover:underline"
+                      <TableCell className="w-16 min-w-[64px] whitespace-nowrap text-right sticky right-0 z-10 bg-card/95 backdrop-blur-xs border-l border-border/40 shadow-[-4px_0_8px_-2px_rgba(0,0,0,0.04)]">
+                        <div className="flex items-center justify-end">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              type="button"
+                              className={cn(
+                                buttonVariants({ variant: "ghost", size: "icon-sm" }),
+                                "size-8 text-muted-foreground hover:text-foreground cursor-pointer focus-visible:ring-2"
+                              )}
+                              aria-label={`Actions for ${record.studentName}`}
+                              title="Actions"
                             >
-                              <ExternalLinkIcon className="size-3.5" />
-                              Open
-                            </a>
-                          ) : null}
+                              <EllipsisIcon className="size-4" />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" side="bottom" className="w-52">
+                              {/* 1. Send Reminder */}
+                              <DropdownMenuItem onClick={() => setReminderRecord(record)}>
+                                <BellRingIcon className="size-4 text-emerald-600 dark:text-emerald-400" />
+                                <span>Send Reminder</span>
+                              </DropdownMenuItem>
+
+                              {/* 2. Direct Collect button */}
+                              {can("data:write") && (
+                                <DropdownMenuItem onClick={() => setCollectRecord(record)}>
+                                  <QrCodeIcon className="size-4 text-primary" />
+                                  <span>Collect Payment</span>
+                                </DropdownMenuItem>
+                              )}
+
+                              {/* 3. Payment History */}
+                              <DropdownMenuItem onClick={() => openHistory(record)}>
+                                <Clock3Icon className="size-4 text-muted-foreground" />
+                                <span>Payment History</span>
+                              </DropdownMenuItem>
+
+                              {/* 4. Open Checkout URL */}
+                              {paymentUrl && (
+                                <DropdownMenuItem onClick={() => window.open(paymentUrl, "_blank")}>
+                                  <ExternalLinkIcon className="size-4 text-muted-foreground" />
+                                  <span>Open Checkout URL</span>
+                                </DropdownMenuItem>
+                              )}
+
+                              {/* 5. View Receipt */}
+                              {record.receiptId && (
+                                <DropdownMenuItem render={<Link href="/dashboard/receipts" />}>
+                                  <ReceiptIcon className="size-4 text-muted-foreground" />
+                                  <span>View Receipt</span>
+                                </DropdownMenuItem>
+                              )}
+
+                              {/* 6. Copy Reference ID */}
+                              <DropdownMenuItem
+                                onClick={() => void copyToClipboard(record.orderId, record.orderId)}
+                              >
+                                <CopyIcon className="size-4 text-muted-foreground" />
+                                <span>Copy Reference ID</span>
+                              </DropdownMenuItem>
+
+                              {/* 7. Cashier counter confirmation */}
+                              {can("data:write") &&
+                                record.source === "gateway" &&
+                                isCounter &&
+                                !TERMINAL.has(record.status) && (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      disabled={isBusy}
+                                      onClick={() => void handleConfirm(record)}
+                                    >
+                                      <CheckIcon className="size-4 text-emerald-600 dark:text-emerald-400" />
+                                      <span>Confirm Cash Payment</span>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      variant="destructive"
+                                      disabled={isBusy}
+                                      onClick={() => void handleDecline(record)}
+                                    >
+                                      <XIcon className="size-4 text-destructive" />
+                                      <span>Decline Payment</span>
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -609,18 +1903,38 @@ export default function PaymentsPage() {
             </TableBody>
           </Table>
         </div>
-        {orders.length > 0 && (
+        {unifiedRecords.length > 0 && (
           <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
             <span>
-              {orders.length} order{orders.length === 1 ? "" : "s"}
+              {unifiedRecords.length} total records across {students.length} students
             </span>
             <span className="hidden sm:block">
-              Webhook-verified payments create a receipt automatically.
+              Payments, receipts, and interactive WhatsApp reminders update in real-time.
             </span>
           </div>
         )}
       </div>
 
+      {/* Single Student Reminder Dialog with interactive-button-bubble (ONLY Pay Now button) */}
+      <FeeReminderDialog
+        record={reminderRecord}
+        open={Boolean(reminderRecord)}
+        onOpenChange={(open) => {
+          if (!open) setReminderRecord(null)
+        }}
+        companyName={companyName}
+        workspacePaymentUrl={workspacePaymentUrl}
+      />
+
+      {/* Bulk Reminders Dialog */}
+      <BulkReminderDialog
+        records={unifiedRecords}
+        open={bulkReminderOpen}
+        onOpenChange={setBulkReminderOpen}
+        onSelectRecord={(rec) => setReminderRecord(rec)}
+      />
+
+      {/* Payment Timeline Dialog */}
       <PaymentTimeline
         order={timelineOrder}
         open={!!timelineOrder}
@@ -628,6 +1942,23 @@ export default function PaymentsPage() {
           if (!open) setTimelineOrder(null)
         }}
       />
+
+      {/* Collect Payment Dialog triggered from 3-dots action menu */}
+      {collectRecord && (
+        <PayWithGateway
+          open={Boolean(collectRecord)}
+          onOpenChange={(next) => {
+            if (!next) setCollectRecord(null)
+          }}
+          studentId={collectRecord.studentId}
+          studentName={collectRecord.studentName}
+          amount={collectRecord.amount}
+          onCompleted={() => {
+            setCollectRecord(null)
+            reload()
+          }}
+        />
+      )}
     </DashboardShell>
   )
 }

@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { loadStudents, saveStudents } from "@/lib/students-store"
+import { loadGroups, saveGroups, type StoredGroup } from "@/lib/groups-store"
 import {
   loadDropdowns,
   type DropdownMap,
 } from "@/lib/dropdown-store"
+import { loadBranches, type StoredBranch } from "@/lib/branches-store"
 import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
 import { StatusBadge } from "@/components/status-badge"
 import { EmptyState } from "@/components/empty-state"
@@ -53,6 +55,7 @@ const initialForm = {
   address: "",
   group: "",
   course: "",
+  branch: "",
   joiningDate: "",
   status: "Active",
 }
@@ -69,18 +72,27 @@ export default function StudentsPage() {
   const [students, setStudents] = useState<Student[]>([])
   const [nextId, setNextId] = useState(1)
   const [hydrated, setHydrated] = useState(false)
+  const [groups, setGroups] = useState<StoredGroup[]>([])
   const [dropdowns, setDropdowns] = useState<DropdownMap | null>(null)
+  const [branches, setBranches] = useState<StoredBranch[]>([])
   const [viewStudent, setViewStudent] = useState<Student | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
 
   useEffect(() => {
-    if (open)
+    if (open) {
       loadDropdowns()
         .then(setDropdowns)
         .catch((error) =>
           console.error("Failed to load dropdown options", error)
         )
+      loadBranches()
+        .then(setBranches)
+        .catch((error) => console.error("Failed to load branches", error))
+      loadGroups()
+        .then(setGroups)
+        .catch((error) => console.error("Failed to load student groups", error))
+    }
   }, [open])
 
   const reloadStudents = useCallback(() => {
@@ -121,20 +133,54 @@ export default function StudentsPage() {
     }
   }
 
+  function handleGroupChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const val = e.target.value
+    const matched = groups.find((g) => g.groupName === val || g.groupId === val)
+    setForm((f) => ({
+      ...f,
+      group: val,
+      course: matched?.course ? matched.course : f.course,
+    }))
+  }
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     // Persisted to Appwrite via the save effect.
     // Student ID is auto-generated (STU-001, STU-002, ...).
+    let assignedId = ""
     if (editingIndex !== null) {
-      const id = students[editingIndex]?.studentId ?? nextStudentId(nextId)
-      const updated: Student = { ...form, studentId: id }
+      assignedId = students[editingIndex]?.studentId ?? nextStudentId(nextId)
+      const updated: Student = { ...form, studentId: assignedId }
       setStudents((prev) => prev.map((s, i) => (i === editingIndex ? updated : s)))
       setEditingIndex(null)
     } else {
-      const student: Student = { ...form, studentId: nextStudentId(nextId) }
+      assignedId = nextStudentId(nextId)
+      const student: Student = { ...form, studentId: assignedId }
       setStudents((s) => [...s, student])
       setNextId((n) => n + 1)
     }
+
+    // Bidirectional sync: keep studentIds updated in groups-store
+    if (form.group && assignedId) {
+      loadGroups().then((currGroups) => {
+        let changed = false
+        const next = currGroups.map((g) => {
+          const isTarget = g.groupName === form.group || g.groupId === form.group
+          const hasId = g.studentIds.includes(assignedId)
+          if (isTarget && !hasId) {
+            changed = true
+            return { ...g, studentIds: [...g.studentIds, assignedId] }
+          }
+          if (!isTarget && hasId && editingIndex !== null) {
+            changed = true
+            return { ...g, studentIds: g.studentIds.filter((id) => id !== assignedId) }
+          }
+          return g
+        })
+        if (changed) void saveGroups(next)
+      }).catch(console.error)
+    }
+
     setForm(initialForm)
     setOpen(false)
   }
@@ -150,7 +196,24 @@ export default function StudentsPage() {
   }
 
   function onDelete(index: number) {
-    setStudents((s) => s.filter((_, i) => i !== index))
+    const s = students[index]
+    if (s?.studentId) {
+      loadGroups().then((currGroups) => {
+        let changed = false
+        const next = currGroups.map((g) => {
+          if (g.studentIds.includes(s.studentId)) {
+            changed = true
+            return {
+              ...g,
+              studentIds: g.studentIds.filter((id) => id !== s.studentId),
+            }
+          }
+          return g
+        })
+        if (changed) void saveGroups(next)
+      }).catch(console.error)
+    }
+    setStudents((st) => st.filter((_, i) => i !== index))
   }
 
   function onCancel() {
@@ -338,17 +401,28 @@ export default function StudentsPage() {
                           id="group"
                           className={selectClassName}
                           value={form.group}
-                          onChange={set("group")}
+                          onChange={handleGroupChange}
                           required
                         >
                           <option value="" disabled>
                             Select
                           </option>
-                          {(dropdowns?.classGroup ?? []).map((o) => (
-                            <option key={o} value={o}>
-                              {o}
-                            </option>
-                          ))}
+                          {groups.length > 0 && (
+                            <optgroup label="Student Groups">
+                              {groups.map((g) => (
+                                <option key={g.groupId} value={g.groupName}>
+                                  {g.groupName} · {g.course} (₹{g.feeAmount})
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          <optgroup label="General / Other">
+                            {(dropdowns?.classGroup ?? []).map((o) => (
+                              <option key={o} value={o}>
+                                {o}
+                              </option>
+                            ))}
+                          </optgroup>
                         </select>
                       </Field>
                       <Field>
@@ -369,6 +443,48 @@ export default function StudentsPage() {
                             </option>
                           ))}
                         </select>
+                      </Field>
+                      {(() => {
+                        const matched = groups.find(
+                          (g) => g.groupName === form.group || g.groupId === form.group
+                        )
+                        if (!matched) return null
+                        return (
+                          <div className="rounded-xl border border-primary/20 bg-primary/5 p-2.5 text-xs md:col-span-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+                            <span className="font-semibold text-primary">Connected Group Details:</span>
+                            <span><strong>Course:</strong> {matched.course}</span>
+                            {matched.batch ? <span><strong>Batch:</strong> {matched.batch}</span> : null}
+                            <span><strong>Fee:</strong> ₹{matched.feeAmount} ({matched.feeFrequency})</span>
+                            <span><strong>Enrolled:</strong> {matched.studentIds.length} students</span>
+                          </div>
+                        )
+                      })()}
+                      <Field>
+                        <FieldLabel htmlFor="branch">Branch</FieldLabel>
+                        <select
+                          id="branch"
+                          className={selectClassName}
+                          value={form.branch}
+                          onChange={set("branch")}
+                          required
+                        >
+                          <option value="" disabled>
+                            Select
+                          </option>
+                          {branches
+                            .filter((b) => b.status === "Active")
+                            .map((b) => (
+                              <option key={b.branchId} value={b.branchName}>
+                                {b.branchName}
+                                {b.code ? ` (${b.code})` : ""}
+                              </option>
+                            ))}
+                        </select>
+                        {branches.filter((b) => b.status === "Active").length === 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            No branches yet — create one on the Branches page.
+                          </p>
+                        )}
                       </Field>
                       <Field>
                         <FieldLabel htmlFor="joiningDate">Joining Date</FieldLabel>
@@ -440,6 +556,7 @@ export default function StudentsPage() {
                     <DetailItem label="Address">{viewStudent.address || "—"}</DetailItem>
                     <DetailItem label="Group / Class">{viewStudent.group || "—"}</DetailItem>
                     <DetailItem label="Course">{viewStudent.course || "—"}</DetailItem>
+                    <DetailItem label="Branch">{viewStudent.branch || "—"}</DetailItem>
                     <DetailItem label="Joining Date">{viewStudent.joiningDate || "—"}</DetailItem>
                     <DetailItem label="Status">
                       <StatusBadge value={viewStudent.status} />
