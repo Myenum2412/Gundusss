@@ -26,6 +26,7 @@ import {
   SmartphoneIcon,
   TriangleAlertIcon,
   UserCheckIcon,
+  WalletIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
@@ -585,17 +586,36 @@ export default function PublicPaymentPage() {
             {/* -------------------------------------------------------------
                 CARD 2: PAYMENT METHODS ONLY
                ------------------------------------------------------------- */}
-            <section className="overflow-hidden rounded-3xl border bg-card p-6 shadow-md shadow-black/[0.03] sm:p-7">
-              {/* Method Selector Tabs */}
-              <div className="flex items-center justify-between border-b pb-4">
-                <div>
-                  <h2 className="text-base font-bold tracking-tight text-foreground">
-                    Select Payment Method
-                  </h2>
-                  <p className="text-xs text-muted-foreground">
-                    Instant zero-fee payment methods only
-                  </p>
+            <section className="overflow-hidden rounded-3xl border bg-card shadow-md shadow-black/[0.03]">
+              {/* YOUPI PG Secure UPI checkout PREVIEW Banner */}
+              <div className="flex items-center justify-between bg-slate-900 px-5 py-3.5 text-white dark:bg-slate-950 border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <span className="grid size-7 place-items-center rounded-full bg-white/10 text-emerald-400">
+                    <WalletIcon className="size-4" />
+                  </span>
+                  <div>
+                    <p className="text-xs font-bold leading-tight tracking-wide">YOUPI PG</p>
+                    <p className="text-[10px] leading-tight text-white/60">
+                      Secure UPI checkout
+                    </p>
+                  </div>
                 </div>
+                <span className="rounded-full border border-white/20 bg-white/5 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider text-white/90">
+                  PREVIEW
+                </span>
+              </div>
+
+              <div className="p-6 sm:p-7">
+                {/* Method Selector Tabs */}
+                <div className="flex items-center justify-between border-b pb-4">
+                  <div>
+                    <h2 className="text-base font-bold tracking-tight text-foreground">
+                      Select Payment Method
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      Instant zero-fee payment methods only
+                    </p>
+                  </div>
                 <div className="flex rounded-xl bg-muted/60 p-1 text-xs font-medium">
                   <button
                     type="button"
@@ -775,6 +795,7 @@ export default function PublicPaymentPage() {
                   </Button>
                 </div>
               )}
+              </div>
             </section>
           </div>
         )}
