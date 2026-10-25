@@ -149,6 +149,18 @@ async function ensureAppwriteSeed(): Promise<void> {
 const port = Number(process.env.PORT ?? 4000);
 const host = process.env.HOST ?? '0.0.0.0';
 
+// The WhatsApp engine (whatsapp-web.js + puppeteer) can throw from inside its
+// own background callbacks ("Execution context was destroyed", Chromium file
+// locks, page reload races). Those rejections escape our try/catch in
+// whatsapp.ts because they happen outside the initialize() promise chain.
+// Without these guards Node kills the whole API for a browser hiccup.
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal-guard] unhandled rejection kept the API alive:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[fatal-guard] uncaught exception kept the API alive:', err);
+});
+
 try {
   if (!isAppwriteConfigured()) {
     throw new Error(
