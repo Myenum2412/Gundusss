@@ -88,11 +88,23 @@ try {
   // ignore
 }
 
+function hasActualContent(msg: any): boolean {
+  if (!msg || typeof msg !== 'object') return false;
+  return Boolean(
+    msg.conversation ||
+    msg.extendedTextMessage?.text ||
+    msg.imageMessage ||
+    msg.documentMessage ||
+    msg.videoMessage ||
+    msg.audioMessage
+  );
+}
+
 let saveMsgTimer: any = null;
 function persistMessage(keyId: string, remoteJid: string, messageProto: any) {
   if (!keyId || !messageProto) return;
   const existing = messageStore.get(keyId) as any;
-  if (existing && Object.keys(existing).length > 0 && (!messageProto || Object.keys(messageProto).length === 0)) {
+  if (existing && hasActualContent(existing) && !hasActualContent(messageProto)) {
     return;
   }
   messageStore.set(keyId, messageProto);
@@ -277,9 +289,9 @@ export async function startWa() {
           const cached =
             messageStore.get(id) ||
             (remoteJid ? messageStore.get(`${remoteJid}:${id}`) : undefined);
-          if (cached) {
+          if (cached && hasActualContent(cached)) {
             console.log(`[wa] getMessage: returning stored message for ${remoteJid || id}:${id}`);
-            return cached as any;
+            return proto.Message.fromObject(cached);
           }
         }
         return proto.Message.fromObject({});
@@ -492,9 +504,9 @@ async function performSend(
     const sent = await s.sendMessage(jid, { text: textToSend });
     firstId = sent?.key?.id ?? null;
     const protoPayload =
-      sent?.message && Object.keys(sent.message).length > 0
+      hasActualContent(sent?.message)
         ? sent.message
-        : { conversation: textToSend };
+        : { conversation: textToSend, extendedTextMessage: { text: textToSend } };
     if (firstId) {
       persistMessage(firstId, jid, protoPayload);
     }
