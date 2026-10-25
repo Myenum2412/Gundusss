@@ -63,7 +63,6 @@ import {
   ExternalLinkIcon,
   Link2Icon,
   Loader2Icon,
-  MessageSquareIcon,
   PhoneIcon,
   QrCodeIcon,
   ReceiptIcon,
@@ -151,10 +150,6 @@ function cleanPhoneNumber(raw?: string): string {
   return digits
 }
 
-function formatWhatsAppLink(phone: string, text: string): string {
-  const cleaned = cleanPhoneNumber(phone)
-  return `https://wa.me/${cleaned}?text=${encodeURIComponent(text)}`
-}
 
 function MethodCell({ method }: { method: string }) {
   const Icon = METHOD_ICONS[method] ?? METHOD_ICONS[method.toUpperCase()] ?? QrCodeIcon
@@ -287,7 +282,6 @@ function FeeReminderDialog({
 
   const isPaid = normalizeStatus(record.status) === "SUCCESS"
   const paymentLink = record.paymentUrl || workspacePaymentUrl || ""
-  const waUrl = formatWhatsAppLink(phone, message)
   const canSendWa = Boolean(cleanPhoneNumber(phone))
 
   async function handleCopy() {
@@ -474,6 +468,15 @@ function FeeReminderDialog({
           </Field>
 
           {/* Status notices */}
+          {waState && waState.status !== "ready" && (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
+              <span>WhatsApp bot is not connected.</span>
+              <Link href="/dashboard/settings" className="font-semibold underline hover:text-amber-950">
+                Connect in Settings
+              </Link>
+            </div>
+          )}
+
           {botError && (
             <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400">
               {botError}
@@ -510,49 +513,34 @@ function FeeReminderDialog({
           </Button>
 
           <div className="flex items-center gap-2">
-            {/* Optional Automated WhatsApp Bot Delivery if bot is connected */}
-            {waState?.status === "ready" && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={sendingBot || !canSendWa}
-                onClick={handleSendViaBot}
-                className="gap-1.5 border-emerald-600/30 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400"
-              >
-                {sendingBot ? (
-                  <Loader2Icon className="size-3.5 animate-spin" />
-                ) : (
-                  <SendIcon className="size-3.5" />
-                )}
-                <span>Send via Bot</span>
-              </Button>
-            )}
-
-            {/* Direct WhatsApp Web/App Link */}
-            <a
-              href={canSendWa ? waUrl : "#"}
-              target={canSendWa ? "_blank" : undefined}
-              rel="noreferrer"
-              onClick={(e) => {
-                if (!canSendWa) {
-                  e.preventDefault()
-                  setBotError("Please enter a valid mobile number first.")
-                }
-              }}
-              className={buttonVariants({
-                variant: "default",
-                size: "sm",
-                className: cn(
-                  "gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold",
-                  !canSendWa && "opacity-60 cursor-not-allowed"
-                ),
-              })}
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              disabled={sendingBot || !canSendWa}
+              onClick={handleSendViaBot}
+              className={cn(
+                "gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-xs",
+                (!canSendWa || sendingBot) && "opacity-60 cursor-not-allowed"
+              )}
             >
-              <MessageSquareIcon className="size-3.5" />
-              <span>Send Reminder to Them</span>
-              <ExternalLinkIcon className="size-3" />
-            </a>
+              {sendingBot ? (
+                <>
+                  <Loader2Icon className="size-3.5 animate-spin" />
+                  <span>Sending Reminder...</span>
+                </>
+              ) : botSent ? (
+                <>
+                  <CheckIcon className="size-3.5 text-white" />
+                  <span>Delivered!</span>
+                </>
+              ) : (
+                <>
+                  <SendIcon className="size-3.5" />
+                  <span>Send Reminder to Them</span>
+                </>
+              )}
+            </Button>
           </div>
         </div>
       </DialogContent>
