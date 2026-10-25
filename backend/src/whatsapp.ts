@@ -172,6 +172,20 @@ export async function logoutWa() {
   return getWaState();
 }
 
+/**
+ * Normalize a phone number for the WhatsApp JID:
+ * bare 10-digit Indian numbers get the default `91` country code, since
+ * without it the session cannot resolve the contact and sends fail with
+ * "No LID for user".
+ */
+export function normalizeWaNumber(input: string): string {
+  const digits = input.replace(/\D/g, '');
+  if (digits.length === 10 && /^[6-9]/.test(digits)) {
+    return `91${digits}`;
+  }
+  return digits;
+}
+
 export async function sendWaMessage(to: string, message: string) {
   if (!client || status !== 'ready') {
     const err = new Error(
@@ -180,7 +194,7 @@ export async function sendWaMessage(to: string, message: string) {
     err.statusCode = 409;
     throw err;
   }
-  const digits = to.replace(/\D/g, '');
+  const digits = normalizeWaNumber(to);
   if (digits.length < 10 || digits.length > 15) {
     const err = new Error(
       'Invalid phone number. Use international format with country code, e.g. 919876543210.'
@@ -188,7 +202,22 @@ export async function sendWaMessage(to: string, message: string) {
     err.statusCode = 400;
     throw err;
   }
+  // Resolve the stored number to a real WhatsApp JID first. This surfaces an
+  // actionable error ("number not on WhatsApp") instead of the cryptic
+  // "No LID for user" protocol error from a blind sendMessage call.
   const chatId = `${digits}@c.us`;
+  if (typeof client.getNumberId === 'function') {
+    const resolved = await client.getNumberId(chatId);
+    if (!resolved?._serialized) {
+      const err = new Error(
+        `Phone number +${digits} could not be resolved on WhatsApp. Check that the country code is correct and the number is registered on WhatsApp.`
+      ) as Error & { statusCode?: number };
+      err.statusCode = 400;
+      throw err;
+    }
+    const sent: any = await client.sendMessage(resolved._serialized, message);
+    return { id: sent?.id?._serialized ?? sent?.id ?? null, to: digits };
+  }
   const sent: any = await client.sendMessage(chatId, message);
   return { id: sent?.id?._serialized ?? sent?.id ?? null, to: digits };
 }
