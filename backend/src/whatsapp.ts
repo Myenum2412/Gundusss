@@ -204,13 +204,17 @@ export async function startWa() {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
-      browser: Browsers.ubuntu('Chrome'),
+      browser: ['MyFees Bot', 'Chrome', '122.0.0'],
       // We render the QR in the web UI ourselves.
       printQRInTerminal: false,
       logger,
       syncFullHistory: false,
+      // Tell WhatsApp not to transfer past chat history: prevents "Sync is paused" on the phone
+      shouldSyncHistoryMessage: () => false,
+      // Message lookup fallback to prevent stalls on retry requests
+      getMessage: async () => undefined,
       markOnlineOnConnect: true,
-      keepAliveIntervalMs: 25_000,
+      keepAliveIntervalMs: 20_000,
       connectTimeoutMs: 60_000,
       defaultQueryTimeoutMs: 60_000,
       retryRequestDelayMs: 500,
@@ -220,6 +224,9 @@ export async function startWa() {
     sock.ev.on('creds.update', saveCreds);
     sock.ev.on('connection.update', (update: ConnUpdate) => {
       void handleConnectionUpdate(update);
+    });
+    sock.ev.on('messaging-history.set', () => {
+      console.log('[wa] history sync acknowledged');
     });
   } catch (err: any) {
     status = 'error';
