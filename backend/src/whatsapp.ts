@@ -102,11 +102,7 @@ function hasActualContent(msg: any): boolean {
 
 let saveMsgTimer: any = null;
 function persistMessage(keyId: string, remoteJid: string, messageProto: any) {
-  if (!keyId || !messageProto) return;
-  const existing = messageStore.get(keyId) as any;
-  if (existing && hasActualContent(existing) && !hasActualContent(messageProto)) {
-    return;
-  }
+  if (!keyId || !messageProto || !hasActualContent(messageProto)) return;
   messageStore.set(keyId, messageProto);
   if (remoteJid) {
     messageStore.set(`${remoteJid}:${keyId}`, messageProto);
@@ -501,12 +497,12 @@ async function performSend(
   }
 
   if (textToSend) {
+    const protoPayload = {
+      conversation: textToSend,
+      extendedTextMessage: { text: textToSend },
+    };
     const sent = await s.sendMessage(jid, { text: textToSend });
     firstId = sent?.key?.id ?? null;
-    const protoPayload =
-      hasActualContent(sent?.message)
-        ? sent.message
-        : { conversation: textToSend, extendedTextMessage: { text: textToSend } };
     if (firstId) {
       persistMessage(firstId, jid, protoPayload);
     }
