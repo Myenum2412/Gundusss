@@ -57,6 +57,12 @@ app.addContentTypeParser(
   }
 );
 
+// Form-encoded or headerless empty posts (CLI clients, primitives) should be
+// treated as empty payloads instead of erroring with 415.
+app.addContentTypeParser('application/x-www-form-urlencoded', (_req, _body, done) => {
+  done(null, {});
+});
+
 app.addHook('preParsing', async (request, _reply, payload) => {
   const chunks: Buffer[] = [];
   for await (const chunk of payload) {
