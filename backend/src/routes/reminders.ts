@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import {
@@ -118,6 +119,12 @@ async function createCronJob(apiKey: string, payload: {
         expiresAt: 0,
       },
       notifyAfterFailedExecutions: 1,
+      // Authenticate every webhook hit: cron-job.org sends this header with
+      // each execution and the backend validates it (CRON_WEBHOOK_SECRET).
+      headers: process.env.CRON_WEBHOOK_SECRET?.trim()
+        || CRONJOB_API_KEY
+        ? [{ name: 'X-Cron-Key', value: process.env.CRON_WEBHOOK_SECRET?.trim() || CRONJOB_API_KEY }]
+        : undefined,
       // Email the account owner when consistently failing so missed fixes don't
       // silently skip a month of fee reminders.
       notification: {
@@ -284,10 +291,42 @@ async function executeMonthlyReminders(
 }
 
 export async function reminderRoutes(app: FastifyInstance) {
+  // Cron-job.org fetches this URL on schedule. The job carries an
+  // X-Cron-Key header (mirror of CRON_WEBHOOK_SECRET) — requests without a
+  // valid key are rejected so the webhook cannot be triggered publicly.
+  // Falls back to CRONJOB_API_KEY when the dedicated secret is not set, so
+  // existing deployments keep working after a backend-only upgrade.
+  const cronWebhookSecret = (): string => {
+    if (process.env.CRON_WEBHOOK_SECRET?.trim()) {
+      return process.env.CRON_WEBHOOK_SECRET.trim();
+    }
+    return CRONJOB_API_KEY;
+  };
+  const timingSafeEqualStr = (a: string, b: string): boolean => {
+    const ha = createHash('sha256').update(a).digest();
+    const hb = createHash('sha256').update(b).digest();
+    return ha.length === hb.length && timingSafeEqual(ha, hb);
+  };
+
   // Public Webhook hit by cron-job.org on schedule
   // Handles both GET and POST so cron-job.org standard GET monitor works out of the box!
   const handleCronTrigger = async (req: FastifyRequest, reply: FastifyReply) => {
     try {
+      const presented =
+        (typeof req.headers['x-cron-key'] === 'string'
+          ? req.headers['x-cron-key'].trim()
+          : '') ||
+        ((req.query as { key?: string } | undefined)?.key ?? '').trim();
+      if (
+        !cronWebhookSecret() ||
+        !presented ||
+        !timingSafeEqualStr(presented, cronWebhookSecret())
+      ) {
+        return reply
+          .code(401)
+          .send({ error: 'Unauthorized cron trigger: valid X-Cron-Key required' });
+      }
+
       // Find default profile (Amarnath / ORG-XD3SLDDC or all profiles)
       const profiles = await listProfiles();
       const targetProfile =

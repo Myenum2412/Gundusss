@@ -31,7 +31,15 @@ async function handleMonthlyCron(req: NextRequest) {
     )
   }
 
-  const url = `${backendBase.replace(/\/+$/, "")}/api/reminders/cron/monthly`
+  const url = new URL(
+    "/api/reminders/cron/monthly",
+    backendBase.replace(/\/+$/, "")
+  )
+  // Forward the shared cron secret so the backend can authenticate the
+  // trigger (cron-job.org posts it as ?key=...; header X-Cron-Key also
+  // supported and forwarded below).
+  const keyParam = req.nextUrl.searchParams.get("key") ?? ""
+  if (keyParam) url.searchParams.set("key", keyParam)
 
   try {
     // WhatsApp sends run sequentially, so allow up to 25s; cron-job.org's
@@ -41,7 +49,12 @@ async function handleMonthlyCron(req: NextRequest) {
     const backendRes = await fetch(url, {
       method: req.method,
       signal: controller.signal,
-      headers: { Accept: "application/json" },
+      // Pass through the cron authentication key sent by cron-job.org so the
+      // backend can validate the trigger (X-Cron-Key webhook secret).
+      headers: {
+        Accept: "application/json",
+        "x-cron-key": req.headers.get("x-cron-key") ?? "",
+      },
     })
     clearTimeout(timer)
 
