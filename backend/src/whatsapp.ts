@@ -338,29 +338,34 @@ function enqueueSend<T>(fn: () => Promise<T>): Promise<T> {
 
 /**
  * Interactive CTA-URL message — the WhatsApp "Tap the button to open the
- * link" bubble. Renders natively on current WhatsApp clients; older clients
- * simply show the body text.
+ * link" bubble. Wrapped in viewOnceMessage so Baileys routes it to the
+ * native-flow encoder. Renders natively on current WhatsApp clients; older
+ * clients simply show the body text.
  */
 function buildCtaUrlMessage(body: string, footer: string, cta: WaCtaUrl) {
   return {
-    interactiveMessage: {
-      body: { text: body },
-      footer: { text: footer },
-      nativeFlowMessage: {
-        messageParamsJson: JSON.stringify({
-          display_text: cta.displayText,
-          id: `${Date.now()}-${Math.floor(Math.random() * 1e9)}`,
-        }),
-        buttons: [
-          {
-            name: 'cta_url',
-            buttonParamsJson: JSON.stringify({
+    viewOnceMessage: {
+      message: {
+        interactiveMessage: {
+          body: { text: body },
+          footer: { text: footer },
+          nativeFlowMessage: {
+            messageParamsJson: JSON.stringify({
               display_text: cta.displayText,
-              url: cta.url,
-              merchant_url: cta.url,
+              id: `${Date.now()}-${Math.floor(Math.random() * 1e9)}`,
             }),
+            buttons: [
+              {
+                name: 'cta_url',
+                buttonParamsJson: JSON.stringify({
+                  display_text: cta.displayText,
+                  url: cta.url,
+                  merchant_url: cta.url,
+                }),
+              },
+            ],
           },
-        ],
+        },
       },
     },
   };
@@ -401,11 +406,11 @@ async function performSend(
     })();
 
     if (sawError && plainText) {
-      const sent = await s.sendMessage(jid, plainText);
+      const sent = await s.sendMessage(jid, { text: plainText });
       firstId = firstId ?? sent?.key?.id ?? null;
     }
     if (sawError && !plainText) {
-      const sent = await s.sendMessage(jid, cta.url);
+      const sent = await s.sendMessage(jid, { text: cta.url });
       firstId = firstId ?? sent?.key?.id ?? null;
     }
     for (const att of attachments) {
