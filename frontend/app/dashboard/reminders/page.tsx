@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
@@ -391,18 +391,25 @@ export default function RemindersPage() {
     }
 
     const studentPaymentUrl = `${activeProfile?.paymentUrl || "https://myfees.myenum.in/amarnath"}?student=${encodeURIComponent(stu.studentId)}`
-    const msg = `ðŸ”” *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${stu.studentName}*,\n\nThis is your monthly fee reminder for *${stu.course || "Course"}* (${stu.group || "Batch"}).\n\nâ€¢ Student ID: *${stu.studentId}*\nâ€¢ Monthly Fee: *â‚¹${parseFloat(feeAmount).toLocaleString("en-IN")}*\nâ€¢ Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\nðŸ‘‰ ${studentPaymentUrl}\n\nâ€” ${activeProfile?.name || "MyFees"} Accounts Desk`
+    const bodyText = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${stu.studentName}*,\n\nThis is your monthly fee reminder for *${stu.course || "Course"}* (${stu.group || "Batch"}).\n\n• Student ID: *${stu.studentId}*\n• Monthly Fee: *₹${parseFloat(feeAmount).toLocaleString("en-IN")}*\n• Due Date: 5th of this month\n\nPlease tap the Pay Now button below to pay directly via UPI / Card:\n\n— ${activeProfile?.name || "MyFees"} Accounts Desk`
 
     if (waState?.status === "ready") {
       try {
-        await sendWaMessage({ to: phone, message: msg })
+        await sendWaMessage({
+          to: phone,
+          message: bodyText,
+          cta: {
+            displayText: "Pay Now",
+            url: studentPaymentUrl,
+          },
+        })
         alert(`WhatsApp reminder delivered to ${stu.studentName} (+91 ${phone})!`)
       } catch (e: any) {
         alert(`Failed to send WhatsApp: ${e?.message}`)
       }
     } else {
       // Direct WhatsApp link fallback
-      const waUrl = `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`
+      const waUrl = `https://wa.me/91${phone}?text=${encodeURIComponent(bodyText + `\n\n👉 ${studentPaymentUrl}`)}`
       window.open(waUrl, "_blank")
     }
   }

@@ -23,6 +23,8 @@ const {
   makeCacheableSignalKeyStore,
   DisconnectReason,
   Browsers,
+  proto,
+  generateWAMessageFromContent,
 } = require('@whiskeysockets/baileys') as any;
 const pino = require('pino') as (opts: unknown) => any;
 
@@ -343,33 +345,44 @@ function enqueueSend<T>(fn: () => Promise<T>): Promise<T> {
  * native-flow encoder. Renders natively on current WhatsApp clients; older
  * clients simply show the body text.
  */
-function buildCtaUrlMessage(body: string, footer: string, cta: WaCtaUrl) {
-  return {
-    viewOnceMessage: {
-      message: {
-        interactiveMessage: {
-          body: { text: body },
-          footer: { text: footer },
-          nativeFlowMessage: {
-            messageParamsJson: JSON.stringify({
-              display_text: cta.displayText,
-              id: `${Date.now()}-${Math.floor(Math.random() * 1e9)}`,
-            }),
-            buttons: [
-              {
-                name: 'cta_url',
-                buttonParamsJson: JSON.stringify({
-                  display_text: cta.displayText,
-                  url: cta.url,
-                  merchant_url: cta.url,
-                }),
-              },
-            ],
+function buildCtaUrlMessage(jid: string, body: string, footer: string, cta: WaCtaUrl) {
+  return generateWAMessageFromContent(
+    jid,
+    {
+      viewOnceMessage: {
+        message: {
+          messageContextInfo: {
+            deviceListMetadata: {},
+            deviceListMetadataVersion: 2,
           },
+          interactiveMessage: proto.Message.InteractiveMessage.create({
+            body: proto.Message.InteractiveMessage.Body.create({
+              text: body,
+            }),
+            footer: proto.Message.InteractiveMessage.Footer.create({
+              text: footer,
+            }),
+            header: proto.Message.InteractiveMessage.Header.create({
+              hasMediaAttachment: false,
+            }),
+            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
+              buttons: [
+                {
+                  name: 'cta_url',
+                  buttonParamsJson: JSON.stringify({
+                    display_text: cta.displayText,
+                    url: cta.url,
+                    merchant_url: cta.url,
+                  }),
+                },
+              ],
+            }),
+          }),
         },
       },
     },
-  };
+    { userJid: jid }
+  );
 }
 
 async function performSend(
@@ -387,36 +400,33 @@ async function performSend(
   // Pure text + CTA fits in one interactive bubble on modern clients, with a
   // plain-text safety net when the interactive send is rejected.
   if (cta) {
-    const sawError = await (async () => {
-      try {
-        if (plainText || attachments.length === 0) {
-          // Baileys' sendMessage() cannot route interactive/native-flow
-          // content (generateWAMessageContent has no interactive branch).
-          // The ecosystem-correct path is relayMessage with pre-built proto.
-          const content = buildCtaUrlMessage(
-            plainText ||
-              `Tap the button below to continue.\n${cta.url}`,
-            'MyFees · Payment & updates',
-            cta
-          );
-          const msgId = '3EB0' + randomBytes(8).toString('hex').toUpperCase();
-          await s.relayMessage(jid, content as any, { messageId: msgId });
-          firstId = msgId;
-        }
-      } catch (err: any) {
-        console.log(`[wa] cta_url send fell back to plain text: ${err?.message ?? err}`);
-        return true;
+    let sentInteractive = false;
+    try {
+      if (plainText || attachments.length === 0) {
+        const waMsg = buildCtaUrlMessage(
+          jid,
+          plainText || `Tap the button below to continue.`,
+          'MyFees · Payment & updates',
+          cta
+        );
+        const msgId = waMsg.key?.id || ('3EB0' + randomBytes(8).toString('hex').toUpperCase());
+        await s.relayMessage(jid, waMsg.message, { messageId: msgId });
+        firstId = msgId;
+        sentInteractive = true;
       }
-      return false;
-    })();
-
-    if (sawError && plainText) {
-      const sent = await s.sendMessage(jid, { text: plainText });
-      firstId = firstId ?? sent?.key?.id ?? null;
+    } catch (err: any) {
+      console.log(`[wa] cta_url relayMessage failed: ${err?.message ?? err}`);
     }
-    if (sawError && !plainText) {
-      const sent = await s.sendMessage(jid, { text: cta.url });
-      firstId = firstId ?? sent?.key?.id ?? null;
+
+    if (!sentInteractive) {
+      if (plainText) {
+        const fallbackText = `${plainText}\n\n👉 ${cta.displayText}: ${cta.url}`;
+        const sent = await s.sendMessage(jid, { text: fallbackText });
+        firstId = firstId ?? sent?.key?.id ?? null;
+      } else {
+        const sent = await s.sendMessage(jid, { text: cta.url });
+        firstId = firstId ?? sent?.key?.id ?? null;
+      }
     }
     for (const att of attachments) {
       const buf = Buffer.from(att.data, 'base64');

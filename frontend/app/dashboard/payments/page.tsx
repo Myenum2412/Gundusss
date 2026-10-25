@@ -48,10 +48,7 @@ import { loadStudents, type StoredStudent } from "@/lib/students-store"
 import { loadReceipts, type StoredReceipt } from "@/lib/receipts-store"
 import { loadFeeStructures, type StoredFeeStructure } from "@/lib/fee-structures-store"
 import { getWaStatus, sendWaMessage, type WaState } from "@/lib/api"
-import {
-  InteractiveButtonBubble,
-  type InteractiveButton,
-} from "@/components/ui/whatsapp/interactive-button-bubble"
+import { CtaUrlBubble } from "@/components/ui/whatsapp/cta-url-bubble"
 import "@/components/ui/whatsapp/styles/whatsapp.css"
 import {
   BanknoteIcon,
@@ -304,6 +301,7 @@ function FeeReminderDialog({
   }
 
   async function handleSendViaBot() {
+    if (!record) return
     const cleaned = cleanPhoneNumber(phone)
     if (!cleaned) {
       setBotError("Please provide a valid 10-digit mobile number")
@@ -314,7 +312,18 @@ function FeeReminderDialog({
     setBotError(null)
     setBotSent(false)
     try {
-      await sendWaMessage({ to: cleaned, message })
+      const cleanBody = `Dear Parent / Student ${record.studentName},\n\nThis is a fee payment notice for *${record.course || "Course"}* (${record.group || "Regular"}).\n\n• Student ID: ${record.studentId || "—"}\n• Amount Due: ${formatAmount(record.amount)}\n• Reference: ${record.orderId}`
+
+      await sendWaMessage({
+        to: cleaned,
+        message: cleanBody,
+        cta: paymentLink
+          ? {
+              displayText: "Pay Now",
+              url: paymentLink,
+            }
+          : undefined,
+      })
       setBotSent(true)
       window.setTimeout(() => setBotSent(false), 3000)
     } catch (err) {
@@ -325,12 +334,6 @@ function FeeReminderDialog({
       )
     } finally {
       setSendingBot(false)
-    }
-  }
-
-  function handlePayNowClick(button: InteractiveButton) {
-    if (paymentLink) {
-      window.open(paymentLink, "_blank")
     }
   }
 
@@ -356,32 +359,37 @@ function FeeReminderDialog({
 
         {/* Body */}
         <div className="space-y-4 p-5 text-xs max-h-[75vh] overflow-y-auto custom-scroll">
-          {/* WhatsApp Interactive Message Preview with ONLY Pay Now Button */}
+          {/* WhatsApp CTA-URL Message Preview with Pay Now Button */}
           <div className="rounded-2xl border bg-[#e5ddd5]/60 dark:bg-[#0b141a] p-4 flex flex-col items-center justify-center shadow-inner">
             <span className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80">
-              WhatsApp Message Preview (with Pay Now Button)
+              WhatsApp CTA-URL Button Preview (Pay Now)
             </span>
 
-            <InteractiveButtonBubble
+            <CtaUrlBubble
               variant="outgoing"
-              header={
-                <div className="flex items-center gap-1.5 text-[13px] font-semibold text-emerald-800 dark:text-emerald-300">
-                  <SparklesIcon className="size-3.5 text-emerald-600 dark:text-emerald-400" />
-                  <span>{isPaid ? "Payment Acknowledgment" : "Fee Payment Reminder"}</span>
-                </div>
-              }
               body={`Dear Parent / Student ${record.studentName},\n\nThis is a fee payment notice for *${record.course || "Course"}* (${record.group || "Regular"}).\n\n• Student ID: ${record.studentId || "—"}\n• Amount Due: ${formatAmount(record.amount)}\n• Reference: ${record.orderId}`}
-              footer={`${companyName || "Institute Office"} · Tap Pay Now below to complete payment via UPI`}
-              buttons={[
-                {
-                  id: "pay-now",
-                  title: "Pay Now",
-                },
-              ]}
+              footer={`${companyName || "Institute Office"} · Secured UPI / Card payment`}
+              displayText="Pay Now"
+              url={paymentLink}
               timestamp="Just now"
               status="delivered"
               showTail={true}
-              onButtonClick={handlePayNowClick}
+              renderAction={(props) => (
+                <a
+                  href={props.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={props.className}
+                  onClick={(e) => {
+                    if (!props.href) {
+                      e.preventDefault()
+                      alert("No payment URL configured for this record")
+                    }
+                  }}
+                >
+                  {props.children}
+                </a>
+              )}
             />
 
             <span className="mt-2 text-[10px] text-muted-foreground">

@@ -11,11 +11,19 @@ const AttachmentSchema = z
   })
   .strip();
 
+const CtaSchema = z
+  .object({
+    displayText: z.string().min(1).max(100),
+    url: z.string().url().max(1000),
+  })
+  .strip();
+
 const SendSchema = z.object({
   to: z.string().min(10).max(20),
-  // Empty message is allowed when the request carries a file instead.
+  // Empty message is allowed when the request carries a file or button instead.
   message: z.string().max(4000),
   attachment: AttachmentSchema.optional(),
+  cta: CtaSchema.optional(),
 });
 
 export async function whatsappRoutes(app: FastifyInstance) {
@@ -48,7 +56,7 @@ export async function whatsappRoutes(app: FastifyInstance) {
     return { data: state };
   });
 
-  // POST /api/whatsapp/send { to, message, attachment? }
+  // POST /api/whatsapp/send { to, message, attachment?, cta? }
   app.post('/api/whatsapp/send', async (req, reply) => {
     const parsed = SendSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -56,17 +64,18 @@ export async function whatsappRoutes(app: FastifyInstance) {
         .code(400)
         .send({ error: 'Invalid body', details: parsed.error.flatten() });
     }
-    const { to, message, attachment } = parsed.data;
-    if (!message.trim() && !attachment) {
+    const { to, message, attachment, cta } = parsed.data;
+    if (!message.trim() && !attachment && !cta) {
       return reply
         .code(400)
-        .send({ error: 'A message or an attachment is required.' });
+        .send({ error: 'A message, attachment, or CTA button is required.' });
     }
     try {
       const result = await sendWaMessage(
         to,
         message,
-        attachment ? [attachment] : []
+        attachment ? [attachment] : [],
+        cta
       );
       return { data: result };
     } catch (err: any) {

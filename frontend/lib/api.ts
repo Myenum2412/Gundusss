@@ -67,11 +67,18 @@ export function logoutWa(): Promise<WaState> {
   return waReq('/api/whatsapp/logout', { method: 'POST' });
 }
 
+export interface WaCtaUrl {
+  displayText: string;
+  url: string;
+}
+
 export async function sendWaMessage(input: {
   to: string;
   message: string;
   /** Optional base64 file payload sent right after the text message. */
   attachment?: { name: string; mime: string; data: string };
+  /** Optional WhatsApp-native CTA-URL button */
+  cta?: WaCtaUrl;
 }): Promise<{ id: string | null; to: string }> {
   const res = await apiFetch('/api/whatsapp/send', {
     method: 'POST',
