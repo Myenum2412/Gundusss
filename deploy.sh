@@ -14,11 +14,11 @@ OLD=$(git rev-parse HEAD 2>/dev/null || echo none)
 
 echo "===== deploy $(date -Is): $OLD -> $NEW"
 git diff --name-only "$OLD" "$NEW" > /tmp/git_changed_names 2>/dev/null || {
-  git checkout -B main origin/main -q
+  git reset --hard origin/main
   exit 0
 }
 CHANGED=$(cat /tmp/git_changed_names)
-git checkout -B main origin/main -q
+git reset --hard origin/main
 
 # --- fees backend (typescript -> dist/server.js, systemd: fees-backend)
 if echo "$CHANGED" | grep -qE '^backend/(src/|package(-lock)?\.json|tsconfig)'; then
