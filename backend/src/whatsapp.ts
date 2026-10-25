@@ -106,6 +106,12 @@ export async function startWa() {
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--disable-gpu',
+          // Slim Chromium down: on a 512 MB droplet every helper process counts.
+          '--disable-crash-reporter',
+          '--disable-background-networking',
+          '--disable-component-update',
+          '--no-first-run',
+          '--disable-features=TranslateUA,OptimizationHints',
         ],
       };
 
@@ -116,6 +122,9 @@ export async function startWa() {
       client = new Client({
         authStrategy: new LocalAuth({ dataPath: '.wwebjs_auth' }),
         puppeteer: puppeteerOptions,
+        // Skips an extra CSP pass during startup injection — measurably quicker
+        // protocol init, especially under memory pressure.
+        bypassCSP: true,
       });
 
       client.on('qr', async (qr: string) => {
