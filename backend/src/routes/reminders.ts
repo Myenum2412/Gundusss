@@ -277,7 +277,7 @@ async function executeMonthlyReminders(
     const studentPhone = (student.phone || '').replace(/\D/g, '');
 
     const studentPaymentUrl = `${paymentBaseUrl}?student=${encodeURIComponent(student.studentId)}`;
-    const message = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${student.studentName}*,\n\nThis is your monthly fee reminder for *${student.course || 'Course'}* (${student.group || 'Batch'}).\n\n• Student ID: *${student.studentId}*\n• Monthly Fee: *${amountStr}*\n• Due Date: 5th of this month\n\nPlease tap the Pay Now button below to pay directly via UPI / Card:\n\n— ${companyName} Accounts Desk`;
+    const message = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${student.studentName}*,\n\nThis is your monthly fee reminder for *${student.course || 'Course'}* (${student.group || 'Batch'}).\n\n• Student ID: *${student.studentId}*\n• Monthly Fee: *${amountStr}*\n• Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\n\n— ${companyName} Accounts Desk`;
 
     if (workerMode && studentPhone.length >= 10) {
       if (isWaReady) {

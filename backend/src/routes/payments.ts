@@ -19,6 +19,7 @@ import {
   scopedEntityId,
 } from '../tenant.js';
 import { ensureGatewayUpiSynced } from './payment-settings.js';
+import { getWaState, sendWaMessage } from '../whatsapp.js';
 
 const YOUPI_API = (process.env.YOUPI_PAYMENT_API_URL ?? 'http://localhost:6100').replace(/\/+$/, '');
 const YOUPI_WEBHOOK_SECRET = process.env.YOUPI_WEBHOOK_SECRET ?? '';
@@ -988,6 +989,35 @@ export async function paymentRoutes(app: FastifyInstance) {
           ? `Receipt ${finalOrder.receiptId} created and the fee is marked paid.`
           : 'Payment settled by the gateway.',
       });
+
+      // Automatically send payment receipt confirmation to student WhatsApp if phone is available
+      try {
+        const wa = getWaState();
+        if (wa.status === 'ready') {
+          let recipientPhone = '';
+          if (finalOrder.studentId) {
+            const stuRec = await getRecord<{ phone?: string }>(
+              APPWRITE_COLLECTIONS.students,
+              scopedEntityId(profileId, finalOrder.studentId)
+            );
+            recipientPhone = stuRec?.data?.phone || '';
+          }
+          if (!recipientPhone && payload.metadata && typeof payload.metadata.phone === 'string') {
+            recipientPhone = String(payload.metadata.phone);
+          }
+          if (recipientPhone) {
+            const cleanPhone = recipientPhone.replace(/\D/g, '');
+            if (cleanPhone.length >= 10) {
+              const receiptText = `🎉 *Payment Confirmation - Receipt #${finalOrder.receiptId || 'Paid'}*\n\nDear ${finalOrder.studentName || 'Student / Parent'},\n\nWe have successfully received your fee payment of *₹${finalOrder.amount || payload.amount || '0'}*.\n\n• *Order ID:* ${orderId}\n• *Method:* ${method || 'UPI'}${utr ? `\n• *UTR / Ref:* ${utr}` : ''}\n• *Date:* ${paymentDate(payload.completedAt)}\n• *Status:* Confirmed (Paid)\n\nThank you for your payment!\n— Accounts Desk`;
+              void sendWaMessage(cleanPhone, receiptText).catch((err: any) => {
+                app.log.warn({ err }, 'Could not send WhatsApp payment confirmation');
+              });
+            }
+          }
+        }
+      } catch (err) {
+        // Non-blocking
+      }
     }
 
     return { received: true, event, orderId };

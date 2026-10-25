@@ -405,7 +405,7 @@ export default function RemindersPage() {
     }
 
     const studentPaymentUrl = `${activeProfile?.paymentUrl || "https://myfees.myenum.in/amarnath"}?student=${encodeURIComponent(stu.studentId)}`
-    const bodyText = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${stu.studentName}*,\n\nThis is your monthly fee reminder for *${stu.course || "Course"}* (${stu.group || "Batch"}).\n\n• Student ID: *${stu.studentId}*\n• Monthly Fee: *₹${parseFloat(feeAmount).toLocaleString("en-IN")}*\n• Due Date: 5th of this month\n\nPlease tap the Pay Now button below to pay directly via UPI / Card:\n\n— ${activeProfile?.name || "MyFees"} Accounts Desk`
+    const bodyText = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${stu.studentName}*,\n\nThis is your monthly fee reminder for *${stu.course || "Course"}* (${stu.group || "Batch"}).\n\n• Student ID: *${stu.studentId}*\n• Monthly Fee: *₹${parseFloat(feeAmount).toLocaleString("en-IN")}*\n• Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\n\n— ${activeProfile?.name || "MyFees"} Accounts Desk`
 
     try {
       await sendWaMessage({
@@ -992,7 +992,7 @@ export default function RemindersPage() {
                             </span>
                           </TableCell>
                           <TableCell className="font-semibold tabular-nums">
-                            â‚¹{parseFloat(feeAmount).toLocaleString("en-IN")}
+                            ₹{parseFloat(feeAmount).toLocaleString("en-IN")}
                           </TableCell>
                           <TableCell className="text-right">
                             <Button

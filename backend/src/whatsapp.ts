@@ -396,56 +396,26 @@ async function performSend(
 
   const plainText = message.trim();
 
-  // Pure text + CTA fits in one interactive bubble on modern clients, with a
-  // plain-text safety net when the interactive send is rejected.
-  if (cta) {
-    let sentInteractive = false;
-    try {
-      if (plainText || attachments.length === 0) {
-        const waMsg = buildCtaUrlMessage(
-          jid,
-          plainText || `Tap the button below to continue.`,
-          'MyFees · Payment & updates',
-          cta
-        );
-        const msgId = waMsg.key?.id || ('3EB0' + randomBytes(8).toString('hex').toUpperCase());
-        await s.relayMessage(jid, waMsg.message, { messageId: msgId });
-        firstId = msgId;
-        sentInteractive = true;
-      }
-    } catch (err: any) {
-      console.log(`[wa] cta_url relayMessage failed: ${err?.message ?? err}`);
+  // Format message text, appending CTA link if present.
+  // We use standard WhatsApp text messages (sock.sendMessage) because interactive
+  // nativeFlowMessage buttons are silently dropped by Meta WhatsApp clients
+  // on iOS/Android when sent from non-business Web companion devices.
+  let textToSend = plainText;
+  if (cta && cta.url) {
+    const ctaSection = `\n\n💳 *${cta.displayText || 'Pay Now'}:*\n👉 ${cta.url}`;
+    if (!textToSend) {
+      textToSend = `💳 *${cta.displayText || 'Pay Now'}:*\n👉 ${cta.url}`;
+    } else if (!textToSend.includes(cta.url)) {
+      textToSend = `${textToSend}${ctaSection}`;
     }
-
-    if (!sentInteractive) {
-      if (plainText) {
-        const fallbackText = `${plainText}\n\n👉 ${cta.displayText}: ${cta.url}`;
-        const sent = await s.sendMessage(jid, { text: fallbackText });
-        firstId = firstId ?? sent?.key?.id ?? null;
-      } else {
-        const sent = await s.sendMessage(jid, { text: cta.url });
-        firstId = firstId ?? sent?.key?.id ?? null;
-      }
-    }
-    for (const att of attachments) {
-      const buf = Buffer.from(att.data, 'base64');
-      const sent = await s.sendMessage(
-        jid,
-        att.mime.startsWith('image/')
-          ? { image: buf, caption: att.name }
-          : att.mime.startsWith('video/')
-            ? { video: buf, mimetype: att.mime, fileName: att.name }
-            : { document: buf, mimetype: att.mime, fileName: att.name }
-      );
-      firstId = firstId ?? sent?.key?.id ?? null;
-    }
-    return { id: firstId };
   }
 
-  if (plainText) {
-    const sent = await s.sendMessage(jid, { text: plainText });
+  if (textToSend) {
+    const sent = await s.sendMessage(jid, { text: textToSend });
     firstId = sent?.key?.id ?? null;
+    console.log(`[wa] Sent text message to ${jid} (id: ${firstId})`);
   }
+
   for (const att of attachments) {
     const buf = Buffer.from(att.data, 'base64');
     const sent = await s.sendMessage(
@@ -457,7 +427,9 @@ async function performSend(
           : { document: buf, mimetype: att.mime, fileName: att.name }
     );
     firstId = firstId ?? sent?.key?.id ?? null;
+    console.log(`[wa] Sent attachment ${att.name} to ${jid}`);
   }
+
   return { id: firstId };
 }
 
