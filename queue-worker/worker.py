@@ -59,6 +59,9 @@ def post(path: str, payload: dict | None = None) -> dict | None:
             if res.status_code in (401, 403, 503):
                 log(f"{path} -> {res.status_code} (fatal auth/config)")
                 return None
+            if res.status_code not in (200, 202):
+                log(f"{path} -> unexpected {res.status_code}: {res.text[:200]}")
+                return None
             body = {}
             try:
                 body = res.json()
@@ -132,11 +135,13 @@ def process_job(job: dict) -> None:
         results.append(
             {
                 "phone": phone,
-                "studentId": item.get("studentId"),
                 "delivered": delivered,
-                "error": error,
             }
         )
+        if item.get("studentId"):
+            results[-1]["studentId"] = str(item["studentId"])
+        if error:
+            results[-1]["error"] = str(error)
         log(f"job {job_id}: item {idx + 1}/{len(items)} -> {phone}: "
             f"{'delivered' if delivered else f'FAILED ({error})'}")
 

@@ -7,10 +7,13 @@ import { sendWaMessage } from '../whatsapp.js';
 import type { ReminderRunLog } from './reminders.js';
 
 const ResultItemSchema = z.object({
-  phone: z.string().min(7).max(20),
-  studentId: z.string().max(60).optional(),
+  // The worker may report a per-item failure without a dialable phone; the
+  // merge step simply skips unmatched phones. Nulls are allowed because
+  // Python's json.dumps serialises None as null (never undefined).
+  phone: z.string().max(20),
+  studentId: z.string().max(60).nullish(),
   delivered: z.boolean(),
-  error: z.string().max(500).optional(),
+  error: z.string().max(500).nullish(),
 });
 
 const ResultSchema = z.object({
@@ -132,9 +135,9 @@ async function mergeResultsIntoLog(
   profileId: string,
   results: Array<{
     phone: string;
-    studentId?: string;
+    studentId?: string | null;
     delivered: boolean;
-    error?: string;
+    error?: string | null;
   }>
 ): Promise<boolean> {
   const record = await getRecord<{
