@@ -19,7 +19,8 @@ import {
   scopedEntityId,
 } from '../tenant.js';
 import { ensureGatewayUpiSynced } from './payment-settings.js';
-import { getWaState, sendWaMessage } from '../whatsapp.js';
+import { getWaState, sendWaMessage, type WaAttachment } from '../whatsapp.js';
+import { generateReceiptPdf } from '../receipt-pdf.js';
 
 const YOUPI_API = (process.env.YOUPI_PAYMENT_API_URL ?? 'http://localhost:6100').replace(/\/+$/, '');
 const YOUPI_WEBHOOK_SECRET = process.env.YOUPI_WEBHOOK_SECRET ?? '';
@@ -1008,8 +1009,56 @@ export async function paymentRoutes(app: FastifyInstance) {
           if (recipientPhone) {
             const cleanPhone = recipientPhone.replace(/\D/g, '');
             if (cleanPhone.length >= 10) {
-              const receiptText = `🎉 *Payment Confirmation - Receipt #${finalOrder.receiptId || 'Paid'}*\n\nDear ${finalOrder.studentName || 'Student / Parent'},\n\nWe have successfully received your fee payment of *₹${finalOrder.amount || payload.amount || '0'}*.\n\n• *Order ID:* ${orderId}\n• *Method:* ${method || 'UPI'}${utr ? `\n• *UTR / Ref:* ${utr}` : ''}\n• *Date:* ${paymentDate(payload.completedAt)}\n• *Status:* Confirmed (Paid)\n\nThank you for your payment!\n— Accounts Desk`;
-              void sendWaMessage(cleanPhone, receiptText).catch((err: any) => {
+              const receiptText = `🎉 *Payment Confirmation - Receipt #${finalOrder.receiptId || 'Paid'}*\n\nDear ${finalOrder.studentName || 'Student / Parent'},\n\nWe have successfully received your fee payment of *₹${finalOrder.amount || payload.amount || '0'}*.\n\n• *Order ID:* ${orderId}\n• *Method:* ${method || 'UPI'}${utr ? `\n• *UTR / Ref:* ${utr}` : ''}\n• *Date:* ${paymentDate(payload.completedAt)}\n• *Status:* Confirmed (Paid)\n\nPlease find your official fee payment receipt attached in PDF format.\n\nThank you for your payment!\n— Accounts Desk`;
+
+              const attachments: WaAttachment[] = [];
+              try {
+                let studentData: any = {};
+                if (finalOrder.studentId) {
+                  const stuRec = await getRecord<any>(
+                    APPWRITE_COLLECTIONS.students,
+                    scopedEntityId(profileId, finalOrder.studentId)
+                  );
+                  if (stuRec?.data) studentData = stuRec.data;
+                }
+
+                let orgName = 'MyFees Learning Center';
+                const prof = await getProfile(profileId);
+                if (prof?.name) orgName = prof.name;
+
+                const pdfBuffer = await generateReceiptPdf({
+                  receiptId: finalOrder.receiptId || orderId,
+                  paymentDate: paymentDate(payload.completedAt),
+                  amount: finalOrder.amount || payload.amount || '0',
+                  method: method || 'UPI',
+                  status: 'Paid',
+                  orderId,
+                  utr,
+                  notes: `Fee payment confirmation for ${finalOrder.studentName || 'Student'}`,
+                  student: {
+                    studentId: finalOrder.studentId || '—',
+                    studentName: finalOrder.studentName || studentData.studentName || 'Student',
+                    phone: recipientPhone,
+                    course: studentData.course || '',
+                    group: studentData.group || '',
+                    branch: studentData.branch || '',
+                    guardian: studentData.guardian || '',
+                  },
+                  organization: {
+                    name: orgName,
+                  },
+                });
+
+                attachments.push({
+                  name: `Receipt_${finalOrder.receiptId || orderId}.pdf`,
+                  mime: 'application/pdf',
+                  data: pdfBuffer.toString('base64'),
+                });
+              } catch (pdfErr) {
+                app.log.warn({ pdfErr }, 'Could not generate receipt PDF for WhatsApp send');
+              }
+
+              void sendWaMessage(cleanPhone, receiptText, attachments).catch((err: any) => {
                 app.log.warn({ err }, 'Could not send WhatsApp payment confirmation');
               });
             }

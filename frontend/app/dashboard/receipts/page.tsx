@@ -46,9 +46,19 @@ import {
 import {
   loadReceipts,
   saveReceipts,
+  downloadReceiptPdf,
+  sendReceiptPdfWhatsApp,
   type StoredReceipt,
 } from "@/lib/receipts-store"
-import { PlusIcon, ReceiptIcon } from "lucide-react"
+import {
+  CheckCircle2Icon,
+  FileDownIcon,
+  Loader2Icon,
+  MessageSquareIcon,
+  PlusIcon,
+  ReceiptIcon,
+  XIcon,
+} from "lucide-react"
 
 const selectClassName =
   "h-9 w-full min-w-0 rounded-[10px] border border-input bg-card px-3 py-1 text-sm shadow-[0_1px_2px_rgba(16,24,40,0.04)] outline-none transition-[border-color,box-shadow] duration-200 hover:border-foreground/20 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
@@ -84,6 +94,10 @@ export default function ReceiptsPage() {
   const [viewReceipt, setViewReceipt] = useState<StoredReceipt | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
+  const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null)
+  const [sendingWaPdf, setSendingWaPdf] = useState<string | null>(null)
+  const [autoSendWa, setAutoSendWa] = useState(true)
+  const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null)
 
   const reloadReceipts = useCallback(() => {
     if (isSyncing()) return
@@ -175,10 +189,15 @@ export default function ReceiptsPage() {
     const student = availableStudents.find(
       (s) => s.studentId === form.studentId
     )
+    const targetReceiptId =
+      editingIndex !== null
+        ? receipts[editingIndex]?.receiptId ?? nextReceiptId(nextId)
+        : nextReceiptId(nextId)
+
     if (editingIndex !== null) {
       const prev = receipts[editingIndex]
       const updated: StoredReceipt = {
-        receiptId: prev?.receiptId ?? nextReceiptId(nextId),
+        receiptId: targetReceiptId,
         studentId: form.studentId,
         studentName: student?.studentName ?? prev?.studentName ?? form.studentId,
         amount: form.amount,
@@ -191,7 +210,7 @@ export default function ReceiptsPage() {
       setEditingIndex(null)
     } else {
       const receipt: StoredReceipt = {
-        receiptId: nextReceiptId(nextId),
+        receiptId: targetReceiptId,
         studentId: form.studentId,
         studentName: student?.studentName ?? form.studentId,
         amount: form.amount,
@@ -203,8 +222,55 @@ export default function ReceiptsPage() {
       setReceipts((r) => [...r, receipt])
       setNextId((n) => n + 1)
     }
+
+    if (autoSendWa && form.status === "Paid" && student?.phone) {
+      const phoneToSend = student.phone
+      const sName = student.studentName
+      setTimeout(async () => {
+        try {
+          await sendReceiptPdfWhatsApp(targetReceiptId, phoneToSend)
+          setNotice({
+            tone: "success",
+            text: `Receipt #${targetReceiptId} saved and official PDF sent to ${sName}'s WhatsApp (${phoneToSend})!`,
+          })
+        } catch (err: any) {
+          console.warn("Could not auto-send WhatsApp receipt PDF", err)
+        }
+      }, 700)
+    }
+
     setForm(initialForm)
     setOpen(false)
+  }
+
+  async function handleDownloadPdf(receiptId: string) {
+    setDownloadingPdf(receiptId)
+    try {
+      await downloadReceiptPdf(receiptId)
+    } catch (err: any) {
+      alert(err?.message || "Could not download receipt PDF")
+    } finally {
+      setDownloadingPdf(null)
+    }
+  }
+
+  async function handleSendWaPdf(receipt: StoredReceipt) {
+    setSendingWaPdf(receipt.receiptId)
+    const student = availableStudents.find((s) => s.studentId === receipt.studentId)
+    try {
+      const res = await sendReceiptPdfWhatsApp(receipt.receiptId, student?.phone)
+      setNotice({
+        tone: "success",
+        text: `Receipt #${receipt.receiptId} PDF successfully sent to WhatsApp (+${res.sentTo})!`,
+      })
+    } catch (err: any) {
+      setNotice({
+        tone: "error",
+        text: err?.message || "Failed to send receipt PDF via WhatsApp",
+      })
+    } finally {
+      setSendingWaPdf(null)
+    }
   }
 
   function openEdit(index: number) {
@@ -266,7 +332,7 @@ export default function ReceiptsPage() {
     <DashboardShell trail={[{ label: "Dashboard", href: "/dashboard" }, { label: "Receipts" }]}>
       <PageHeader
         title="Receipts"
-        description="Record fee payments. Every receipt is listed below with student and method."
+        description="Record fee payments, download official PDF receipts, and auto-send receipts to students via WhatsApp."
         meta={
           <span className="flex items-center gap-2">
             <span className="inline-flex h-6 items-center rounded-full border bg-card px-2.5 text-xs font-medium text-muted-foreground">
@@ -424,6 +490,18 @@ export default function ReceiptsPage() {
                       rows={3}
                     />
                   </Field>
+
+                  <Field className="md:col-span-2">
+                    <label className="flex items-center gap-2.5 cursor-pointer rounded-xl border bg-muted/20 p-3 text-xs font-medium text-foreground hover:bg-muted/30 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={autoSendWa}
+                        onChange={(e) => setAutoSendWa(e.target.checked)}
+                        className="size-4 accent-primary rounded cursor-pointer"
+                      />
+                      <span>Auto-send official PDF receipt to student via WhatsApp when saved as Paid</span>
+                    </label>
+                  </Field>
                 </div>
 
                 <DialogFooter>
@@ -468,6 +546,38 @@ export default function ReceiptsPage() {
                     </DetailItem>
                     <DetailItem label="Notes">{viewReceipt.notes || "—"}</DetailItem>
                   </DetailList>
+
+                  <div className="mt-6 flex flex-wrap items-center gap-2 border-t pt-4">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDownloadPdf(viewReceipt.receiptId)}
+                      disabled={downloadingPdf === viewReceipt.receiptId}
+                      className="gap-1.5"
+                    >
+                      {downloadingPdf === viewReceipt.receiptId ? (
+                        <Loader2Icon className="size-3.5 animate-spin" />
+                      ) : (
+                        <FileDownIcon className="size-3.5" />
+                      )}
+                      Download PDF
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => handleSendWaPdf(viewReceipt)}
+                      disabled={sendingWaPdf === viewReceipt.receiptId}
+                      className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                    >
+                      {sendingWaPdf === viewReceipt.receiptId ? (
+                        <Loader2Icon className="size-3.5 animate-spin" />
+                      ) : (
+                        <MessageSquareIcon className="size-3.5" />
+                      )}
+                      Send PDF via WhatsApp
+                    </Button>
+                  </div>
                 </div>
               )}
             </DialogContent>
@@ -488,6 +598,28 @@ export default function ReceiptsPage() {
           </>
         }
       />
+
+      {notice && (
+        <div
+          className={`mb-4 flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${
+            notice.tone === "success"
+              ? "border-emerald-600/20 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+              : "border-destructive/20 bg-destructive/10 text-destructive"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <CheckCircle2Icon className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <span>{notice.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="rounded p-1 opacity-70 hover:opacity-100 cursor-pointer"
+          >
+            <XIcon className="size-4" />
+          </button>
+        </div>
+      )}
 
       <Stats01 stats={stats} />
 
@@ -532,11 +664,41 @@ export default function ReceiptsPage() {
                       <StatusBadge value={r.status} />
                     </TableCell>
                     <TableCell className="text-right">
-                      <RowActions
-                        onView={() => setViewReceipt(r)}
-                        onEdit={() => openEdit(i)}
-                        onDelete={() => setDeleteIndex(i)}
-                      />
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          title="Download PDF Receipt"
+                          className="size-8 text-primary hover:bg-primary/10 cursor-pointer"
+                          onClick={() => handleDownloadPdf(r.receiptId)}
+                          disabled={downloadingPdf === r.receiptId}
+                        >
+                          {downloadingPdf === r.receiptId ? (
+                            <Loader2Icon className="size-3.5 animate-spin" />
+                          ) : (
+                            <FileDownIcon className="size-4" />
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          title="Send PDF to Student WhatsApp"
+                          className="size-8 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 cursor-pointer"
+                          onClick={() => handleSendWaPdf(r)}
+                          disabled={sendingWaPdf === r.receiptId}
+                        >
+                          {sendingWaPdf === r.receiptId ? (
+                            <Loader2Icon className="size-3.5 animate-spin" />
+                          ) : (
+                            <MessageSquareIcon className="size-4" />
+                          )}
+                        </Button>
+                        <RowActions
+                          onView={() => setViewReceipt(r)}
+                          onEdit={() => openEdit(i)}
+                          onDelete={() => setDeleteIndex(i)}
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))

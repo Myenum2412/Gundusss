@@ -2,10 +2,14 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   APPWRITE_COLLECTIONS,
+  getRecord,
   listScopedRecords,
   replaceScopedRecords,
 } from '../appwrite.js';
-import { resolveProfileId } from '../profiles.js';
+import { getProfile, resolveProfileId } from '../profiles.js';
+import { scopedEntityId } from '../tenant.js';
+import { sendWaMessage } from '../whatsapp.js';
+import { generateReceiptPdf, type ReceiptPdfData } from '../receipt-pdf.js';
 
 const str = (max = 500) => z.string().max(max).default('');
 const strArray = z.array(z.string().max(200)).default([]);
@@ -226,6 +230,146 @@ export async function collectionsRoutes(app: FastifyInstance) {
       }))
     );
     return { data: { count: parsed.data.items.length } };
+  });
+
+  async function buildReceiptPdfData(
+    profileId: string,
+    receipt: Receipt
+  ): Promise<ReceiptPdfData> {
+    let studentData: any = {};
+    if (receipt.studentId) {
+      const stuRec = await getRecord<any>(
+        APPWRITE_COLLECTIONS.students,
+        scopedEntityId(profileId, receipt.studentId)
+      );
+      if (stuRec?.data) {
+        studentData = stuRec.data;
+      }
+    }
+
+    let orgData: any = {};
+    const bizRec = await getRecord<any>(
+      APPWRITE_COLLECTIONS.businessProfiles,
+      scopedEntityId(profileId, '1')
+    );
+    if (bizRec?.data?.profile) {
+      const bp = bizRec.data.profile;
+      orgData = {
+        name: bp.name,
+        email: bp.email,
+        phone: bp.phone,
+        website: bp.website,
+        address: bp.location?.addressLine1,
+        city: bp.location?.city,
+        state: bp.location?.state,
+      };
+    }
+
+    if (!orgData.name) {
+      const prof = await getProfile(profileId);
+      orgData.name = prof?.name || 'MyFees Learning Center';
+    }
+
+    return {
+      receiptId: receipt.receiptId,
+      paymentDate: receipt.paymentDate,
+      amount: receipt.amount,
+      method: receipt.method || 'Cash',
+      status: receipt.status || 'Paid',
+      notes: receipt.notes,
+      student: {
+        studentId: receipt.studentId,
+        studentName: receipt.studentName || studentData.studentName || 'Student',
+        phone: studentData.phone || '',
+        email: studentData.email || '',
+        course: studentData.course || '',
+        group: studentData.group || '',
+        branch: studentData.branch || '',
+        guardian: studentData.guardian || '',
+      },
+      organization: orgData,
+    };
+  }
+
+  // GET /api/receipts/:receiptId/pdf — download or view receipt as PDF
+  app.get('/api/receipts/:receiptId/pdf', async (req, reply) => {
+    const { receiptId } = req.params as { receiptId: string };
+    const profileId = await resolveProfileId(req);
+
+    const record = await getRecord<Receipt>(
+      APPWRITE_COLLECTIONS.receipts,
+      scopedEntityId(profileId, receiptId)
+    );
+    if (!record?.data) {
+      return reply.code(404).send({ error: 'Receipt not found' });
+    }
+
+    const pdfData = await buildReceiptPdfData(profileId, record.data);
+    const pdfBuffer = await generateReceiptPdf(pdfData);
+
+    return reply
+      .header('Content-Type', 'application/pdf')
+      .header(
+        'Content-Disposition',
+        `inline; filename="Receipt-${receiptId}.pdf"`
+      )
+      .send(pdfBuffer);
+  });
+
+  // POST /api/receipts/:receiptId/send-pdf — send receipt PDF via WhatsApp
+  app.post('/api/receipts/:receiptId/send-pdf', async (req, reply) => {
+    const { receiptId } = req.params as { receiptId: string };
+    const profileId = await resolveProfileId(req);
+
+    const record = await getRecord<Receipt>(
+      APPWRITE_COLLECTIONS.receipts,
+      scopedEntityId(profileId, receiptId)
+    );
+    if (!record?.data) {
+      return reply.code(404).send({ error: 'Receipt not found' });
+    }
+
+    const receipt = record.data;
+    const pdfData = await buildReceiptPdfData(profileId, receipt);
+
+    const recipientPhone = (req.body as any)?.phone || pdfData.student.phone;
+    if (!recipientPhone) {
+      return reply.code(400).send({
+        error:
+          'No phone number available for this student. Please add a phone number first.',
+      });
+    }
+
+    const cleanPhone = String(recipientPhone).replace(/\D/g, '');
+    if (cleanPhone.length < 10) {
+      return reply.code(400).send({
+        error: `Invalid recipient phone number: ${recipientPhone}`,
+      });
+    }
+
+    const pdfBuffer = await generateReceiptPdf(pdfData);
+    const pdfBase64 = pdfBuffer.toString('base64');
+
+    const messageText = `🎉 *Payment Receipt #${receipt.receiptId}*\n\nDear ${pdfData.student.studentName},\n\nThank you for your payment! Please find your official payment receipt PDF attached for your records.\n\n• *Receipt ID:* ${receipt.receiptId}\n• *Amount:* ₹${receipt.amount}\n• *Method:* ${receipt.method || 'Cash / UPI'}\n• *Date:* ${receipt.paymentDate || '—'}\n• *Status:* Confirmed (Paid)\n\n— ${pdfData.organization.name || 'Accounts Desk'}`;
+
+    try {
+      const waResult = await sendWaMessage(
+        cleanPhone,
+        messageText,
+        [
+          {
+            name: `Receipt_${receipt.receiptId}.pdf`,
+            mime: 'application/pdf',
+            data: pdfBase64,
+          },
+        ]
+      );
+      return { ok: true, sentTo: cleanPhone, messageId: waResult.id };
+    } catch (err: any) {
+      return reply.code(500).send({
+        error: `Failed to send WhatsApp message: ${err?.message || String(err)}`,
+      });
+    }
   });
 
   // ---- Announcements ----

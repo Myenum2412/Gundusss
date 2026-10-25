@@ -1,4 +1,5 @@
 import { getCollection, replaceCollection } from "./api";
+import { apiFetch } from "./api-base";
 import { trackSync } from "./live";
 
 export interface StoredReceipt {
@@ -24,4 +25,39 @@ export async function saveReceipts(receipts: StoredReceipt[]): Promise<void> {
   } catch (error) {
     console.error("Failed to save receipts", error);
   }
+}
+
+export async function downloadReceiptPdf(receiptId: string): Promise<void> {
+  const res = await apiFetch(`/api/receipts/${encodeURIComponent(receiptId)}/pdf`);
+  if (!res.ok) {
+    throw new Error(`Failed to download PDF (${res.status})`);
+  }
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Receipt-${receiptId}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+}
+
+export async function sendReceiptPdfWhatsApp(
+  receiptId: string,
+  phone?: string
+): Promise<{ ok: boolean; sentTo?: string; error?: string }> {
+  const res = await apiFetch(
+    `/api/receipts/${encodeURIComponent(receiptId)}/send-pdf`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone }),
+    }
+  );
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json.error || "Failed to send WhatsApp receipt");
+  }
+  return json;
 }
