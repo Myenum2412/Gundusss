@@ -5,9 +5,10 @@ import QRCode from 'qrcode';
 
 const require = createRequire(import.meta.url);
 // whatsapp-web.js is CommonJS; load via require for reliable ESM interop.
-const { Client, LocalAuth } = require('whatsapp-web.js') as {
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js') as {
   Client: new (opts: any) => any;
   LocalAuth: new (opts: any) => any;
+  MessageMedia: new (mime: string, data: string, filename?: string) => any;
 };
 
 export type WaStatus =
@@ -83,6 +84,19 @@ export async function startWa() {
   status = 'starting';
   lastError = null;
 
+  // A previous puppeteer/Chromium instance may still be alive after an error
+  // or disconnect. Starting a new client while its user-data dir is locked
+  // fails with "The browser is already running for <userDataDir>" — destroy
+  // the old driver first so the profile lock is released.
+  if (client) {
+    try {
+      await client.destroy();
+    } catch {
+      // stale driver may be half-dead; the profile lock dies with the process
+    }
+    client = null;
+  }
+
   try {
     if (!client) {
       const execPath = findChromeExecutable();
@@ -134,6 +148,17 @@ export async function startWa() {
         qrDataUrl = null;
         lastError = typeof reason === 'string' ? reason : null;
         starting = false;
+        // Release the browser immediately so a later start cannot hit the
+        // profile lock ("browser is already running").
+        const stale = client;
+        client = null;
+        try {
+          void (async () => {
+            await stale?.destroy();
+          })().catch(() => undefined);
+        } catch {
+          // ignore
+        }
       });
     }
 
@@ -186,7 +211,18 @@ export function normalizeWaNumber(input: string): string {
   return digits;
 }
 
-export async function sendWaMessage(to: string, message: string) {
+export interface WaAttachment {
+  name: string;
+  mime: string;
+  /** base64 payload (no data: URL prefix) */
+  data: string;
+}
+
+export async function sendWaMessage(
+  to: string,
+  message: string,
+  attachments: WaAttachment[] = []
+) {
   if (!client || status !== 'ready') {
     const err = new Error(
       'WhatsApp is not connected. Scan the QR code on the Settings page first.'
@@ -206,18 +242,41 @@ export async function sendWaMessage(to: string, message: string) {
   // actionable error ("number not on WhatsApp") instead of the cryptic
   // "No LID for user" protocol error from a blind sendMessage call.
   const chatId = `${digits}@c.us`;
-  if (typeof client.getNumberId === 'function') {
-    const resolved = await client.getNumberId(chatId);
-    if (!resolved?._serialized) {
-      const err = new Error(
-        `Phone number +${digits} could not be resolved on WhatsApp. Check that the country code is correct and the number is registered on WhatsApp.`
-      ) as Error & { statusCode?: number };
-      err.statusCode = 400;
-      throw err;
-    }
-    const sent: any = await client.sendMessage(resolved._serialized, message);
-    return { id: sent?.id?._serialized ?? sent?.id ?? null, to: digits };
+  const target =
+    typeof client.getNumberId === 'function'
+      ? await client.getNumberId(chatId)
+      : null;
+  const resolvedId = target?._serialized ?? chatId;
+  if (target !== null && !target?._serialized) {
+    const err = new Error(
+      `Phone number +${digits} could not be resolved on WhatsApp. Check that the country code is correct and the number is registered on WhatsApp.`
+    ) as Error & { statusCode?: number };
+    err.statusCode = 400;
+    throw err;
   }
-  const sent: any = await client.sendMessage(chatId, message);
-  return { id: sent?.id?._serialized ?? sent?.id ?? null, to: digits };
+  if (!message.trim() && attachments.length > 0) {
+    // File-only send: the first file carries no caption.
+    const media = new MessageMedia(
+      attachments[0].mime,
+      attachments[0].data,
+      attachments[0].name
+    );
+    const sent: any = await client.sendMessage(resolvedId, media);
+    const ids: (string | null)[] = [sent?.id?._serialized ?? sent?.id ?? null];
+    for (const att of attachments.slice(1)) {
+      const next = new MessageMedia(att.mime, att.data, att.name);
+      const more: any = await client.sendMessage(resolvedId, next);
+      ids.push(more?.id?._serialized ?? more?.id ?? null);
+    }
+    return { id: ids[0] ?? null, to: digits };
+  }
+  const sent: any = await client.sendMessage(resolvedId, message);
+  const firstId = sent?.id?._serialized ?? sent?.id ?? null;
+  // Text is delivered first; attachments follow as their own messages so a
+  // single unsupported file cannot swallow the whole announcement.
+  for (const att of attachments) {
+    const media = new MessageMedia(att.mime, att.data, att.name);
+    await client.sendMessage(resolvedId, media);
+  }
+  return { id: firstId, to: digits };
 }

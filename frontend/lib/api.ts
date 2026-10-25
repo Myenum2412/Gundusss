@@ -70,6 +70,8 @@ export function logoutWa(): Promise<WaState> {
 export async function sendWaMessage(input: {
   to: string;
   message: string;
+  /** Optional base64 file payload sent right after the text message. */
+  attachment?: { name: string; mime: string; data: string };
 }): Promise<{ id: string | null; to: string }> {
   const res = await apiFetch('/api/whatsapp/send', {
     method: 'POST',

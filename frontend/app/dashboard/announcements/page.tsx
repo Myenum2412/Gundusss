@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
 import { StatusBadge } from "@/components/status-badge"
 import { EmptyState } from "@/components/empty-state"
@@ -40,10 +40,12 @@ import {
   type StoredAnnouncement,
 } from "@/lib/announcements-store"
 import { sendWaMessage } from "@/lib/api"
-import { MegaphoneIcon, PlusIcon } from "lucide-react"
+import { MegaphoneIcon, PaperclipIcon, PlusIcon, X } from "lucide-react"
 
 const textareaClassName =
   "min-h-20 w-full min-w-0 rounded-[10px] border border-input bg-card px-3 py-2 text-sm shadow-[0_1px_2px_rgba(16,24,40,0.04)] outline-none transition-[border-color,box-shadow] duration-200 placeholder:text-muted-foreground/70 hover:border-foreground/20 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+
+const MAX_FILE_BYTES = 3 * 1024 * 1024 // 3 MB per file (base64 must fit the API body limit)
 
 const initialForm = {
   title: "",
@@ -53,6 +55,19 @@ const initialForm = {
 
 function nextAnnouncementId(n: number) {
   return `ANN-${String(n).padStart(3, "0")}`
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = String(reader.result ?? "")
+      const comma = result.indexOf(",")
+      resolve(comma >= 0 ? result.slice(comma + 1) : result)
+    }
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"))
+    reader.readAsDataURL(file)
+  })
 }
 
 export default function AnnouncementsPage() {
@@ -70,6 +85,31 @@ export default function AnnouncementsPage() {
   const [viewItem, setViewItem] = useState<StoredAnnouncement | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
+  const [files, setFiles] = useState<File[]>([])
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  function addFiles(selected: FileList | null) {
+    if (!selected || selected.length === 0) return
+    const incoming = Array.from(selected)
+    const tooBig = incoming.filter((f) => f.size > MAX_FILE_BYTES)
+    setFormError("")
+    setFiles((prev) => [
+      ...prev,
+      ...incoming
+        .filter((f) => f.size <= MAX_FILE_BYTES)
+        .filter((f) => !prev.some((p) => p.name === f.name && p.size === f.size)),
+    ])
+    if (tooBig.length > 0) {
+      setFormError(
+        `Attachment skipped (over 3 MB): ${tooBig.map((f) => f.name).join(", ")}`
+      )
+    }
+  }
+
+  function clearFiles() {
+    setFiles([])
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
 
   const reloadAnnouncements = useCallback(() => {
     if (isSyncing()) return
@@ -133,6 +173,10 @@ export default function AnnouncementsPage() {
       setFormError("Select at least one student.")
       return
     }
+    if (!form.message.trim() && files.length === 0) {
+      setFormError("Write a message or attach a file.")
+      return
+    }
     setFormError("")
 
     // Editing updates the saved record without re-sending on WhatsApp.
@@ -159,13 +203,29 @@ export default function AnnouncementsPage() {
       )
       setEditingIndex(null)
       setForm(initialForm)
+      clearFiles()
       setOpen(false)
       return
     }
 
     setSending(true)
 
-    // Send orderly: one recipient at a time, in list order.
+    // turn every selected file into its base64 payload once, then reuse for
+    // every recipient
+    const base64Sizes: { name: string; mime: string; size: number }[] = []
+    const attachmentsForSend = [] as { name: string; mime: string; data: string }[]
+    for (const file of files) {
+      try {
+        const data = await fileToBase64(file)
+        attachmentsForSend.push({ name: file.name, mime: file.type || "application/octet-stream", data })
+        base64Sizes.push({ name: file.name, mime: file.type ?? "", size: file.size })
+      } catch {
+        // unreadable file — skip
+      }
+    }
+
+    // Send orderly: one recipient at a time, in list order. Text goes first;
+    // every attachment follows as its own message.
     let sent = 0
     let failed = 0
     const names: string[] = []
@@ -173,11 +233,15 @@ export default function AnnouncementsPage() {
       const s = availableStudents.find((st) => st.studentId === id)
       names.push(s ? `${s.studentName} (${s.studentId})` : id)
       try {
-        await sendWaMessage({
-          to: s?.phone ?? id,
-          message: `*${form.title}*\n${form.message}`,
-        })
-        sent += 1
+        if (form.message.trim()) {
+          await sendWaMessage({ to: s?.phone ?? id, message: `*${form.title}*\n${form.message}` })
+        }
+        for (const att of attachmentsForSend) {
+          await sendWaMessage({ to: s?.phone ?? id, message: att === attachmentsForSend[0] && !form.message.trim() ? form.title : "", attachment: att })
+        }
+        if (form.message.trim() || attachmentsForSend.length > 0) {
+          sent += 1
+        }
       } catch {
         failed += 1
       }
@@ -189,6 +253,7 @@ export default function AnnouncementsPage() {
       message: form.message,
       recipientIds: [...form.studentIds],
       recipientNames: names,
+      attachments: base64Sizes.map((f) => ({ name: f.name, mime: f.mime })),
       sentCount: sent,
       failedCount: failed,
       status: failed === 0 ? "Sent" : sent === 0 ? "Failed" : "Partial",
@@ -197,6 +262,7 @@ export default function AnnouncementsPage() {
     setItems((prev) => [...prev, record])
     setNextId((n) => n + 1)
     setForm(initialForm)
+    clearFiles()
     setSending(false)
     setOpen(false)
   }
@@ -209,6 +275,7 @@ export default function AnnouncementsPage() {
       message: a.message,
       studentIds: [...a.recipientIds],
     })
+    clearFiles()
     setFormError("")
     setEditingIndex(index)
     setOpen(true)
@@ -222,6 +289,7 @@ export default function AnnouncementsPage() {
     setForm(initialForm)
     setFormError("")
     setEditingIndex(null)
+    clearFiles()
     setOpen(false)
   }
 
@@ -275,11 +343,12 @@ export default function AnnouncementsPage() {
                 setForm(initialForm)
                 setFormError("")
                 setEditingIndex(null)
+                clearFiles()
               }
               setOpen(v)
             }}
           >
-            <DialogTrigger render={<Button />}>
+                <DialogTrigger render={<Button />}>
               <PlusIcon />
               New Announcement
             </DialogTrigger>
@@ -316,8 +385,64 @@ export default function AnnouncementsPage() {
                       value={form.message}
                       onChange={(e) => setForm((f) => ({ ...f, message: e.target.value }))}
                       rows={4}
-                      required
                     />
+                  </Field>
+                  <Field>
+                    <FieldLabel>
+                      Attachments (optional) — delivered right after the message
+                    </FieldLabel>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      className="sr-only"
+                      id="announcement-files"
+                      onChange={(e) => {
+                        addFiles(e.target.files)
+                        // allow re-selecting the same file(s) later
+                        e.target.value = ""
+                      }}
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+                        <PaperclipIcon />
+                        Choose files
+                      </Button>
+                      {(files.length > 0 || formError.startsWith("Attachment skipped")) && (
+                        <Button type="button" variant="ghost" size="sm" onClick={clearFiles}>
+                          <X />
+                          Clear all
+                        </Button>
+                      )}
+                    </div>
+                    {files.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {files.map((f, i) => (
+                          <span
+                            key={`${f.name}-${f.size}-${i}`}
+                            className="inline-flex max-w-full items-center gap-1 rounded-full border bg-card px-2.5 py-1 text-xs text-muted-foreground"
+                          >
+                            <span className="max-w-56 truncate font-medium text-foreground" title={f.name}>
+                              {f.name}
+                            </span>
+                            <span className="shrink-0">
+                              {(f.size / 1024).toFixed(0)} KB
+                            </span>
+                            <button
+                              type="button"
+                              className="shrink-0 rounded-full p-0.5 hover:bg-muted"
+                              onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                              aria-label={`Remove ${f.name}`}
+                            >
+                              <X className="size-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Images, PDFs, docs — up to 3 MB per file.
+                    </p>
                   </Field>
                   <Field>
                     <FieldLabel>Students ({form.studentIds.length} of {availableStudents.length} selected)</FieldLabel>
@@ -445,6 +570,13 @@ export default function AnnouncementsPage() {
                     <DetailItem label="Title">{viewItem.title}</DetailItem>
                     <DetailItem label="Announcement ID">{viewItem.announcementId}</DetailItem>
                     <DetailItem label="Message">{viewItem.message || "—"}</DetailItem>
+                    <DetailItem label="Attachments">
+                      {!viewItem.attachments || viewItem.attachments.length === 0
+                        ? "—"
+                        : viewItem.attachments
+                            .map((a) => `${a.name} (${a.mime.split("/")[0] || "file"})`)
+                            .join(", ")}
+                    </DetailItem>
                     <DetailItem label="Recipients">
                       {viewItem.recipientNames.length === 0
                         ? "—"
@@ -519,6 +651,15 @@ export default function AnnouncementsPage() {
                     <TableCell className="font-medium text-foreground">{a.title}</TableCell>
                     <TableCell className="max-w-56 truncate text-muted-foreground" title={a.message}>
                       {a.message}
+                      {a.attachments && a.attachments.length > 0 && (
+                        <span
+                          title={a.attachments.map((f) => f.name).join("\n")}
+                          className="mt-0.5 flex max-w-56 items-center gap-1 text-[11px] text-muted-foreground/80"
+                        >
+                          <PaperclipIcon className="size-3 shrink-0" />
+                          <span className="truncate">{a.attachments.length} attachment{a.attachments.length === 1 ? "" : "s"}</span>
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell title={a.recipientNames.join("\n")}>
                       {a.recipientIds.length} selected

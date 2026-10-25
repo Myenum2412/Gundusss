@@ -35,7 +35,27 @@ declare module 'fastify' {
 
 // Merchant QR uploads are stored as data URLs (up to ~3.5M chars), so the
 // default 1 MiB Fastify body limit is too small for PUT /api/payments/settings.
-const app = Fastify({ logger: true, bodyLimit: 5 * 1024 * 1024 });
+const app = Fastify({ logger: true, bodyLimit: 8 * 1024 * 1024 });
+
+// Tolerate empty JSON bodies: curl/Invoke-RestMethod/cron clients often POST
+// with Content-Type: application/json and no payload — Fastify's default
+// parser answers 400 "Body cannot be empty" for those. Treat missing payloads
+// as empty objects so routes with no required body just work.
+app.addContentTypeParser(
+  'application/json',
+  { parseAs: 'string' },
+  (_req, body, done) => {
+    if (body === '' || body == null) {
+      done(null, {});
+      return;
+    }
+    try {
+      done(null, JSON.parse(String(body)));
+    } catch (err) {
+      done(err as Error, undefined);
+    }
+  }
+);
 
 app.addHook('preParsing', async (request, _reply, payload) => {
   const chunks: Buffer[] = [];

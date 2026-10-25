@@ -7,6 +7,8 @@ export interface StoredAnnouncement {
   message: string;
   recipientIds: string[];
   recipientNames: string[];
+  /** Files delivered with the message (names only — data is not stored). */
+  attachments?: { name: string; mime: string }[];
   sentCount: number;
   failedCount: number;
   status: "Sent" | "Partial" | "Failed";

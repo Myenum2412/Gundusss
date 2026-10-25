@@ -2,9 +2,20 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getWaState, startWa, logoutWa, sendWaMessage } from '../whatsapp.js';
 
+const AttachmentSchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    mime: z.string().min(1).max(120),
+    // base64 payload; ~4.5MB covers common PDFs/images within the 5MB body limit
+    data: z.string().min(8).max(6_500_000),
+  })
+  .strip();
+
 const SendSchema = z.object({
   to: z.string().min(10).max(20),
-  message: z.string().min(1).max(2000),
+  // Empty message is allowed when the request carries a file instead.
+  message: z.string().max(4000),
+  attachment: AttachmentSchema.optional(),
 });
 
 export async function whatsappRoutes(app: FastifyInstance) {
@@ -31,7 +42,7 @@ export async function whatsappRoutes(app: FastifyInstance) {
     return { data: state };
   });
 
-  // POST /api/whatsapp/send { to, message }
+  // POST /api/whatsapp/send { to, message, attachment? }
   app.post('/api/whatsapp/send', async (req, reply) => {
     const parsed = SendSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -39,10 +50,17 @@ export async function whatsappRoutes(app: FastifyInstance) {
         .code(400)
         .send({ error: 'Invalid body', details: parsed.error.flatten() });
     }
+    const { to, message, attachment } = parsed.data;
+    if (!message.trim() && !attachment) {
+      return reply
+        .code(400)
+        .send({ error: 'A message or an attachment is required.' });
+    }
     try {
       const result = await sendWaMessage(
-        parsed.data.to,
-        parsed.data.message
+        to,
+        message,
+        attachment ? [attachment] : []
       );
       return { data: result };
     } catch (err: any) {
