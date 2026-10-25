@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
 import { LiveBadge } from "@/components/live-badge"
-import ProfileBlock from "@/components/blocks/profile-1"
 import BusinessProfileForm from "@/components/business-profile-form"
 import { loadStudents } from "@/lib/students-store"
 import { loadGroups } from "@/lib/groups-store"
@@ -112,11 +111,11 @@ export default function ProfilePage() {
   return (
     <DashboardShell trail={[{ label: "Dashboard", href: "/dashboard" }, { label: "Profile" }]}>
       <PageHeader
-        title="Profile"
-        description="Your account, workspace stats, system connection, and recent activity."
+        title="Profile & Business"
+        description="Your unified account profile, workspace activity, and Google Business Profile."
         meta={<LiveBadge />}
       />
-      <ProfileBlock
+      <BusinessProfileForm
         user={{
           name: authUser.name,
           email: authUser.email,
@@ -149,7 +148,6 @@ export default function ProfilePage() {
         canManageSettings={can("settings:manage")}
         onSignOut={onSignOut}
       />
-      {can("settings:manage") && <BusinessProfileForm />}
     </DashboardShell>
   )
 }

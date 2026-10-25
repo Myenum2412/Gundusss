@@ -1,11 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
 import { cn } from "cn"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { sameJson } from "@/lib/live"
 import {
@@ -19,27 +22,41 @@ import {
 } from "@/lib/business-profile"
 import {
   AlertTriangleIcon,
+  Building2,
   CalendarDaysIcon,
   CheckCircle2Icon,
   ClockIcon,
+  Database,
   ExternalLinkIcon,
   FileTextIcon,
   GlobeIcon,
+  Hash,
   ImageIcon,
   InfoIcon,
+  Link2,
   Link2Icon,
   ListChecksIcon,
   Loader2Icon,
+  LogOut,
+  Mail,
   MapPinIcon,
+  Megaphone,
   MessageSquareIcon,
   NavigationIcon,
   PhoneIcon,
+  Plug,
   PlusIcon,
+  Receipt,
+  RefreshCw,
   RotateCcwIcon,
   SaveIcon,
+  Settings,
+  ShieldCheck,
   ShieldCheckIcon,
+  Sprout,
   StoreIcon,
   Trash2Icon,
+  User,
   XIcon,
   type LucideIcon,
 } from "lucide-react"
@@ -159,27 +176,38 @@ function formatTimestamp(value: string) {
   })
 }
 
-function VerificationPill({
+function initials(name?: string, email?: string) {
+  if (!name && !email) return "CO"
+  const cleanName = (name || "").trim()
+  const cleanEmail = (email || "").trim()
+  const parts = cleanName.split(/\s+/).filter(Boolean)
+  if (parts.length > 1 && parts[0][0] && parts[parts.length - 1][0])
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  if (cleanName) return cleanName.slice(0, 2).toUpperCase()
+  return cleanEmail.slice(0, 2).toUpperCase()
+}
+
+function Fact({
+  icon: Icon,
+  label,
   value,
 }: {
-  value: BusinessProfile["verificationStatus"]
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  value: React.ReactNode
 }) {
-  const tone =
-    value === "Verified"
-      ? "border-emerald-600/20 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
-      : value === "Pending"
-        ? "border-amber-600/20 bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400"
-        : "border-border bg-muted text-muted-foreground"
   return (
-    <span
-      className={cn(
-        "inline-flex h-5 items-center gap-1.5 rounded-full border px-2 text-[11px] font-medium",
-        tone
-      )}
-    >
-      <span className="size-1.5 rounded-full bg-current" aria-hidden />
-      {value}
-    </span>
+    <li className="flex items-center gap-2.5 text-sm">
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/60 text-muted-foreground">
+        <Icon className="size-3.5" aria-hidden="true" />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-[11px] tracking-wide text-muted-foreground uppercase">
+          {label}
+        </span>
+        <span className="block truncate font-medium">{value}</span>
+      </span>
+    </li>
   )
 }
 
@@ -557,7 +585,62 @@ function ImagePreview({
   )
 }
 
-export default function BusinessProfileForm() {
+export interface BusinessProfileUser {
+  name: string
+  email: string
+  role: string
+  workspace: string
+  userId: string
+  profileId: string
+  paymentUrl: string
+}
+
+export interface BusinessProfileStat {
+  label: string
+  value: string
+}
+
+export interface BusinessProfileReceipt {
+  id: string
+  student: string
+  amount: string
+  date: string
+}
+
+export interface BusinessProfileAnnouncement {
+  id: string
+  title: string
+  meta: string
+}
+
+export interface BusinessProfileSystem {
+  apiUrl: string
+  database: string
+  sync: string
+  whatsapp: string
+}
+
+export interface BusinessProfileFormProps {
+  user?: BusinessProfileUser
+  stats?: BusinessProfileStat[]
+  receipts?: BusinessProfileReceipt[]
+  announcements?: BusinessProfileAnnouncement[]
+  system?: BusinessProfileSystem
+  optionCount?: number
+  canManageSettings?: boolean
+  onSignOut?: () => void
+}
+
+export default function BusinessProfileForm({
+  user,
+  stats = [],
+  receipts = [],
+  announcements = [],
+  system,
+  optionCount = 0,
+  canManageSettings = true,
+  onSignOut,
+}: BusinessProfileFormProps = {}) {
   const [profile, setProfile] = useState<BusinessProfile | null>(null)
   const [saved, setSaved] = useState<BusinessProfile | null>(null)
   const [updatedAt, setUpdatedAt] = useState<string | null>(null)
@@ -767,18 +850,21 @@ export default function BusinessProfileForm() {
   if (loading || !profile) {
     return (
       <section className="w-full shrink-0">
-        <div className="rounded-2xl border bg-card p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2Icon className="size-4 animate-spin" />
-            Loading Google Business details…
-          </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <div
-                key={index}
-                className="h-9 animate-pulse rounded-lg bg-muted"
-              />
-            ))}
+        <div className="overflow-hidden rounded-2xl border bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+          <div className="h-36 w-full animate-pulse bg-muted sm:h-44" />
+          <div className="p-6">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2Icon className="size-4 animate-spin" />
+              Loading profile details…
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="h-9 animate-pulse rounded-lg bg-muted"
+                />
+              ))}
+            </div>
           </div>
         </div>
       </section>
@@ -800,20 +886,54 @@ export default function BusinessProfileForm() {
   return (
     <section className="w-full shrink-0">
       <div className="overflow-hidden rounded-2xl border bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-        <div className="border-b bg-muted/20 p-5">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex min-w-0 items-start gap-3">
-              <div className="flex size-11 shrink-0 items-center justify-center rounded-xl border bg-[#4285F4] text-xl font-bold text-white shadow-[0_1px_2px_rgba(16,24,40,0.06)]">
-                G
-              </div>
-              <div className="min-w-0">
+        {/* Cover banner */}
+        <div
+          className="relative h-36 w-full bg-linear-to-br from-primary/15 via-muted to-muted-foreground/10 sm:h-44"
+          style={
+            profile.media.coverUrl
+              ? {
+                  backgroundImage: `url(${profile.media.coverUrl})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }
+              : undefined
+          }
+          aria-hidden="true"
+        >
+          <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent" />
+        </div>
+
+        {/* Profile info & top actions */}
+        <div className="px-6 pb-6 sm:px-8">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="flex items-end gap-4">
+              <Avatar className="-mt-12 size-20 border-4 border-card shadow-md sm:size-24">
+                {profile.media.logoUrl ? (
+                  <AvatarImage
+                    src={profile.media.logoUrl}
+                    alt={profile.name || user?.name || "Logo"}
+                    className="object-cover"
+                  />
+                ) : null}
+                <AvatarFallback className="bg-primary/10 text-lg font-semibold text-primary">
+                  {initials(profile.name || user?.name, user?.email || profile.email)}
+                </AvatarFallback>
+              </Avatar>
+              <div className="pb-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-base font-semibold tracking-tight">
-                    Google Business Profile
-                  </h2>
-                  <VerificationPill value={profile.verificationStatus} />
+                  <h1 className="text-xl font-bold tracking-tight">
+                    {profile.name || user?.workspace || user?.name || "Business Profile"}
+                  </h1>
+                  {user?.role && <Badge variant="secondary">{user.role}</Badge>}
                   <StatusPill value={profile.status} />
-                  {dirty && <Badge variant="secondary">Unsaved changes</Badge>}
+                  {dirty && (
+                    <Badge
+                      variant="outline"
+                      className="border-amber-500/30 text-amber-600 dark:text-amber-400"
+                    >
+                      Unsaved changes
+                    </Badge>
+                  )}
                   {!online && (
                     <Badge
                       variant="outline"
@@ -823,31 +943,21 @@ export default function BusinessProfileForm() {
                     </Badge>
                   )}
                 </div>
-                <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
-                  Everything customers see on Google Search and Maps — identity,
-                  contact details, location, hours, attributes, photos, and
-                  booking links.
-                </p>
-                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                  <div className="h-1.5 w-40 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary transition-all"
-                      style={{ width: `${completionPercent}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    {completion.done} of {completion.total} details complete ·{" "}
-                    {completionPercent}%
-                  </span>
-                  {updatedAt && (
-                    <span className="text-xs text-muted-foreground">
-                      · Last saved {formatTimestamp(updatedAt)}
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+                  {user?.name && profile.name && user.name !== profile.name && (
+                    <span>
+                      Managed by <strong className="font-medium text-foreground">{user.name}</strong>
                     </span>
+                  )}
+                  {user?.email && <span>{user.email}</span>}
+                  {user?.profileId && (
+                    <span className="font-mono text-xs">#{user.profileId}</span>
                   )}
                 </div>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+
+            <div className="flex flex-wrap items-center gap-2 pb-1">
               <Button
                 variant="outline"
                 size="sm"
@@ -862,6 +972,12 @@ export default function BusinessProfileForm() {
                 <ExternalLinkIcon className="size-3.5" />
                 Google Business
               </Button>
+              {canManageSettings && (
+                <Button variant="outline" size="sm" render={<Link href="/dashboard/settings" />}>
+                  <Settings className="size-3.5" />
+                  Settings
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -871,14 +987,56 @@ export default function BusinessProfileForm() {
                 <RotateCcwIcon className="size-3.5" />
                 Reset
               </Button>
-              <Button size="sm" onClick={onSave} disabled={!dirty || saving}>
-                {saving ? (
-                  <Loader2Icon className="size-3.5 animate-spin" />
-                ) : (
-                  <SaveIcon className="size-3.5" />
-                )}
-                {saving ? "Saving…" : "Save changes"}
-              </Button>
+              {canManageSettings && (
+                <Button size="sm" onClick={onSave} disabled={!dirty || saving}>
+                  {saving ? (
+                    <Loader2Icon className="size-3.5 animate-spin" />
+                  ) : (
+                    <SaveIcon className="size-3.5" />
+                  )}
+                  {saving ? "Saving…" : "Save changes"}
+                </Button>
+              )}
+              {onSignOut && (
+                <Button variant="ghost" size="sm" onClick={onSignOut}>
+                  <LogOut className="size-3.5" />
+                  Sign out
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <p className="mt-4 max-w-3xl text-sm/relaxed text-foreground/80">
+            {profile.description || (
+              <>
+                {user?.workspace || "Institute"} · Google Business Profile & Fees Manager —
+                enrolments, groups, fee structures, receipts, and announcements, synced live across every page.
+              </>
+            )}
+          </p>
+
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-4 border-t pt-4">
+            {stats && stats.length > 0 && (
+              <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                {stats.map((stat) => (
+                  <span key={stat.label} className="flex items-baseline gap-1.5">
+                    <span className="text-base font-semibold tabular-nums">{stat.value}</span>
+                    <span className="text-xs text-muted-foreground">{stat.label}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center gap-3">
+              <div className="h-1.5 w-36 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-primary transition-all"
+                  style={{ width: `${completionPercent}%` }}
+                />
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {completion.done} of {completion.total} details · {completionPercent}% complete
+                {updatedAt && ` · Saved ${formatTimestamp(updatedAt)}`}
+              </span>
             </div>
           </div>
         </div>
@@ -931,6 +1089,14 @@ export default function BusinessProfileForm() {
               <TabsTrigger value="attributes" className="gap-1.5 px-3">
                 <ListChecksIcon className="size-3.5" />
                 Attributes & media
+              </TabsTrigger>
+              <TabsTrigger value="activity" className="gap-1.5 px-3">
+                <Receipt className="size-3.5" />
+                Activity
+              </TabsTrigger>
+              <TabsTrigger value="account" className="gap-1.5 px-3">
+                <User className="size-3.5" />
+                Account & System
               </TabsTrigger>
             </TabsList>
 
@@ -1035,37 +1201,6 @@ export default function BusinessProfileForm() {
                   maxLength={750}
                   description="Up to 750 characters. Avoid promotional language, links, and prices."
                 />
-              </SectionCard>
-
-              <SectionCard
-                icon={ShieldCheckIcon}
-                title="Verification"
-                description="Keep the listing status in sync with your Google Business Profile."
-              >
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <SelectField
-                    id="bp-verification"
-                    label="Verification status"
-                    value={profile.verificationStatus}
-                    onChange={(value) =>
-                      patch(
-                        "verificationStatus",
-                        value as BusinessProfile["verificationStatus"]
-                      )
-                    }
-                  >
-                    <option value="Unverified">Unverified</option>
-                    <option value="Pending">Pending</option>
-                    <option value="Verified">Verified</option>
-                  </SelectField>
-                  <TextField
-                    id="bp-verified-on"
-                    label="Verified on"
-                    type="date"
-                    value={profile.verifiedOn}
-                    onChange={(value) => patch("verifiedOn", value)}
-                  />
-                </div>
               </SectionCard>
             </TabsContent>
 
@@ -1752,11 +1887,153 @@ export default function BusinessProfileForm() {
                   label="Notes"
                   value={profile.notes}
                   onChange={(value) => patch("notes", value)}
-                  placeholder="Verification call scheduled, listing manager contact, etc."
+                  placeholder="Admission inquiry notes, listing manager contact, etc."
                   rows={4}
                   maxLength={2000}
                 />
               </SectionCard>
+            </TabsContent>
+
+            {/* --------------------------------------------------------- Activity */}
+            <TabsContent value="activity" className="flex flex-col gap-4">
+              {receipts.length === 0 && announcements.length === 0 ? (
+                <div className="rounded-2xl border bg-background p-8 text-center text-sm text-muted-foreground">
+                  No activity recorded yet — records you create will appear here.
+                </div>
+              ) : (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="flex flex-col gap-3">
+                    <h2 className="text-[13px] font-semibold tracking-tight">
+                      Recent receipts
+                    </h2>
+                    {receipts.length === 0 ? (
+                      <p className="rounded-xl border bg-background p-4 text-xs text-muted-foreground">
+                        No receipts yet.
+                      </p>
+                    ) : (
+                      receipts.map((r) => (
+                        <article
+                          key={r.id}
+                          className="flex items-center gap-3 rounded-xl border bg-background p-4 shadow-[0_1px_2px_rgba(16,24,40,0.03)]"
+                        >
+                          <span className="flex size-8 shrink-0 items-center justify-center rounded-[10px] border bg-muted/60 text-muted-foreground">
+                            <Receipt className="size-4" aria-hidden="true" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <h3 className="truncate text-sm font-semibold">
+                              ₹ {r.amount} · {r.student}
+                            </h3>
+                            <p className="text-xs text-muted-foreground tabular-nums">
+                              {r.id} · {r.date}
+                            </p>
+                          </div>
+                        </article>
+                      ))
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    <h2 className="text-[13px] font-semibold tracking-tight">
+                      Latest announcements
+                    </h2>
+                    {announcements.length === 0 ? (
+                      <p className="rounded-xl border bg-background p-4 text-xs text-muted-foreground">
+                        Nothing sent yet.
+                      </p>
+                    ) : (
+                      announcements.map((a) => (
+                        <article
+                          key={a.id}
+                          className="flex items-center gap-3 rounded-xl border bg-background p-4 shadow-[0_1px_2px_rgba(16,24,40,0.03)]"
+                        >
+                          <span className="flex size-8 shrink-0 items-center justify-center rounded-[10px] border bg-muted/60 text-muted-foreground">
+                            <Megaphone className="size-4" aria-hidden="true" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <h3 className="truncate text-sm font-semibold">
+                              {a.title}
+                            </h3>
+                            <p className="text-xs text-muted-foreground tabular-nums">
+                              {a.meta}
+                            </p>
+                          </div>
+                        </article>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+
+            {/* --------------------------------------------------------- Account & System */}
+            <TabsContent value="account" className="flex flex-col gap-4">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <SectionCard icon={User} title="Account identity">
+                  <ul className="flex flex-col gap-3">
+                    <Fact icon={Mail} label="Email" value={user?.email || profile.email || "—"} />
+                    <Fact icon={Hash} label="User ID" value={user?.userId ? `#${user.userId}` : "—"} />
+                    <Fact icon={ShieldCheck} label="Role" value={user?.role || "Admin"} />
+                  </ul>
+                </SectionCard>
+
+                <SectionCard icon={Sprout} title="Workspace info">
+                  <ul className="flex flex-col gap-3">
+                    <Fact icon={Sprout} label="Organization" value={user?.workspace || profile.name || "MyFees"} />
+                    <Fact
+                      icon={Hash}
+                      label="Profile ID"
+                      value={
+                        <code className="font-mono text-[12px]">
+                          {user?.profileId || "default"}
+                        </code>
+                      }
+                    />
+                    {user?.paymentUrl && (
+                      <Fact
+                        icon={Link2}
+                        label="Payment link"
+                        value={
+                          <a
+                            href={user.paymentUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[12px] underline underline-offset-4 text-primary"
+                          >
+                            {user.paymentUrl}
+                          </a>
+                        }
+                      />
+                    )}
+                    <Fact icon={Building2} label="Product" value="Fees Manager" />
+                    {system?.database && (
+                      <Fact icon={Database} label="Database" value={system.database} />
+                    )}
+                  </ul>
+                </SectionCard>
+
+                <SectionCard icon={Plug} title="System connection">
+                  <ul className="flex flex-col gap-3">
+                    {system?.apiUrl && <Fact icon={Plug} label="API" value={system.apiUrl} />}
+                    {system?.sync && <Fact icon={RefreshCw} label="Sync" value={system.sync} />}
+                    {system?.whatsapp && <Fact icon={Megaphone} label="WhatsApp" value={system.whatsapp} />}
+                  </ul>
+                </SectionCard>
+              </div>
+
+              <div className="rounded-2xl border bg-background p-4 sm:p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs text-muted-foreground">
+                    {optionCount} dropdown options configured across 8 lists · Forms pick up changes live
+                  </p>
+                  {canManageSettings && (
+                    <Link
+                      href="/dashboard/settings"
+                      className="text-xs font-medium text-primary underline underline-offset-4 hover:text-primary/80"
+                    >
+                      Manage in Settings →
+                    </Link>
+                  )}
+                </div>
+              </div>
             </TabsContent>
           </Tabs>
 
