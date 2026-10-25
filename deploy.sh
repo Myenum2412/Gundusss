@@ -51,6 +51,15 @@ if echo "$CHANGED" | grep -qE '^payment-gateway/'; then
   echo "   gateway: $(systemctl is-active youpi-gateway)"
 fi
 
+# --- reminder queue worker (python, systemd: gundusss-worker)
+if echo "$CHANGED" | grep -qE '^queue-worker/'; then
+  echo "-- queue worker changed"
+  (cd queue-worker && python3 -m pip install --break-system-packages -r requirements.txt --quiet >/dev/null 2>&1) || true
+  systemctl restart gundusss-worker 2>/dev/null || true
+  sleep 2
+  echo "   worker: $(systemctl is-active gundusss-worker 2>/dev/null || echo not-installed)"
+fi
+
 echo "===== done"
 # Record success only after both service steps completed, so a failed build is
 # retried on the next cron cycle instead of being marked deployed.

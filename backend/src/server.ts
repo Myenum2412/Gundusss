@@ -1,4 +1,4 @@
-import './env.js';
+﻿import './env.js';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { Readable } from 'node:stream';
@@ -19,6 +19,7 @@ import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/users.js';
 import { profileRoutes } from './routes/profiles.js';
 import { whatsappRoutes } from './routes/whatsapp.js';
+import { queueRoutes } from './routes/queue.js';
 import { collectionsRoutes } from './routes/collections.js';
 import { paymentRoutes } from './routes/payments.js';
 import { paymentSettingsRoutes } from './routes/payment-settings.js';
@@ -38,7 +39,7 @@ declare module 'fastify' {
 const app = Fastify({ logger: true, bodyLimit: 8 * 1024 * 1024 });
 
 // Tolerate empty JSON bodies: curl/Invoke-RestMethod/cron clients often POST
-// with Content-Type: application/json and no payload — Fastify's default
+// with Content-Type: application/json and no payload â€” Fastify's default
 // parser answers 400 "Body cannot be empty" for those. Treat missing payloads
 // as empty objects so routes with no required body just work.
 app.addContentTypeParser(
@@ -144,6 +145,7 @@ await app.register(paymentRoutes);
 await app.register(paymentSettingsRoutes);
 await app.register(businessProfileRoutes);
 await app.register(reminderRoutes);
+await app.register(queueRoutes);
 
 async function ensureAppwriteSeed(): Promise<void> {
   await assertAppwriteSetup();

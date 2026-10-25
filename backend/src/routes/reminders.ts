@@ -10,6 +10,7 @@ import {
 import { getProfile, listProfiles, resolveProfileId } from '../profiles.js';
 import { scopedEntityId } from '../tenant.js';
 import { getWaState, sendWaMessage } from '../whatsapp.js';
+import { enqueueReminderJob, workerSecret, type QueueItem } from '../queue.js';
 
 const CRONJOB_API_BASE = 'https://api.cron-job.org';
 // Never hardcode this: set CRONJOB_API_KEY in backend/.env (gitignored) and in
@@ -58,7 +59,7 @@ export interface ReminderRunLog {
   source: 'cron-job.org' | 'manual' | 'scheduled';
   totalStudents: number;
   sentCount: number;
-  status: 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'SKIPPED';
+  status: 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'SKIPPED' | 'QUEUED';
   details: string;
   recipients: Array<{
     studentId: string;
@@ -226,9 +227,14 @@ async function executeMonthlyReminders(
 
   const waState = getWaState();
   const isWaReady = waState.status === 'ready';
+  // Queue mode: when the independent Python worker is configured (and the bot
+  // is connected) reminder sends belong to the worker, which paces them with
+  // randomized spacing instead of blasting them inline.
+  const workerMode = Boolean(workerSecret());
 
   const recipientResults: ReminderRunLog['recipients'] = [];
   let sentCount = 0;
+  const jobItems: QueueItem[] = [];
 
   for (const student of students) {
     const studentFee =
@@ -240,6 +246,37 @@ async function executeMonthlyReminders(
 
     const studentPaymentUrl = `${paymentBaseUrl}?student=${encodeURIComponent(student.studentId)}`;
     const message = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${student.studentName}*,\n\nThis is your monthly fee reminder for *${student.course || 'Course'}* (${student.group || 'Batch'}).\n\n• Student ID: *${student.studentId}*\n• Monthly Fee: *${amountStr}*\n• Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\n👉 ${studentPaymentUrl}\n\n— ${companyName} Accounts Desk`;
+
+    if (workerMode && studentPhone.length >= 10) {
+      if (isWaReady) {
+        // Hand over to the queue worker; the run log gets merged when the
+        // worker reports results.
+        jobItems.push({
+          phone: studentPhone,
+          message,
+          studentId: student.studentId,
+          studentName: student.studentName,
+        });
+        recipientResults.push({
+          studentId: student.studentId,
+          studentName: student.studentName,
+          phone: student.phone,
+          amount: studentFee,
+          delivered: false,
+          error: 'Queued for paced delivery',
+        });
+      } else {
+        recipientResults.push({
+          studentId: student.studentId,
+          studentName: student.studentName,
+          phone: student.phone,
+          amount: studentFee,
+          delivered: false,
+          error: 'WhatsApp bot offline (queued for auto-send)',
+        });
+      }
+      continue;
+    }
 
     let delivered = false;
     let errorMsg: string | undefined;
@@ -274,6 +311,10 @@ async function executeMonthlyReminders(
   if (students.length === 0) {
     status = 'SKIPPED';
     details = 'No active students found for monthly fee reminders.';
+  } else if (workerMode && isWaReady && jobItems.length > 0) {
+    // Nothing has been sent here — the Python queue worker owns delivery now.
+    status = 'QUEUED';
+    details = `${jobItems.length} reminder(s) queued; the queue worker delivers them one by one with randomized spacing (anti-ban).`;
   } else if (isWaReady) {
     if (sentCount === students.length) {
       status = 'SUCCESS';
@@ -307,6 +348,19 @@ async function executeMonthlyReminders(
     details,
     recipients: recipientResults,
   };
+
+  if (workerMode && isWaReady && jobItems.length > 0) {
+    enqueueReminderJob({
+      jobId: runLog.id,
+      profileId,
+      source,
+      createdAt: runLog.timestamp,
+      status: 'pending',
+      claimedAt: null,
+      totalItems: jobItems.length,
+      items: jobItems,
+    });
+  }
 
   return runLog;
 }

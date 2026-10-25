@@ -184,6 +184,8 @@ function isPublicRoute(method: string, path: string): boolean {
   if (path.startsWith('/api/public/')) return true;
   // cron-job.org automated reminder webhook
   if (path.startsWith('/api/reminders/cron/')) return true;
+  // Reminder queue worker (Python) authenticates with X-Worker-Key per call.
+  if (path.startsWith('/api/queue/')) return true;
   return false;
 }
 
