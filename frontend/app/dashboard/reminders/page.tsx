@@ -191,7 +191,7 @@ export default function RemindersPage() {
   useEffect(() => {
     const timer = setInterval(() => {
       getWaStatus().then(setWaState).catch(() => null)
-    }, 5000)
+    }, 2000)
     return () => clearInterval(timer)
   }, [])
 

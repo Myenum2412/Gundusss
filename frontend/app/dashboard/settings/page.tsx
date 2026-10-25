@@ -121,7 +121,7 @@ export default function SettingsPage() {
       } catch {
         // keep polling; backend may still be booting
       }
-    }, 4000)
+    }, 1500)
     return () => clearInterval(t)
   }, [refresh])
 

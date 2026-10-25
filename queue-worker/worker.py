@@ -33,9 +33,9 @@ load_dotenv()
 
 API_BASE = os.getenv("API_BASE", "http://127.0.0.1:4000").rstrip("/")
 WORKER_SECRET = os.getenv("WORKER_SECRET", "").strip()
-SEND_GAP_SECONDS = float(os.getenv("SEND_GAP_SECONDS", "12"))
-SEND_JITTER_SECONDS = float(os.getenv("SEND_JITTER_SECONDS", "8"))
-POLL_SECONDS = float(os.getenv("POLL_SECONDS", "10"))
+SEND_GAP_SECONDS = float(os.getenv("SEND_GAP_SECONDS", "3"))
+SEND_JITTER_SECONDS = float(os.getenv("SEND_JITTER_SECONDS", "2"))
+POLL_SECONDS = float(os.getenv("POLL_SECONDS", "3"))
 HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT_SECONDS", "65"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "5"))
 

@@ -303,12 +303,12 @@ export interface WaAttachment {
 
 const WA_SEND_GAP_MS = Math.min(
   60_000,
-  Math.max(0, Number(process.env.WA_SEND_GAP_MS ?? 8_000))
-); // minimum spacing between two messages
+  Math.max(0, Number(process.env.WA_SEND_GAP_MS ?? 1_200))
+); // fast anti-flood spacing (1.2s)
 const WA_SEND_JITTER_MS = Math.min(
   60_000,
-  Math.max(0, Number(process.env.WA_SEND_JITTER_MS ?? 7_000))
-); // extra random spacing
+  Math.max(0, Number(process.env.WA_SEND_JITTER_MS ?? 800))
+); // fast random jitter (0.8s)
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
