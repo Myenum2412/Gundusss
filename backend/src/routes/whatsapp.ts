@@ -31,9 +31,15 @@ export async function whatsappRoutes(app: FastifyInstance) {
   });
 
   // POST /api/whatsapp/start
+  // Fire-and-forget: Chromium takes ~25s to boot on the 512MB droplet.
+  // Returning immediately lets the UI show "starting" and keep polling
+  // status instead of a request hanging until the engine is up.
   app.post('/api/whatsapp/start', async () => {
-    const state = await startWa();
-    return { data: state };
+    void startWa();
+    const state = getWaState();
+    return {
+      data: { ...state, status: state.status === 'idle' ? ('starting' as const) : state.status },
+    };
   });
 
   // POST /api/whatsapp/logout

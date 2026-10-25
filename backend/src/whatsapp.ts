@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import QRCode from 'qrcode';
@@ -25,6 +25,21 @@ let qrDataUrl: string | null = null;
 let connectedNumber: string | null = null;
 let lastError: string | null = null;
 let starting = false;
+
+/**
+ * Delete the stored WhatsApp session. Needed whenever the phone revokes the
+ * browser (LOGOUT / auth failure): the saved credentials are dead and
+ * initialize() would otherwise hang forever waiting on them, leaving the UI
+ * spinning on "connecting" with no QR ever appearing.
+ */
+function purgeWaSession() {
+  try {
+    rmSync('.wwebjs_auth', { recursive: true, force: true });
+    console.log('[wa] stale auth session purged');
+  } catch (err: any) {
+    console.log(`[wa] could not purge auth session: ${err?.message ?? err}`);
+  }
+}
 
 function findChromeExecutable(): string | undefined {
   if (process.env.CHROME_PATH && existsSync(process.env.CHROME_PATH)) {
@@ -140,6 +155,22 @@ export async function startWa() {
         qrDataUrl = null;
       });
 
+      // Phone revoked/failed the pairing — the stored session is dead from
+      // this point on, so purge it immediately or the next initialize()
+      // hangs on invalid credentials.
+      client.on('auth_failure', (reason: any) => {
+        lastError = typeof reason === 'string' ? reason : 'Authentication failed';
+        status = 'disconnected';
+        qrDataUrl = null;
+        starting = false;
+        const dead = client;
+        client = null;
+        purgeWaSession();
+        void (async () => {
+          await dead?.destroy();
+        })().catch(() => undefined);
+      });
+
       client.on('ready', () => {
         status = 'ready';
         qrDataUrl = null;
@@ -155,7 +186,8 @@ export async function startWa() {
         status = 'disconnected';
         connectedNumber = null;
         qrDataUrl = null;
-        lastError = typeof reason === 'string' ? reason : null;
+        const reasonText = typeof reason === 'string' ? reason : null;
+        lastError = reasonText;
         starting = false;
         // Release the browser immediately so a later start cannot hit the
         // profile lock ("browser is already running").
@@ -168,14 +200,61 @@ export async function startWa() {
         } catch {
           // ignore
         }
+
+        if (reasonText && /log\s?out|logged out|LOGOUT/i.test(reasonText)) {
+          // The phone logged this browser out: the saved session is invalid.
+          // Purge it and boot a fresh client so a new QR shows up on its own
+          // instead of the UI spinning forever on "connecting".
+          purgeWaSession();
+          setTimeout(() => {
+            void startWa();
+          }, 1_500).unref?.();
+        }
       });
     }
 
-    await client.initialize();
+    // Hard cap on boot: initialize() can hang indefinitely on an invalid or
+    // revoked session ("taking so long to connect"). On timeout, tear the
+    // client down, purge the (likely dead) session and let the user retry.
+    const INIT_TIMEOUT_MS = Math.max(
+      30_000,
+      Number(process.env.WA_INIT_TIMEOUT_MS ?? 90_000)
+    );
+    await Promise.race([
+      client.initialize(),
+      new Promise<never>((_, reject) => {
+        const t = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `WhatsApp boot timed out after ${INIT_TIMEOUT_MS / 1000}s (stale session cleared — connect again for a fresh QR)`
+              )
+            ),
+          INIT_TIMEOUT_MS
+        );
+        // Never keep the process alive just for this timer.
+        (t as { unref?: () => void }).unref?.();
+      }),
+    ]);
   } catch (err: any) {
     status = 'error';
     lastError = err?.message ?? 'Failed to start WhatsApp client';
     starting = false;
+    const msg = String(err?.message ?? '');
+    // Only purge on hang/timeout-style failures. A browser-launch failure
+    // (out of memory etc.) must never destroy a valid paired session.
+    if (/timed out|stale session/i.test(msg)) {
+      purgeWaSession();
+    }
+    const dead = client;
+    client = null;
+    try {
+      void (async () => {
+        await dead?.destroy();
+      })().catch(() => undefined);
+    } catch {
+      // ignore
+    }
   } finally {
     if (status === 'starting') {
       // initialize() resolved but 'ready'/'qr' event hasn't fired yet;
@@ -203,6 +282,8 @@ export async function logoutWa() {
   status = 'disconnected';
   qrDataUrl = null;
   connectedNumber = null;
+  // logout() revokes the pairing, so the stored session is dead on disk too.
+  purgeWaSession();
   return getWaState();
 }
 
