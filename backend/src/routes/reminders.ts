@@ -11,8 +11,17 @@ import { scopedEntityId } from '../tenant.js';
 import { getWaState, sendWaMessage } from '../whatsapp.js';
 
 const CRONJOB_API_BASE = 'https://api.cron-job.org';
-const DEFAULT_CRONJOB_KEY =
-  process.env.CRONJOB_API_KEY || 'JmJ+4jtfj0b9PE6dy01ZttLiFgsw3NK/qs2aTNKNDjU=';
+// Never hardcode this: set CRONJOB_API_KEY in backend/.env (gitignored) and in
+// the deployment environment. An unset key simply surfaces as an API error.
+const CRONJOB_API_KEY = (process.env.CRONJOB_API_KEY ?? '').trim();
+
+function cronJobKey(storedKey?: string): string {
+  const key = (storedKey || CRONJOB_API_KEY).trim();
+  if (!key) {
+    throw new Error('CRONJOB_API_KEY is not configured in the backend environment');
+  }
+  return key;
+}
 
 export interface CronScheduleConfig {
   timezone: string;
@@ -61,7 +70,7 @@ const DEFAULT_SCHEDULE: CronScheduleConfig = {
 
 function defaultSettings(): StoredReminderSettings {
   return {
-    apiKey: DEFAULT_CRONJOB_KEY,
+    apiKey: CRONJOB_API_KEY,
     enabled: true,
     jobId: 8715234, // ID created on cron-job.org
     targetUrl: 'https://myfees.myenum.in/api/reminders/cron/monthly',
@@ -107,6 +116,17 @@ async function createCronJob(apiKey: string, payload: {
         months: [-1], // every month
         wdays: [-1],  // every day of week
         expiresAt: 0,
+      },
+      notifyAfterFailedExecutions: 1,
+      // Email the account owner when consistently failing so missed fixes don't
+      // silently skip a month of fee reminders.
+      notification: {
+        onFailure: true,
+        onFailureCount: 1,
+        onSuccess: false,
+        onDisable: false,
+        onSslCertExpiry: false,
+        mode: 1,
       },
     },
   };
@@ -234,13 +254,19 @@ async function executeMonthlyReminders(
       status = 'PARTIAL';
       details = `Delivered to ${sentCount}/${students.length} student(s) via WhatsApp.`;
     } else {
-      status = 'SUCCESS';
-      details = `Executed monthly fee reminders for ${students.length} student(s). Payment notice links prepared & active.`;
+      // Bot is connected but not a single send succeeded — this is a real
+      // failure (bad numbers, protocol errors), not a success.
+      status = 'FAILED';
+      const firstError =
+        recipientResults.find((r) => !r.delivered && r.error)?.error ?? undefined;
+      details = `No messages delivered. WhatsApp bot is connected but every send failed${
+        firstError ? `: ${firstError}` : '.'
+      }`;
     }
   } else {
-    // WhatsApp client is offline / waiting for QR: reminders generated, fees calculated, links active
-    status = 'SUCCESS';
-    details = `Executed monthly fee reminders for ${students.length} student(s). Payment notice links prepared & active.`;
+    // WhatsApp client is offline / waiting for QR: nothing was delivered.
+    status = 'FAILED';
+    details = `WhatsApp bot is offline — no messages delivered. Reminders were generated for ${students.length} student(s) and payment links remain active; connect the bot on the Settings page and re-run.`;
   }
 
   const runLog: ReminderRunLog = {
@@ -324,7 +350,7 @@ export async function reminderRoutes(app: FastifyInstance) {
     let cronJobError: string | null = null;
 
     try {
-      const data = await fetchCronJobs(settings.apiKey || DEFAULT_CRONJOB_KEY);
+      const data = await fetchCronJobs(cronJobKey(settings.apiKey));
       if (data?.jobs && Array.isArray(data.jobs)) {
         cronJobRemote =
           data.jobs.find((j: any) => j.jobId === settings.jobId) ||
@@ -350,7 +376,7 @@ export async function reminderRoutes(app: FastifyInstance) {
     const profileId = await resolveProfileId(req);
     const body = (req.body as any) || {};
 
-    const apiKey = body.apiKey || DEFAULT_CRONJOB_KEY;
+    const apiKey = cronJobKey(body.apiKey);
     const title = body.title || 'Monthly Student Fee Reminder (Seeds of Success)';
     const targetUrl =
       body.targetUrl || 'https://myfees.myenum.in/api/reminders/cron/monthly';
@@ -444,7 +470,7 @@ export async function reminderRoutes(app: FastifyInstance) {
     const settings = record?.data || defaultSettings();
 
     try {
-      await deleteCronJob(settings.apiKey || DEFAULT_CRONJOB_KEY, Number(jobId));
+      await deleteCronJob(cronJobKey(settings.apiKey), Number(jobId));
       if (settings.jobId === Number(jobId)) {
         settings.jobId = null;
         settings.enabled = false;

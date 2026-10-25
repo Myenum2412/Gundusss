@@ -16,6 +16,8 @@ services:
       APPWRITE_DATABASE_ID: ${APPWRITE_DATABASE_ID:-fees}
       AUTH_SECRET: ${AUTH_SECRET:-}
       AUTH_TOKEN_TTL_HOURS: ${AUTH_TOKEN_TTL_HOURS:-12}
+      # cron-job.org REST API key for the monthly reminder cron
+      CRONJOB_API_KEY: ${CRONJOB_API_KEY:?Set CRONJOB_API_KEY before starting Compose}
       # YOUPI PG runs on the host in the default local setup.
       YOUPI_PAYMENT_API_URL: ${YOUPI_PAYMENT_API_URL:-http://host.docker.internal:6100}
       YOUPI_WEBHOOK_SECRET: ${YOUPI_WEBHOOK_SECRET:-}
