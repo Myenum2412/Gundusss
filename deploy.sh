@@ -12,7 +12,10 @@ if ! git fetch origin main -q 2>/dev/null; then
 fi
 
 NEW=$(git rev-parse origin/main)
-OLD=$(git rev-parse HEAD 2>/dev/null || echo none)
+# Track the last *deployed* revision, not HEAD: something else (a manual pull,
+# a cron overlap) can advance HEAD without deploying, and comparing against
+# HEAD would then silently skip the rebuild.
+OLD=$(cat .last-deploy-rev 2>/dev/null || git rev-parse HEAD 2>/dev/null || echo none)
 [ "$NEW" = "$OLD" ] && exit 0
 
 echo "===== deploy $(date -Is): $OLD -> $NEW"
@@ -49,3 +52,6 @@ if echo "$CHANGED" | grep -qE '^payment-gateway/'; then
 fi
 
 echo "===== done"
+# Record success only after both service steps completed, so a failed build is
+# retried on the next cron cycle instead of being marked deployed.
+echo "$NEW" > .last-deploy-rev
