@@ -69,6 +69,26 @@ import { cn } from "@/lib/utils"
 
 const MAX_FILE_BYTES = 3 * 1024 * 1024 // 3 MB per file (base64 must fit the API body limit)
 
+/**
+ * Reminder day values derived from the fee due date:
+ * N days before + the due date itself + M days after, unique and sorted,
+ * clamped to the days every month actually has (1-28).
+ */
+function deriveReminderDays(due: number, before: number, after: number): number[] {
+  const clampedDue = Math.min(28, Math.max(1, Math.trunc(Number(due)) || 5))
+  const b = Math.min(27, Math.max(0, Math.trunc(Number(before)) || 0))
+  const a = Math.min(27, Math.max(0, Math.trunc(Number(after)) || 0))
+  const days: number[] = []
+  for (let i = b; i >= 1; i--) {
+    if (clampedDue - i >= 1) days.push(clampedDue - i)
+  }
+  days.push(clampedDue)
+  for (let i = 1; i <= a; i++) {
+    if (clampedDue + i <= 28) days.push(clampedDue + i)
+  }
+  return Array.from(new Set(days)).sort((x, y) => x - y)
+}
+
 export default function RemindersPage() {
   const { user, activeProfile, can } = useAuth()
   const [loading, setLoading] = useState(true)
@@ -88,7 +108,9 @@ export default function RemindersPage() {
 
   // Form state for Cron Schedule
   const [apiKey, setApiKey] = useState("")
-  const [dayOfMonth, setDayOfMonth] = useState<number>(1)
+  const [dueDay, setDueDay] = useState<number>(5)
+  const [daysBefore, setDaysBefore] = useState<number>(1)
+  const [daysAfter, setDaysAfter] = useState<number>(0)
   const [daysOfMonth, setDaysOfMonth] = useState<number[]>([1])
   const [hour, setHour] = useState<number>(9)
   const [minute, setMinute] = useState<number>(0)
@@ -121,12 +143,25 @@ export default function RemindersPage() {
       if (res) {
         setData(res)
         setApiKey(res.settings.apiKey || "")
-        const days = Array.isArray(res.settings.schedule?.daysOfMonth)
-          ? (res.settings.schedule.daysOfMonth as number[]).filter((d) => d >= 1 && d <= 28)
-          : []
-        const loaded = days.length > 0 ? days : [res.settings.schedule?.dayOfMonth ?? 1]
-        setDaysOfMonth(Array.from(new Set(loaded)).sort((a, b) => a - b))
-        setDayOfMonth(loaded[0] ?? 1)
+        const s = res.settings.schedule
+        // Prefer the due-date-relative schedule; fall back to explicit day
+        // lists or the legacy single day.
+        const legacyDays = Array.isArray(s?.daysOfMonth) ? s!.daysOfMonth! : []
+        const due = s?.dueDate ?? (legacyDays.length > 0 ? legacyDays[0] : s?.dayOfMonth) ?? 5
+        const before = s?.daysBefore ?? 1
+        const after = s?.daysAfter ?? 0
+        if (legacyDays.length > 0 && s?.dueDate === undefined) {
+          // Legacy stored schedule (explicit list) — show as before=0/after=0 on that due day.
+          setDaysOfMonth(legacyDays)
+          setDueDay(Number(legacyDays[0]) || 5)
+          setDaysBefore(0)
+          setDaysAfter(0)
+        } else {
+          setDueDay(Math.min(28, Math.max(1, Number(due) || 5)))
+          setDaysBefore(Math.min(27, Math.max(0, Number(before) || 0)))
+          setDaysAfter(Math.min(27, Math.max(0, Number(after) || 0)))
+        }
+        setDaysOfMonth(deriveReminderDays(Number(due) || 5, Number(before) || 0, Number(after) || 0))
         setHour(res.settings.schedule?.hour ?? 9)
         setMinute(res.settings.schedule?.minute ?? 0)
         setTimezone(res.settings.schedule?.timezone || "Asia/Kolkata")
@@ -200,14 +235,18 @@ export default function RemindersPage() {
     setActionSuccess(null)
     setActionError(null)
     try {
+      const derived = deriveReminderDays(dueDay, daysBefore, daysAfter)
       const res = await syncCronJob({
         apiKey: apiKey.trim(),
         title: `Monthly Student Fee Reminder (${activeProfile?.name || "MyFees"})`,
         targetUrl: "https://myfees.myenum.in/api/reminders/cron/monthly",
         schedule: {
           timezone,
-          dayOfMonth: Number(dayOfMonth),
-          daysOfMonth: daysOfMonth.length > 0 ? daysOfMonth : [Number(dayOfMonth)],
+          dueDate: Number(dueDay),
+          daysBefore: Number(daysBefore),
+          daysAfter: Number(daysAfter),
+          dayOfMonth: Number(dueDay),
+          daysOfMonth: derived.length > 0 ? derived : [Number(dueDay)],
           hour: Number(hour),
           minute: Number(minute),
         },
@@ -223,15 +262,11 @@ export default function RemindersPage() {
     }
   }
 
-  const toggleDayOfMonth = (day: number) => {
-    setReminderError("")
-    setDaysOfMonth((prev) => {
-      const next = prev.includes(day)
-        ? prev.filter((d) => d !== day)
-        : [...prev, day].sort((a, b) => a - b)
-      return next.length > 0 ? next : prev // never allow an empty day selection
-    })
-  }
+  // Reminder days computed live from due date + before/after offsets.
+  const reminderDays = useMemo(
+    () => deriveReminderDays(dueDay, daysBefore, daysAfter),
+    [dueDay, daysBefore, daysAfter]
+  )
 
   function toggleReminderStudent(id: string) {
     setReminderStudentIds((prev) =>
@@ -645,8 +680,8 @@ export default function RemindersPage() {
             </span>
           </div>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            Schedule: Every month on day{" "}
-            {(daysOfMonth.length > 0 ? daysOfMonth : [dayOfMonth]).join(", ")}
+            Schedule: due day {dueDay} — {daysBefore}d before, {daysAfter}d after → days{" "}
+            {reminderDays.join(", ")}
           </p>
         </div>
 
@@ -756,35 +791,77 @@ export default function RemindersPage() {
             </div>
 
             <div className="mt-4 space-y-3.5 text-xs">
-              <Field>
-                <FieldLabel className="text-xs font-semibold">
-                  Days of Month ({daysOfMonth.length} selected)
-                </FieldLabel>
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  {Array.from({ length: 28 }, (_, i) => i + 1).map((day) => {
-                    const active = daysOfMonth.includes(day)
-                    return (
-                      <button
-                        key={day}
-                        type="button"
-                        onClick={() => toggleDayOfMonth(day)}
-                        aria-pressed={active}
-                        className={cn(
-                          "h-7 w-7 rounded-md border text-xs font-medium transition-colors",
-                          active
-                            ? "border-primary bg-primary text-primary-foreground"
-                            : "border-input bg-card text-muted-foreground hover:border-foreground/30 hover:text-foreground"
-                        )}
-                      >
-                        {day}
-                      </button>
-                    )
-                  })}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Field>
+                  <FieldLabel className="text-xs font-semibold">Fee Due Day</FieldLabel>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={28}
+                    value={dueDay}
+                    onChange={(e) => setDueDay(Math.min(28, Math.max(1, parseInt(e.target.value) || 5)))}
+                    className="mt-1 text-xs"
+                  />
+                </Field>
+
+                <Field>
+                  <FieldLabel className="text-xs font-semibold">Reminders Before Due (days)</FieldLabel>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={27}
+                    value={daysBefore}
+                    onChange={(e) => setDaysBefore(Math.min(27, Math.max(0, parseInt(e.target.value) || 0)))}
+                    className="mt-1 text-xs"
+                  />
+                </Field>
+
+                <Field>
+                  <FieldLabel className="text-xs font-semibold">Reminders After Due (days)</FieldLabel>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={27}
+                    value={daysAfter}
+                    onChange={(e) => setDaysAfter(Math.min(27, Math.max(0, parseInt(e.target.value) || 0)))}
+                    className="mt-1 text-xs"
+                  />
+                </Field>
+              </div>
+
+              {/* Computed schedule: count + per-day values + delivery volume */}
+              <div className="rounded-xl border border-dashed border-foreground/15 bg-muted/40 p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Reminder Schedule Preview
+                  </span>
+                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                    {reminderDays.length} reminder{reminderDays.length === 1 ? "" : "s"} / month
+                  </span>
                 </div>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  Tap the days the reminder should fire (e.g. 1 and 15 for twice a month).
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  {reminderDays.map((day) => (
+                    <span
+                      key={day}
+                      className={cn(
+                        "rounded-md px-2 py-1 text-[11px] font-semibold",
+                        day === dueDay
+                          ? "bg-primary text-primary-foreground"
+                          : "border bg-card text-foreground"
+                      )}
+                    >
+                      Day {day}
+                      {day === dueDay ? " (due)" : day < dueDay ? " (before)" : " (after)"}
+                    </span>
+                  ))}
+                </div>
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  Each reminder day sends <span className="font-semibold text-foreground">{students.length}</span>{" "}
+                  student message{students.length === 1 ? "" : "s"} —{" "}
+                  {reminderDays.length * students.length} total messages/month, one at a time via the
+                  anti-ban queue at {hour}:00 {timezone}.
                 </p>
-              </Field>
+              </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <Field>

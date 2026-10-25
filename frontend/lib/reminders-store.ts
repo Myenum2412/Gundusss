@@ -5,7 +5,13 @@ export interface CronScheduleConfig {
   hour: number
   minute: number
   dayOfMonth: number
-  /** Multiple days of the month (e.g. [1, 5, 15]); falls back to dayOfMonth. */
+  /** Fee due date (day of month, 1-28). Drives the before/after offsets. */
+  dueDate?: number
+  /** Reminders this many days before the due date. */
+  daysBefore?: number
+  /** Reminders this many days after the due date. */
+  daysAfter?: number
+  /** Explicit day list; falls back to dayOfMonth. */
   daysOfMonth?: number[]
 }
 

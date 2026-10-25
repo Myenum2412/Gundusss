@@ -31,25 +31,54 @@ export interface CronScheduleConfig {
   minute: number;
   /** Legacy single day. Kept for backwards compatibility with stored settings. */
   dayOfMonth: number;
+  /** Due date of the fee (day of month, 1-28). Drives before/after offsets. */
+  dueDate?: number;
+  /** Reminder reminders N days before the due date (0-27). */
+  daysBefore?: number;
+  /** Reminder reminders N days after the due date (0-27). */
+  daysAfter?: number;
   /**
-   * Multi-day support: reminders can fire on several days of the month
+   * Multi-day support: explicit list of days when reminders fire
    * (e.g. [1, 5, 15]). Cron-job.org receives these as mdays. Absent/empty
    * means "only dayOfMonth" (legacy behaviour).
    */
   daysOfMonth?: number[];
 }
 
-/** Normalized, validated day list for a stored schedule. */
+/**
+ * Normalized, validated day list for a stored schedule. Priority:
+ * explicit daysOfMonth > daysBefore/daysAfter around dueDate > legacy dayOfMonth.
+ */
 function scheduleDaysOfMonth(schedule?: Partial<CronScheduleConfig> | null): number[] {
+  const clampDay = (n: unknown, fallback: number) => {
+    const t = Math.trunc(Number(n));
+    return Number.isInteger(t) && t >= 1 && t <= 28 ? t : fallback;
+  };
+
+  // 1. Explicit day list (sent by the UI after computing before/after).
   const multi = Array.isArray(schedule?.daysOfMonth)
     ? schedule!.daysOfMonth!
         .map((d) => Math.trunc(Number(d)))
         .filter((d) => Number.isInteger(d) && d >= 1 && d <= 28)
     : [];
-  const unique = Array.from(new Set(multi)).sort((a, b) => a - b);
-  if (unique.length > 0) return unique;
-  const legacy = Math.trunc(Number(schedule?.dayOfMonth ?? 1));
-  return [Number.isInteger(legacy) && legacy >= 1 && legacy <= 28 ? legacy : 1];
+  if (multi.length > 0) return Array.from(new Set(multi)).sort((a, b) => a - b);
+
+  // 2. Relative to the due date: N days before + due date + M days after.
+  const due = clampDay(schedule?.dueDate ?? schedule?.dayOfMonth, 1);
+  const before = Math.min(27, Math.max(0, Math.trunc(Number(schedule?.daysBefore ?? 0)) || 0));
+  const after = Math.min(27, Math.max(0, Math.trunc(Number(schedule?.daysAfter ?? 0)) || 0));
+  const derived: number[] = [];
+  for (let i = before; i >= 1; i--) {
+    if (due - i >= 1) derived.push(due - i);
+  }
+  derived.push(due);
+  for (let i = 1; i <= after; i++) {
+    if (due + i <= 28) derived.push(due + i);
+  }
+  if (derived.length > 0) return Array.from(new Set(derived)).sort((a, b) => a - b);
+
+  // 3. Legacy single day.
+  return [due];
 }
 
 export interface ReminderRunLog {
@@ -87,7 +116,10 @@ const DEFAULT_SCHEDULE: CronScheduleConfig = {
   timezone: 'Asia/Kolkata',
   hour: 9,
   minute: 0,
-  dayOfMonth: 1, // 1st of every month
+  dayOfMonth: 5, // legacy mirror of the due date
+  dueDate: 5, // fee due on the 5th of every month
+  daysBefore: 1, // one reminder the day before
+  daysAfter: 0,
 };
 
 function defaultSettings(): StoredReminderSettings {
@@ -503,6 +535,9 @@ export async function reminderRoutes(app: FastifyInstance) {
         : DEFAULT_SCHEDULE.timezone,
       hour: Math.min(23, Math.max(0, Math.trunc(Number(rawSchedule.hour ?? 9)) || 0)),
       minute: Math.min(59, Math.max(0, Math.trunc(Number(rawSchedule.minute ?? 0)) || 0)),
+      dueDate: Math.min(28, Math.max(1, Math.trunc(Number(rawSchedule.dueDate ?? rawSchedule.dayOfMonth ?? DEFAULT_SCHEDULE.dueDate)) || (DEFAULT_SCHEDULE.dueDate as number))),
+      daysBefore: Math.min(27, Math.max(0, Math.trunc(Number(rawSchedule.daysBefore ?? 0)) || 0)),
+      daysAfter: Math.min(27, Math.max(0, Math.trunc(Number(rawSchedule.daysAfter ?? 0)) || 0)),
       dayOfMonth: scheduleDaysOfMonth(rawSchedule)[0],
       daysOfMonth: scheduleDaysOfMonth(rawSchedule),
     };
