@@ -96,8 +96,8 @@ const BusinessProfileSchema = z.object({
 
   media: z
     .object({
-      logoUrl: str(1000),
-      coverUrl: str(1000),
+      logoUrl: z.string().max(2_000_000).default(''),
+      coverUrl: z.string().max(2_000_000).default(''),
       photos: list(50, 1000),
       videoUrl: str(1000),
     })
