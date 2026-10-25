@@ -5,6 +5,8 @@ export interface CronScheduleConfig {
   hour: number
   minute: number
   dayOfMonth: number
+  /** Multiple days of the month (e.g. [1, 5, 15]); falls back to dayOfMonth. */
+  daysOfMonth?: number[]
 }
 
 export interface ReminderRecipient {

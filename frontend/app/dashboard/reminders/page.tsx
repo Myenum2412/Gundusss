@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
@@ -6,8 +6,19 @@ import { useAuth } from "@/components/auth-provider"
 import { LiveBadge } from "@/components/live-badge"
 import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { fileToBase64 } from "@/lib/file-base64"
+import { loadAnnouncements, saveAnnouncements, type StoredAnnouncement } from "@/lib/announcements-store"
 import {
   Table,
   TableBody,
@@ -43,6 +54,7 @@ import {
   KeyIcon,
   Loader2Icon,
   MessageSquareIcon,
+  PaperclipIcon,
   PhoneIcon,
   PlayIcon,
   RefreshCwIcon,
@@ -51,8 +63,11 @@ import {
   SparklesIcon,
   TriangleAlertIcon,
   UsersIcon,
+  X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+
+const MAX_FILE_BYTES = 3 * 1024 * 1024 // 3 MB per file (base64 must fit the API body limit)
 
 export default function RemindersPage() {
   const { user, activeProfile, can } = useAuth()
@@ -74,27 +89,44 @@ export default function RemindersPage() {
   // Form state for Cron Schedule
   const [apiKey, setApiKey] = useState("")
   const [dayOfMonth, setDayOfMonth] = useState<number>(1)
+  const [daysOfMonth, setDaysOfMonth] = useState<number[]>([1])
   const [hour, setHour] = useState<number>(9)
   const [minute, setMinute] = useState<number>(0)
   const [timezone, setTimezone] = useState("Asia/Kolkata")
+
+  // Form state for the custom reminder dialog
+  const [reminderOpen, setReminderOpen] = useState(false)
+  const [reminderForm, setReminderForm] = useState({ title: "", message: "" })
+  const [reminderStudentIds, setReminderStudentIds] = useState<string[]>([])
+  const [reminderFiles, setReminderFiles] = useState<File[]>([])
+  const [reminderSending, setReminderSending] = useState(false)
+  const [reminderFilesRef, setReminderFilesRef] = useState<HTMLInputElement | null>(null)
+  const [reminderError, setReminderError] = useState("")
+  const [recentCustomReminders, setRecentCustomReminders] = useState<StoredAnnouncement[]>([])
 
   const refreshAll = useCallback(async () => {
     setLoading(true)
     setActionError(null)
     try {
-      const [res, stu, grp, fee, rcp, wa] = await Promise.all([
+      const [res, stu, grp, fee, rcp, wa, ann] = await Promise.all([
         loadRemindersStatus().catch(() => null),
         loadStudents().catch(() => []),
         loadGroups().catch(() => []),
         loadFeeStructures().catch(() => []),
         loadReceipts().catch(() => []),
         getWaStatus().catch(() => null),
+        loadAnnouncements().catch(() => []),
       ])
 
       if (res) {
         setData(res)
         setApiKey(res.settings.apiKey || "")
-        setDayOfMonth(res.settings.schedule?.dayOfMonth ?? 1)
+        const days = Array.isArray(res.settings.schedule?.daysOfMonth)
+          ? (res.settings.schedule.daysOfMonth as number[]).filter((d) => d >= 1 && d <= 28)
+          : []
+        const loaded = days.length > 0 ? days : [res.settings.schedule?.dayOfMonth ?? 1]
+        setDaysOfMonth(Array.from(new Set(loaded)).sort((a, b) => a - b))
+        setDayOfMonth(loaded[0] ?? 1)
         setHour(res.settings.schedule?.hour ?? 9)
         setMinute(res.settings.schedule?.minute ?? 0)
         setTimezone(res.settings.schedule?.timezone || "Asia/Kolkata")
@@ -104,6 +136,7 @@ export default function RemindersPage() {
       setFeeStructures(fee)
       setReceipts(rcp)
       setWaState(wa)
+      setRecentCustomReminders((ann as StoredAnnouncement[]).slice(-5).reverse())
       if (stu.length > 0 && !selectedStudentId) {
         setSelectedStudentId(stu[0].studentId)
       }
@@ -174,6 +207,7 @@ export default function RemindersPage() {
         schedule: {
           timezone,
           dayOfMonth: Number(dayOfMonth),
+          daysOfMonth: daysOfMonth.length > 0 ? daysOfMonth : [Number(dayOfMonth)],
           hour: Number(hour),
           minute: Number(minute),
         },
@@ -189,8 +223,130 @@ export default function RemindersPage() {
     }
   }
 
-  const handleSendSingleWa = async (stu: StoredStudent) => {
-    const feeInfo = resolveStudentFee(stu, feeStructures, groups)
+  const toggleDayOfMonth = (day: number) => {
+    setReminderError("")
+    setDaysOfMonth((prev) => {
+      const next = prev.includes(day)
+        ? prev.filter((d) => d !== day)
+        : [...prev, day].sort((a, b) => a - b)
+      return next.length > 0 ? next : prev // never allow an empty day selection
+    })
+  }
+
+  function toggleReminderStudent(id: string) {
+    setReminderStudentIds((prev) =>
+      prev.includes(id)
+        ? prev.filter((s) => s !== id)
+        : [...prev, id]
+    )
+  }
+
+  function addReminderFiles(selected: FileList | null) {
+    if (!selected || selected.length === 0) return
+    const incoming = Array.from(selected)
+    setReminderError("")
+    setReminderFiles((prev) => [
+      ...prev,
+      ...incoming
+        .filter((f) => f.size <= MAX_FILE_BYTES)
+        .filter((f) => !prev.some((p) => p.name === f.name && p.size === f.size)),
+    ])
+  }
+
+  function clearReminderFormState() {
+    setReminderForm({ title: "", message: "" })
+    setReminderStudentIds([])
+    setReminderFiles([])
+    setReminderError("")
+    if (reminderFilesRef) reminderFilesRef.value = ""
+  }
+
+  async function handleCreateReminder() {
+    if (reminderStudentIds.length === 0) {
+      setReminderError("Select at least one student.")
+      return
+    }
+    if (!reminderForm.message.trim() && !reminderForm.title.trim() && reminderFiles.length === 0) {
+      setReminderError("Write a message, a title, or attach a file.")
+      return
+    }
+    setReminderError("")
+    setReminderSending(true)
+
+    const attachmentsForSend: { name: string; mime: string; data: string }[] = []
+    for (const file of reminderFiles) {
+      try {
+        attachmentsForSend.push({
+          name: file.name,
+          mime: file.type || "application/octet-stream",
+          data: await fileToBase64(file),
+        })
+      } catch {
+        // unreadable file â€” skip
+      }
+    }
+
+    let sent = 0
+    let failed = 0
+    const recipientNames: string[] = []
+    for (const id of reminderStudentIds) {
+      const stu = students.find((st) => st.studentId === id)
+      recipientNames.push(stu ? `${stu.studentName} (${stu.studentId})` : id)
+      try {
+        const titleLine = reminderForm.title.trim()
+        await sendWaMessage({
+          to: stu?.phone ?? id,
+          message: titleLine ? `*${titleLine}*\n${reminderForm.message.trim()}` : reminderForm.message.trim(),
+        })
+        for (const att of attachmentsForSend) {
+          await sendWaMessage({ to: stu?.phone ?? id, message: "", attachment: att })
+        }
+        sent += 1
+      } catch {
+        failed += 1
+      }
+    }
+
+    // Save the reminder as an announcement-shaped record so it shows up in
+    // both lists (announcements page + this page's recent reminders).
+    try {
+      const stored = await loadAnnouncements().catch(() => [])
+      const max = stored.reduce((m, a) => {
+        const n = parseInt(a.announcementId.replace(/\D/g, ""), 10)
+        return Number.isNaN(n) ? m : Math.max(m, n)
+      }, 0)
+      const record: StoredAnnouncement = {
+        announcementId: `REM-${String(max + 1).padStart(3, "0")}`,
+        title: reminderForm.title.trim() || "Custom reminder",
+        message: reminderForm.message,
+        recipientIds: [...reminderStudentIds],
+        recipientNames,
+        attachments: reminderFiles.map((f) => ({
+          name: f.name,
+          mime: f.type || "application/octet-stream",
+        })),
+        sentCount: sent,
+        failedCount: failed,
+        status: failed === 0 ? "Sent" : sent === 0 ? "Failed" : "Partial",
+        createdAt: new Date().toISOString(),
+      }
+      await saveAnnouncements([...stored, record])
+    } catch (error) {
+      console.error("Failed to save reminder record", error)
+    }
+
+    clearReminderFormState()
+    setReminderSending(false)
+    setReminderOpen(false)
+    setActionSuccess(
+      `Reminder sent to ${sent} student(s)` +
+        (failed > 0 ? ` â€” ${failed} failed` : "") +
+        "."
+    )
+    await refreshAll()
+  }
+
+  const handleSendSingleWa = async (stu: StoredStudent) => {    const feeInfo = resolveStudentFee(stu, feeStructures, groups)
     const feeAmount = feeInfo.amount || "5000"
     const phone = (stu.phone || "").replace(/\D/g, "")
     if (!phone) {
@@ -199,7 +355,7 @@ export default function RemindersPage() {
     }
 
     const studentPaymentUrl = `${activeProfile?.paymentUrl || "https://myfees.myenum.in/amarnath"}?student=${encodeURIComponent(stu.studentId)}`
-    const msg = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${stu.studentName}*,\n\nThis is your monthly fee reminder for *${stu.course || "Course"}* (${stu.group || "Batch"}).\n\n• Student ID: *${stu.studentId}*\n• Monthly Fee: *₹${parseFloat(feeAmount).toLocaleString("en-IN")}*\n• Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\n👉 ${studentPaymentUrl}\n\n— ${activeProfile?.name || "MyFees"} Accounts Desk`
+    const msg = `ðŸ”” *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${stu.studentName}*,\n\nThis is your monthly fee reminder for *${stu.course || "Course"}* (${stu.group || "Batch"}).\n\nâ€¢ Student ID: *${stu.studentId}*\nâ€¢ Monthly Fee: *â‚¹${parseFloat(feeAmount).toLocaleString("en-IN")}*\nâ€¢ Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\nðŸ‘‰ ${studentPaymentUrl}\n\nâ€” ${activeProfile?.name || "MyFees"} Accounts Desk`
 
     if (waState?.status === "ready") {
       try {
@@ -234,9 +390,175 @@ export default function RemindersPage() {
       <PageHeader
         title="Fee Reminders & Automated Schedules"
         description="Automate monthly WhatsApp fee reminders to students using cron-job.org REST API."
+        liveSlot={<LiveBadge />}
         actions={
-          <div className="flex items-center gap-2">
-            <LiveBadge />
+          <>
+            <Dialog
+              open={reminderOpen}
+              onOpenChange={(v) => {
+                if (!v) clearReminderFormState()
+                setReminderOpen(v)
+              }}
+            >
+              <DialogTrigger render={<Button size="sm" />}>
+                <SparklesIcon className="size-3.5" />
+                <span>New Reminder</span>
+              </DialogTrigger>
+              <DialogContent className="max-h-[90vh] overflow-y-auto p-0 sm:max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle className="text-base font-semibold tracking-tight">
+                    New Reminder
+                  </DialogTitle>
+                  <DialogDescription>
+                    Sent immediately to the selected students on WhatsApp; saved to your announcement log.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="grid gap-4 px-6 py-5">
+                  <Field>
+                    <FieldLabel htmlFor="reminder-title">Title</FieldLabel>
+                    <Input
+                      id="reminder-title"
+                      placeholder="e.g. Test series payment due tomorrow"
+                      value={reminderForm.title}
+                      onChange={(e) =>
+                        setReminderForm((f) => ({ ...f, title: e.target.value }))
+                      }
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="reminder-message">Message</FieldLabel>
+                    <textarea
+                      id="reminder-message"
+                      placeholder="Type the reminder sent to WhatsApp"
+                      value={reminderForm.message}
+                      onChange={(e) =>
+                        setReminderForm((f) => ({ ...f, message: e.target.value }))
+                      }
+                      rows={4}
+                      className={cn(
+                        "min-h-20 w-full min-w-0 rounded-[10px] border border-input bg-card px-3 py-2 text-sm shadow-[0_1px_2px_rgba(16,24,40,0.04)] outline-none transition-[border-color,box-shadow] duration-200 placeholder:text-muted-foreground/70 hover:border-foreground/20 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+                      )}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel>Attachments (optional) — up to 3 MB each</FieldLabel>
+                    <input
+                      ref={setReminderFilesRef}
+                      type="file"
+                      multiple
+                      className="sr-only"
+                      id="reminder-files"
+                      onChange={(e) => {
+                        addReminderFiles(e.target.files)
+                        e.target.value = ""
+                      }}
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={() => reminderFilesRef?.click()}>
+                        <PaperclipIcon className="size-3.5" />
+                        <span>Choose files</span>
+                      </Button>
+                      {reminderFiles.length > 0 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setReminderFiles([])
+                            if (reminderFilesRef) reminderFilesRef.value = ""
+                          }}
+                        >
+                          <X className="size-3.5" />
+                          <span>Clear all</span>
+                        </Button>
+                      )}
+                    </div>
+                    {reminderFiles.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {reminderFiles.map((f, i) => (
+                          <span
+                            key={`${f.name}-${f.size}-${i}`}
+                            className="inline-flex max-w-full items-center gap-1 rounded-full border bg-card px-2.5 py-1 text-xs text-muted-foreground"
+                          >
+                            <span className="max-w-56 truncate font-medium text-foreground" title={f.name}>
+                              {f.name}
+                            </span>
+                            <span className="shrink-0">{(f.size / 1024).toFixed(0)} KB</span>
+                            <button
+                              type="button"
+                              className="shrink-0 rounded-full p-0.5 hover:bg-muted"
+                              onClick={() => setReminderFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                              aria-label={`Remove ${f.name}`}
+                            >
+                              <X className="size-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </Field>
+                  <Field>
+                    <FieldLabel>Students ({reminderStudentIds.length} of {students.length} selected)</FieldLabel>
+                    <div className="max-h-52 overflow-y-auto rounded-[10px] border border-input bg-card p-1.5 custom-scroll">
+                      {students.length === 0 ? (
+                        <p className="px-2 py-4 text-center text-sm text-muted-foreground">
+                          No students found. Add students first on the Students page.
+                        </p>
+                      ) : (
+                        students.map((stu) => (
+                          <label
+                            key={stu.studentId}
+                            className="app-transition flex cursor-pointer items-center justify-between rounded-lg px-2.5 py-1.5 text-sm hover:bg-muted"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <input
+                                type="checkbox"
+                                className="size-4 accent-primary"
+                                checked={reminderStudentIds.includes(stu.studentId)}
+                                onChange={() => toggleReminderStudent(stu.studentId)}
+                              />
+                              <span className="font-medium text-foreground">{stu.studentName}</span>
+                              <span className="font-mono text-xs text-muted-foreground">{stu.studentId}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
+                              {stu.course && <span>{stu.course}</span>}
+                              {stu.group ? (
+                                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">{stu.group}</span>
+                              ) : null}
+                            </div>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </Field>
+                  {reminderError && <p className="text-sm text-destructive">{reminderError}</p>}
+                </div>
+
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      clearReminderFormState()
+                      setReminderOpen(false)
+                    }}
+                    disabled={reminderSending}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="button" onClick={handleCreateReminder} disabled={reminderSending}>
+                    {reminderSending ? (
+                      <Loader2Icon className="size-3.5 animate-spin" />
+                    ) : (
+                      <SendIcon className="size-3.5" />
+                    )}
+                    {reminderSending ? "Sending…" : "Send Reminder"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
             <Button
               type="button"
               variant="outline"
@@ -266,7 +588,7 @@ export default function RemindersPage() {
                 <span>Run Reminder Now</span>
               </Button>
             )}
-          </div>
+          </>
         }
       />
 
@@ -323,7 +645,8 @@ export default function RemindersPage() {
             </span>
           </div>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            Schedule: Every month on day {dayOfMonth}
+            Schedule: Every month on day{" "}
+            {(daysOfMonth.length > 0 ? daysOfMonth : [dayOfMonth]).join(", ")}
           </p>
         </div>
 
@@ -370,6 +693,52 @@ export default function RemindersPage() {
         </div>
       </div>
 
+      {/* Recent Custom Reminders */}
+      {recentCustomReminders.length > 0 && (
+        <div className="rounded-2xl border bg-card p-5 shadow-xs">
+          <div className="flex items-center justify-between border-b pb-3">
+            <div className="flex items-center gap-2">
+              <BellRingIcon className="size-4 text-primary" />
+              <h3 className="font-semibold text-sm">Recent Custom Reminders</h3>
+            </div>
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+              {recentCustomReminders.length} recent
+            </span>
+          </div>
+          <div className="mt-3 divide-y">
+            {recentCustomReminders.map((rem) => (
+              <div key={rem.announcementId} className="flex items-start justify-between gap-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[11px] text-muted-foreground">{rem.announcementId}</span>
+                    <StatusBadge value={rem.status} />
+                  </div>
+                  <p className="mt-0.5 truncate text-sm font-medium text-foreground">{rem.title}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {rem.recipientNames?.slice(0, 3).join(", ")}
+                    {(rem.recipientNames?.length ?? 0) > 3 && ` +${rem.recipientNames.length - 3} more`}
+                    {" · "}
+                    {new Date(rem.createdAt).toLocaleString()}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right text-xs text-muted-foreground">
+                  <span className="font-medium text-emerald-600">{rem.sentCount} sent</span>
+                  {(rem.failedCount ?? 0) > 0 && (
+                    <span className="text-red-600"> · {rem.failedCount} failed</span>
+                  )}
+                  {(rem.attachments?.length ?? 0) > 0 && (
+                    <p className="mt-0.5 flex items-center justify-end gap-1">
+                      <PaperclipIcon className="size-3" />
+                      {rem.attachments!.length}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Main Grid: Left is Schedule & Students, Right is Live WhatsApp Bubble Preview */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
         {/* Left Column (7 cols): cron-job.org Configuration & Students List */}
@@ -387,19 +756,37 @@ export default function RemindersPage() {
             </div>
 
             <div className="mt-4 space-y-3.5 text-xs">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <Field>
-                  <FieldLabel className="text-xs font-semibold">Day of Month</FieldLabel>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={28}
-                    value={dayOfMonth}
-                    onChange={(e) => setDayOfMonth(parseInt(e.target.value) || 1)}
-                    className="mt-1 text-xs"
-                  />
-                </Field>
+              <Field>
+                <FieldLabel className="text-xs font-semibold">
+                  Days of Month ({daysOfMonth.length} selected)
+                </FieldLabel>
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {Array.from({ length: 28 }, (_, i) => i + 1).map((day) => {
+                    const active = daysOfMonth.includes(day)
+                    return (
+                      <button
+                        key={day}
+                        type="button"
+                        onClick={() => toggleDayOfMonth(day)}
+                        aria-pressed={active}
+                        className={cn(
+                          "h-7 w-7 rounded-md border text-xs font-medium transition-colors",
+                          active
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-input bg-card text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+                        )}
+                      >
+                        {day}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Tap the days the reminder should fire (e.g. 1 and 15 for twice a month).
+                </p>
+              </Field>
 
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <Field>
                   <FieldLabel className="text-xs font-semibold">Hour (24h)</FieldLabel>
                   <Input
@@ -512,7 +899,7 @@ export default function RemindersPage() {
                             </span>
                           </TableCell>
                           <TableCell className="font-semibold tabular-nums">
-                            ₹{parseFloat(feeAmount).toLocaleString("en-IN")}
+                            â‚¹{parseFloat(feeAmount).toLocaleString("en-IN")}
                           </TableCell>
                           <TableCell className="text-right">
                             <Button
@@ -562,8 +949,8 @@ export default function RemindersPage() {
                     <span>Monthly Fee Payment Reminder</span>
                   </div>
                 }
-                body={`Dear Parent / Student *${previewStudent?.studentName || "Student"}*,\n\nThis is your monthly fee reminder for *${previewStudent?.course || "Science"}* (${previewStudent?.group || "Science Batch A"}).\n\n• Student ID: *${previewStudent?.studentId || "STU-001"}*\n• Monthly Fee: *₹${parseFloat(previewFee).toLocaleString("en-IN")}*\n• Due Date: 5th of this month\n\nPlease tap the button below to pay directly via UPI / Card:`}
-                footer={`${activeProfile?.name || "MyFees"} · Tap Pay Now below to complete payment`}
+                body={`Dear Parent / Student *${previewStudent?.studentName || "Student"}*,\n\nThis is your monthly fee reminder for *${previewStudent?.course || "Science"}* (${previewStudent?.group || "Science Batch A"}).\n\nâ€¢ Student ID: *${previewStudent?.studentId || "STU-001"}*\nâ€¢ Monthly Fee: *â‚¹${parseFloat(previewFee).toLocaleString("en-IN")}*\nâ€¢ Due Date: 5th of this month\n\nPlease tap the button below to pay directly via UPI / Card:`}
+                footer={`${activeProfile?.name || "MyFees"} Â· Tap Pay Now below to complete payment`}
                 buttons={[
                   {
                     id: "pay-now",
@@ -600,7 +987,7 @@ export default function RemindersPage() {
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Monthly Fee Amount:</span>
                   <span className="font-bold text-foreground">
-                    ₹{parseFloat(previewFee).toLocaleString("en-IN")}
+                    â‚¹{parseFloat(previewFee).toLocaleString("en-IN")}
                   </span>
                 </div>
               </div>

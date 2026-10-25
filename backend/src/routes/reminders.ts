@@ -28,7 +28,27 @@ export interface CronScheduleConfig {
   timezone: string;
   hour: number;
   minute: number;
+  /** Legacy single day. Kept for backwards compatibility with stored settings. */
   dayOfMonth: number;
+  /**
+   * Multi-day support: reminders can fire on several days of the month
+   * (e.g. [1, 5, 15]). Cron-job.org receives these as mdays. Absent/empty
+   * means "only dayOfMonth" (legacy behaviour).
+   */
+  daysOfMonth?: number[];
+}
+
+/** Normalized, validated day list for a stored schedule. */
+function scheduleDaysOfMonth(schedule?: Partial<CronScheduleConfig> | null): number[] {
+  const multi = Array.isArray(schedule?.daysOfMonth)
+    ? schedule!.daysOfMonth!
+        .map((d) => Math.trunc(Number(d)))
+        .filter((d) => Number.isInteger(d) && d >= 1 && d <= 28)
+    : [];
+  const unique = Array.from(new Set(multi)).sort((a, b) => a - b);
+  if (unique.length > 0) return unique;
+  const legacy = Math.trunc(Number(schedule?.dayOfMonth ?? 1));
+  return [Number.isInteger(legacy) && legacy >= 1 && legacy <= 28 ? legacy : 1];
 }
 
 export interface ReminderRunLog {
@@ -113,7 +133,8 @@ async function createCronJob(apiKey: string, payload: {
         timezone: payload.schedule.timezone || 'Asia/Kolkata',
         hours: [payload.schedule.hour],
         minutes: [payload.schedule.minute],
-        mdays: [payload.schedule.dayOfMonth],
+        // Multi-day-aware: falls back to the legacy single day of month.
+        mdays: scheduleDaysOfMonth(payload.schedule),
         months: [-1], // every month
         wdays: [-1],  // every day of week
         expiresAt: 0,
@@ -419,7 +440,18 @@ export async function reminderRoutes(app: FastifyInstance) {
     const title = body.title || 'Monthly Student Fee Reminder (MyFees)';
     const targetUrl =
       body.targetUrl || 'https://myfees.myenum.in/api/reminders/cron/monthly';
-    const schedule = body.schedule || DEFAULT_SCHEDULE;
+    const rawSchedule = (body.schedule || DEFAULT_SCHEDULE) as Partial<CronScheduleConfig>;
+    // Sanitize: normalize days + clamp time fields so cron-job.org never
+    // receives an invalid schedule.
+    const schedule: CronScheduleConfig = {
+      timezone: typeof rawSchedule.timezone === 'string' && rawSchedule.timezone.trim()
+        ? rawSchedule.timezone.trim()
+        : DEFAULT_SCHEDULE.timezone,
+      hour: Math.min(23, Math.max(0, Math.trunc(Number(rawSchedule.hour ?? 9)) || 0)),
+      minute: Math.min(59, Math.max(0, Math.trunc(Number(rawSchedule.minute ?? 0)) || 0)),
+      dayOfMonth: scheduleDaysOfMonth(rawSchedule)[0],
+      daysOfMonth: scheduleDaysOfMonth(rawSchedule),
+    };
 
     try {
       const created = await createCronJob(apiKey, {

@@ -40,6 +40,7 @@ import {
   type StoredAnnouncement,
 } from "@/lib/announcements-store"
 import { sendWaMessage } from "@/lib/api"
+import { fileToBase64 } from "@/lib/file-base64"
 import { MegaphoneIcon, PaperclipIcon, PlusIcon, X } from "lucide-react"
 
 const textareaClassName =
@@ -55,19 +56,6 @@ const initialForm = {
 
 function nextAnnouncementId(n: number) {
   return `ANN-${String(n).padStart(3, "0")}`
-}
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = String(reader.result ?? "")
-      const comma = result.indexOf(",")
-      resolve(comma >= 0 ? result.slice(comma + 1) : result)
-    }
-    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"))
-    reader.readAsDataURL(file)
-  })
 }
 
 export default function AnnouncementsPage() {
@@ -326,12 +314,12 @@ export default function AnnouncementsPage() {
       <PageHeader
         title="Announcements"
         description="Compose once — delivered to each student on WhatsApp, one by one. Connect WhatsApp in Settings first."
+        liveSlot={<LiveBadge />}
         meta={
           <span className="flex items-center gap-2">
             <span className="inline-flex h-6 items-center rounded-full border bg-card px-2.5 text-xs font-medium text-muted-foreground">
               {items.length} total
             </span>
-            <LiveBadge />
           </span>
         }
         actions={

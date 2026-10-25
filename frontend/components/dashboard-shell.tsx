@@ -79,11 +79,14 @@ export function PageHeader({
   description,
   meta,
   actions,
+  liveSlot,
 }: {
   title: string
   description: string
   meta?: React.ReactNode
   actions?: React.ReactNode
+  /** Always-visible right-corner slot (e.g. LiveBadge) — not permission-gated. */
+  liveSlot?: React.ReactNode
 }) {
   const { can } = useAuth()
   return (
@@ -95,9 +98,10 @@ export function PageHeader({
         </div>
         <p className="mt-1 max-w-2xl text-[13px] text-muted-foreground">{description}</p>
       </div>
-      {actions && can("data:write") && (
-        <div className="flex shrink-0 items-center gap-2">{actions}</div>
-      )}
+      <div className="flex shrink-0 items-center gap-2">
+        {liveSlot}
+        {actions && can("data:write") && <div className="flex items-center gap-2">{actions}</div>}
+      </div>
     </div>
   )
 }
