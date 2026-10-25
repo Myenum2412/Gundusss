@@ -10,7 +10,7 @@
  * working unchanged: getWaState / startWa / logoutWa / sendWaMessage /
  * normalizeWaNumber.
  */
-import { rmSync, mkdirSync, existsSync } from 'node:fs';
+import { rmSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { randomBytes } from 'node:crypto';
@@ -60,6 +60,59 @@ let lastError: string | null = null;
 let starting = false;
 let restartAttempts = 0;
 let reconnectTimer: any = null;
+
+// ---------------------------------------------------------------------------
+// E2EE retry caches & persistent message store
+// Prevents "Waiting for this message. This may take a while" by answering
+// Signal protocol retry requests when WhatsApp recipients need session keys.
+// ---------------------------------------------------------------------------
+const NodeCache = require('node-cache');
+const msgRetryCounterCache = new NodeCache({ stdTTL: 3600, checkperiod: 600 });
+const userDevicesCache = new NodeCache({ stdTTL: 86400, checkperiod: 3600 });
+const messageStore = new NodeCache({ stdTTL: 14 * 86400, checkperiod: 3600 });
+
+const MESSAGES_CACHE_FILE = path.join(AUTH_DIR, 'recent_messages.json');
+
+try {
+  if (existsSync(MESSAGES_CACHE_FILE)) {
+    const raw = readFileSync(MESSAGES_CACHE_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      for (const [k, v] of Object.entries(parsed)) {
+        messageStore.set(k, v);
+      }
+      console.log(`[wa] Loaded ${Object.keys(parsed).length} cached messages for retry`);
+    }
+  }
+} catch {
+  // ignore
+}
+
+let saveMsgTimer: any = null;
+function persistMessage(keyId: string, remoteJid: string, messageProto: any) {
+  if (!keyId || !messageProto) return;
+  messageStore.set(keyId, messageProto);
+  if (remoteJid) {
+    messageStore.set(`${remoteJid}:${keyId}`, messageProto);
+  }
+  if (!saveMsgTimer) {
+    saveMsgTimer = setTimeout(() => {
+      saveMsgTimer = null;
+      try {
+        const keys = messageStore.keys();
+        const dump: Record<string, any> = {};
+        const recent = keys.slice(-1000);
+        for (const k of recent) {
+          dump[k] = messageStore.get(k);
+        }
+        writeFileSync(MESSAGES_CACHE_FILE, JSON.stringify(dump), 'utf-8');
+      } catch {
+        // ignore disk write errors
+      }
+    }, 2000);
+    saveMsgTimer.unref?.();
+  }
+}
 
 /**
  * Delete the paired session from disk. ONLY called when the user explicitly
@@ -204,26 +257,47 @@ export async function startWa() {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
-      browser: ['MyFees Bot', 'Chrome', '122.0.0'],
+      browser: Browsers.ubuntu('Chrome'),
       // We render the QR in the web UI ourselves.
       printQRInTerminal: false,
       logger,
       syncFullHistory: false,
       // Tell WhatsApp not to transfer past chat history: prevents "Sync is paused" on the phone
       shouldSyncHistoryMessage: () => false,
-      // Message lookup fallback to prevent stalls on retry requests
-      getMessage: async () => undefined,
+      msgRetryCounterCache,
+      userDevicesCache,
+      getMessage: async (key: any) => {
+        const id = key?.id;
+        const remoteJid = key?.remoteJid;
+        if (id) {
+          const cached =
+            messageStore.get(id) ||
+            (remoteJid ? messageStore.get(`${remoteJid}:${id}`) : undefined);
+          if (cached) {
+            console.log(`[wa] getMessage: returning stored message for ${remoteJid || id}:${id}`);
+            return cached as any;
+          }
+        }
+        return proto.Message.fromObject({});
+      },
       markOnlineOnConnect: true,
       keepAliveIntervalMs: 20_000,
       connectTimeoutMs: 60_000,
       defaultQueryTimeoutMs: 60_000,
-      retryRequestDelayMs: 500,
+      retryRequestDelayMs: 250,
       maxMsgRetryCount: 5,
     });
 
     sock.ev.on('creds.update', saveCreds);
     sock.ev.on('connection.update', (update: ConnUpdate) => {
       void handleConnectionUpdate(update);
+    });
+    sock.ev.on('messages.upsert', ({ messages }: { messages: any[] }) => {
+      for (const m of messages || []) {
+        if (m.key?.id && m.message) {
+          persistMessage(m.key.id, m.key.remoteJid || '', m.message);
+        }
+      }
     });
     sock.ev.on('messaging-history.set', () => {
       console.log('[wa] history sync acknowledged');
@@ -413,6 +487,9 @@ async function performSend(
   if (textToSend) {
     const sent = await s.sendMessage(jid, { text: textToSend });
     firstId = sent?.key?.id ?? null;
+    if (sent?.key?.id && sent.message) {
+      persistMessage(sent.key.id, jid, sent.message);
+    }
     console.log(`[wa] Sent text message to ${jid} (id: ${firstId})`);
   }
 
@@ -427,6 +504,9 @@ async function performSend(
           : { document: buf, mimetype: att.mime, fileName: att.name }
     );
     firstId = firstId ?? sent?.key?.id ?? null;
+    if (sent?.key?.id && sent.message) {
+      persistMessage(sent.key.id, jid, sent.message);
+    }
     console.log(`[wa] Sent attachment ${att.name} to ${jid}`);
   }
 
