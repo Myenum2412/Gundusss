@@ -10,8 +10,9 @@
  * working unchanged: getWaState / startWa / logoutWa / sendWaMessage /
  * normalizeWaNumber.
  */
-import { existsSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { randomBytes } from 'node:crypto';
 import QRCode from 'qrcode';
 
 const require = createRequire(import.meta.url);
@@ -389,14 +390,18 @@ async function performSend(
     const sawError = await (async () => {
       try {
         if (plainText || attachments.length === 0) {
-          const interactive = buildCtaUrlMessage(
+          // Baileys' sendMessage() cannot route interactive/native-flow
+          // content (generateWAMessageContent has no interactive branch).
+          // The ecosystem-correct path is relayMessage with pre-built proto.
+          const content = buildCtaUrlMessage(
             plainText ||
               `Tap the button below to continue.\n${cta.url}`,
             'MyFees · Payment & updates',
             cta
           );
-          const sent = await s.sendMessage(jid, interactive);
-          firstId = sent?.key?.id ?? null;
+          const msgId = '3EB0' + randomBytes(8).toString('hex').toUpperCase();
+          await s.relayMessage(jid, content as any, { messageId: msgId });
+          firstId = msgId;
         }
       } catch (err: any) {
         console.log(`[wa] cta_url send fell back to plain text: ${err?.message ?? err}`);
