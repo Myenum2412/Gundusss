@@ -11,3 +11,5 @@ backend/.pgdata
 backend/.pgdata.corrupt-*
 *.tsbuildinfo
 whatsapp-qr-*.png
+
+queue-worker/__pycache__/
