@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
-import { createToken, ROLE_PERMISSIONS } from '../auth.js';
+import { createToken, ROLE_PERMISSIONS, verifyToken } from '../auth.js';
 import {
   createWorkspace,
   getProfileOrDefault,
@@ -12,9 +12,11 @@ import { SUPER_PROFILE_ID } from '../tenant.js';
 import {
   countUsers,
   findUserByEmail,
+  getAuthUser,
   normalizeEmail,
   toPublicUser,
   verifyPassword,
+  type PublicUser,
 } from '../users.js';
 
 const SetupSchema = z.object({
@@ -170,6 +172,55 @@ export async function authRoutes(app: FastifyInstance) {
         activeProfile,
       },
     };
+  });
+
+  // GET /api/auth/gate — nginx auth_request target for the gateway-admin panel.
+  // Public (no session required to reach it), but validates the fees session
+  // token that nginx forwards from whichever client source provided it:
+  //   X-Fees-Header: the request's own Authorization header (API calls)
+  //   X-Fees-Cookie: the fees_session cookie (same-origin navigation)
+  //   X-Fees-Arg:    ?fees_token= query param (iframe src built by the dashboard)
+  // Returns 200 only for a valid, active account; anything else is 401.
+  app.get('/api/auth/gate', async (req, reply) => {
+    req.log.info(
+      {
+        h: Object.fromEntries(
+          Object.entries(req.headers)
+            .filter(([k]) => k.startsWith('x-fees-'))
+            .map(([k, v]) => [k, typeof v === 'string' ? v.slice(0, 24) : v])
+        ),
+      },
+      'gate-headers'
+    );
+    const sources = [
+      String(req.headers['x-fees-header'] || ''),
+      String(req.headers['x-fees-cookie'] || ''),
+      // nginx auth subrequests do not inherit ?args=; the main location
+      // stashes the fees token into a variable (set $gate_arg_token) which
+      // subrequests DO see — see the nginx gate config.
+      String(req.headers['x-fees-set'] || ''),
+      String(req.headers['x-fees-arg'] || ''),
+    ];
+    for (const source of sources) {
+      const token = source.replace(/^Bearer\s+/i, '').trim();
+      const payload = verifyToken(token);
+      if (!payload) continue;
+      let user: PublicUser | null = null;
+      try {
+        user = await getAuthUser(payload.email);
+      } catch {
+        return reply
+          .code(503)
+          .send({ error: 'Could not verify the session. Try again.' });
+      }
+      // A signed token that no longer matches an active account is rejected
+      // outright — fall through to 401 rather than trying other sources.
+      if (user && user.active) return reply.code(200).send({ ok: true });
+      break;
+    }
+    return reply.code(401).send({
+      error: 'Open the Gateway Admin from the dashboard to continue.',
+    });
   });
 
   // POST /api/auth/logout — tokens are stateless, so the client simply drops

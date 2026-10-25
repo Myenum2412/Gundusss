@@ -175,6 +175,9 @@ function isPublicRoute(method: string, path: string): boolean {
   if (path === '/api/auth/signup' && method === 'POST') return true;
   if (path === '/api/auth/setup') return true;
   if (path === '/api/auth/logout') return true;
+  // nginx auth_request target for the gateway-admin panel (validates the
+  // token itself — see the /api/auth/gate route for the source precedence).
+  if (path === '/api/auth/gate') return true;
   // The payment gateway authenticates with an HMAC signature, not a user token.
   if (path === '/api/payments/webhook') return true;
   // Public payment page endpoints for students/parents

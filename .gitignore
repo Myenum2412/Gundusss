@@ -10,3 +10,4 @@ backend/.pgdata
 .wwebjs_cache
 backend/.pgdata.corrupt-*
 *.tsbuildinfo
+whatsapp-qr-*.png
