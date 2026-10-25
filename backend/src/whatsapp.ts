@@ -91,6 +91,10 @@ try {
 let saveMsgTimer: any = null;
 function persistMessage(keyId: string, remoteJid: string, messageProto: any) {
   if (!keyId || !messageProto) return;
+  const existing = messageStore.get(keyId) as any;
+  if (existing && Object.keys(existing).length > 0 && (!messageProto || Object.keys(messageProto).length === 0)) {
+    return;
+  }
   messageStore.set(keyId, messageProto);
   if (remoteJid) {
     messageStore.set(`${remoteJid}:${keyId}`, messageProto);
@@ -109,7 +113,7 @@ function persistMessage(keyId: string, remoteJid: string, messageProto: any) {
       } catch {
         // ignore disk write errors
       }
-    }, 2000);
+    }, 1000);
     saveMsgTimer.unref?.();
   }
 }
@@ -294,7 +298,7 @@ export async function startWa() {
     });
     sock.ev.on('messages.upsert', ({ messages }: { messages: any[] }) => {
       for (const m of messages || []) {
-        if (m.key?.id && m.message) {
+        if (m.key?.id && m.message && Object.keys(m.message).length > 0) {
           persistMessage(m.key.id, m.key.remoteJid || '', m.message);
         }
       }
@@ -487,8 +491,12 @@ async function performSend(
   if (textToSend) {
     const sent = await s.sendMessage(jid, { text: textToSend });
     firstId = sent?.key?.id ?? null;
-    if (sent?.key?.id && sent.message) {
-      persistMessage(sent.key.id, jid, sent.message);
+    const protoPayload =
+      sent?.message && Object.keys(sent.message).length > 0
+        ? sent.message
+        : { conversation: textToSend };
+    if (firstId) {
+      persistMessage(firstId, jid, protoPayload);
     }
     console.log(`[wa] Sent text message to ${jid} (id: ${firstId})`);
   }
