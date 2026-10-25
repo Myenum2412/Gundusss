@@ -201,6 +201,13 @@ try {
   console.log(
     `Appwrite store connected: ${getAppwriteStatus().endpoint} | database ${getAppwriteStatus().databaseId}`
   );
+
+  // Warm the WhatsApp engine at boot: inside startWa the Baileys WebSocket is
+  // live ~8s later, so a QR is already waiting in the dashboard right after a
+  // deploy/restart instead of showing "connecting" until the first UI poll.
+  // Import lazily so the WhatsApp stack can never delay the API's boot.
+  const { startWa } = await import('./whatsapp.js');
+  void startWa();
 } catch (err) {
   app.log.error(err);
   process.exit(1);
