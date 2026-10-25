@@ -10,7 +10,8 @@
  * working unchanged: getWaState / startWa / logoutWa / sendWaMessage /
  * normalizeWaNumber.
  */
-import { rmSync } from 'node:fs';
+import { rmSync, mkdirSync, existsSync } from 'node:fs';
+import path from 'node:path';
 import { createRequire } from 'node:module';
 import { randomBytes } from 'node:crypto';
 import QRCode from 'qrcode';
@@ -31,7 +32,17 @@ const pino = require('pino') as (opts: unknown) => any;
 // Keep Baileys protocol logs off — they are enormous and useless in journald.
 const logger = (pino as any)({ level: 'silent' });
 
-const AUTH_DIR = '.baileys_auth';
+const AUTH_DIR = process.env.WA_AUTH_DIR
+  ? path.resolve(process.env.WA_AUTH_DIR)
+  : path.resolve(process.cwd(), '.baileys_auth');
+
+if (!existsSync(AUTH_DIR)) {
+  try {
+    mkdirSync(AUTH_DIR, { recursive: true });
+  } catch {
+    // ignore
+  }
+}
 
 export type WaStatus =
   | 'idle'
@@ -48,16 +59,16 @@ let connectedNumber: string | null = null;
 let lastError: string | null = null;
 let starting = false;
 let restartAttempts = 0;
+let reconnectTimer: any = null;
 
 /**
- * Delete the paired session from disk. Needed whenever the phone revokes the
- * browser (LOGOUT / auth failure): the saved credentials are dead and any
- * reconnect would loop forever on them.
+ * Delete the paired session from disk. ONLY called when the user explicitly
+ * clicks "Log out" in the Settings UI. Never called on transient disconnects.
  */
 function purgeWaSession() {
   try {
     rmSync(AUTH_DIR, { recursive: true, force: true });
-    console.log('[wa] stale auth session purged');
+    console.log('[wa] auth session purged from disk');
   } catch (err: any) {
     console.log(`[wa] could not purge auth session: ${err?.message ?? err}`);
   }
@@ -73,34 +84,6 @@ export function getWaState() {
   };
 }
 
-/** Milliseconds to wait before a fresh start attempt (exponential-ish). */
-function restartDelayMs(): number {
-  return Math.min(60_000, 2_000 * Math.pow(2, restartAttempts));
-}
-
-function armInitWatchdog() {
-  // If no QR and no connection within the window, surface an explicit error
-  // instead of leaving the UI spinning on "connecting" forever.
-  const t = setTimeout(() => {
-    if ((status === 'starting' || status === 'idle') && !starting) return;
-    if (status !== 'starting') return;
-    status = 'error';
-    lastError =
-      'WhatsApp boot timed out (network unreachable or WhatsApp servers unreachable). Connect again to retry.';
-    starting = false;
-    const dead = sock;
-    sock = null;
-    try {
-      void (async () => {
-        await dead?.end(undefined);
-      })().catch(() => undefined);
-    } catch {
-      // ignore
-    }
-  }, Math.max(30_000, Number(process.env.WA_INIT_TIMEOUT_MS ?? 90_000)));
-  (t as { unref?: () => void }).unref?.();
-}
-
 interface ConnUpdate {
   connection?: string;
   qr?: string;
@@ -113,6 +96,7 @@ async function handleConnectionUpdate(update: ConnUpdate) {
       qrDataUrl = await QRCode.toDataURL(update.qr);
       status = 'qr';
       starting = false; // QR is on screen; pairing can now happen at any time
+      console.log('[wa] New QR code generated for scanning in Settings');
     } catch (err: any) {
       lastError = err?.message ?? 'Failed to render QR';
     }
@@ -132,75 +116,64 @@ async function handleConnectionUpdate(update: ConnUpdate) {
     } catch {
       connectedNumber = null;
     }
+    console.log(`[wa] WhatsApp connection open! Connected as +${connectedNumber ?? 'unknown'}`);
     return;
   }
 
   if (update.connection === 'close') {
+    const error = update.lastDisconnect?.error;
     const code =
-      update.lastDisconnect?.error?.output?.statusCode ??
-      update.lastDisconnect?.error?.code ??
+      error?.output?.statusCode ??
+      error?.code ??
+      error?.statusCode ??
       null;
+    const reason = error?.message ?? String(error ?? 'connection closed');
     starting = false;
     qrDataUrl = null;
     connectedNumber = null;
 
-    const loggedOut =
-      code === DisconnectReason.loggedOut ||
-      code === 401 ||
-      code === 403 ||
-      code === DisconnectReason.badSession;
+    console.log(`[wa] Connection closed (code: ${code}, reason: ${reason})`);
 
-    if (loggedOut) {
-      // The phone revoked/invalidated this session. Purge and come back with
-      // a fresh QR automatically.
-      lastError = typeof code === 'number' ? `LOGOUT (${code})` : 'LOGOUT';
-      status = 'disconnected';
-      const dead = sock;
-      sock = null;
-      purgeWaSession();
-      try {
-        void (async () => {
-          await dead?.end(undefined);
-        })().catch(() => undefined);
-      } catch {
-        // ignore
-      }
-      setTimeout(() => {
-        void startWa();
-      }, 1_500).unref?.();
-      return;
+    const dead = sock;
+    sock = null;
+    try {
+      void (async () => {
+        await dead?.end(undefined);
+      })().catch(() => undefined);
+    } catch {
+      // ignore
     }
 
-    // Transient disconnect (515 restart-required after pairing, 440 connection
-    // replaced, network drops...). Backoff-reconnect without touching the
-    // valid session on disk.
+    // CRITICAL: We NEVER call purgeWaSession() on disconnect!
+    // The session credentials stay safely stored on disk in .baileys_auth.
+    // If phone revoked the session, Baileys will automatically emit a new QR.
+
     restartAttempts += 1;
-    if (restartAttempts > 6) {
-      status = 'error';
-      lastError = `Repeated connection failures (code ${code ?? 'unknown'}) — connect again to retry.`;
-      const dead = sock;
-      sock = null;
-      try {
-        void (async () => {
-          await dead?.end(undefined);
-        })().catch(() => undefined);
-      } catch {
-        // ignore
-      }
-      return;
-    }
-    status = 'starting'; // a reconnect is already scheduled
-    setTimeout(() => {
+    // Exponential backoff capped at 30 seconds
+    const delay = Math.min(30_000, 2_000 * Math.pow(1.5, Math.min(restartAttempts, 8)));
+    status = 'starting';
+    lastError = `Connection closed (${code ?? 'unknown'}). Reconnecting in ${Math.round(delay / 1000)}s...`;
+
+    console.log(`[wa] Scheduling reconnect attempt #${restartAttempts} in ${Math.round(delay / 1000)}s...`);
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
       void startWa();
-    }, restartDelayMs()).unref?.();
+    }, delay);
+    reconnectTimer.unref?.();
   }
 }
 
 export async function startWa() {
-  if (status === 'ready' || starting) return getWaState();
+  if (status === 'ready' && sock) return getWaState();
+  if (starting) return getWaState();
   starting = true;
   status = 'starting';
   lastError = null;
+
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
 
   // A previous socket may still be half-alive after an error or disconnect.
   // Tear it (and its listeners) down before creating a new one.
@@ -217,7 +190,14 @@ export async function startWa() {
 
   try {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-    const { version } = await fetchLatestBaileysVersion();
+    let version: [number, number, number] = [2, 3000, 1043857760];
+    try {
+      const fetched = await fetchLatestBaileysVersion();
+      if (fetched?.version) version = fetched.version;
+    } catch (e: any) {
+      console.log(`[wa] fetchLatestBaileysVersion fallback used: ${e?.message ?? e}`);
+    }
+
     sock = makeWASocket({
       version,
       auth: {
@@ -229,26 +209,37 @@ export async function startWa() {
       printQRInTerminal: false,
       logger,
       syncFullHistory: false,
-      markOnlineOnConnect: false,
+      markOnlineOnConnect: true,
+      keepAliveIntervalMs: 25_000,
+      connectTimeoutMs: 60_000,
+      defaultQueryTimeoutMs: 60_000,
+      retryRequestDelayMs: 500,
+      maxMsgRetryCount: 5,
     });
+
     sock.ev.on('creds.update', saveCreds);
     sock.ev.on('connection.update', (update: ConnUpdate) => {
       void handleConnectionUpdate(update);
     });
-    armInitWatchdog();
   } catch (err: any) {
     status = 'error';
     lastError = err?.message ?? 'Failed to start WhatsApp client';
     starting = false;
     sock = null;
+    console.error('[wa] Error starting WhatsApp socket:', err);
   } finally {
-    if (status !== 'starting') starting = false;
+    starting = false;
   }
 
   return getWaState();
 }
 
 export async function logoutWa() {
+  console.log('[wa] Manual logout initiated by user');
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   try {
     await sock?.logout();
   } catch {
@@ -264,7 +255,8 @@ export async function logoutWa() {
   status = 'disconnected';
   qrDataUrl = null;
   connectedNumber = null;
-  // logout() revokes the pairing, so the stored session is dead on disk too.
+  lastError = 'Logged out by user. Click "Restart client" or scan QR to reconnect.';
+  // User explicitly logged out: delete disk credentials so fresh QR can generate
   purgeWaSession();
   return getWaState();
 }
@@ -462,16 +454,42 @@ async function performSend(
   return { id: firstId };
 }
 
+function waitForReady(maxWaitMs: number): Promise<boolean> {
+  if (status === 'ready' && sock) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const interval = setInterval(() => {
+      if (status === 'ready' && sock) {
+        clearInterval(interval);
+        resolve(true);
+      } else if (Date.now() - start >= maxWaitMs || status === 'error' || status === 'qr') {
+        clearInterval(interval);
+        resolve(false);
+      }
+    }, 250);
+    (interval as any).unref?.();
+  });
+}
+
 export async function sendWaMessage(
   to: string,
   message: string,
   attachments: WaAttachment[] = [],
   cta?: WaCtaUrl
 ) {
+  // If socket is starting or reconnecting, wait briefly for connection to open
+  if (status === 'starting' || (!sock && status !== 'qr' && status !== 'error')) {
+    await waitForReady(7_000);
+  }
+
   if (!sock || status !== 'ready') {
-    const err = new Error(
-      'WhatsApp is not connected. Scan the QR code on the Settings page first.'
-    ) as Error & { statusCode?: number };
+    const hint =
+      status === 'qr'
+        ? 'WhatsApp is not connected. Scan the QR code on the Settings page first.'
+        : status === 'starting'
+          ? 'WhatsApp client is currently connecting. Please try again in a few moments.'
+          : `WhatsApp is not connected (status: ${status}). Scan the QR code on the Settings page first.`;
+    const err = new Error(hint) as Error & { statusCode?: number };
     err.statusCode = 409;
     throw err;
   }

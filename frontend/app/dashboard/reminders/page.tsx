@@ -187,6 +187,14 @@ export default function RemindersPage() {
     refreshAll()
   }, [refreshAll])
 
+  // Keep WhatsApp connection status fresh in reminders
+  useEffect(() => {
+    const timer = setInterval(() => {
+      getWaStatus().then(setWaState).catch(() => null)
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [])
+
   const previewStudent = useMemo(() => {
     if (!students.length) return null
     return (
@@ -330,9 +338,14 @@ export default function RemindersPage() {
       recipientNames.push(stu ? `${stu.studentName} (${stu.studentId})` : id)
       try {
         const titleLine = reminderForm.title.trim()
+        const stuPayUrl = `${activeProfile?.paymentUrl || "https://myfees.myenum.in/amarnath"}?student=${encodeURIComponent(stu?.studentId || id)}`
         await sendWaMessage({
           to: stu?.phone ?? id,
           message: titleLine ? `*${titleLine}*\n${reminderForm.message.trim()}` : reminderForm.message.trim(),
+          cta: {
+            displayText: "Pay Now",
+            url: stuPayUrl,
+          },
         })
         for (const att of attachmentsForSend) {
           await sendWaMessage({ to: stu?.phone ?? id, message: "", attachment: att })
@@ -382,7 +395,8 @@ export default function RemindersPage() {
     await refreshAll()
   }
 
-  const handleSendSingleWa = async (stu: StoredStudent) => {    const feeInfo = resolveStudentFee(stu, feeStructures, groups)
+  const handleSendSingleWa = async (stu: StoredStudent) => {
+    const feeInfo = resolveStudentFee(stu, feeStructures, groups)
     const feeAmount = feeInfo.amount || "5000"
     const phone = (stu.phone || "").replace(/\D/g, "")
     if (!phone) {
@@ -393,24 +407,18 @@ export default function RemindersPage() {
     const studentPaymentUrl = `${activeProfile?.paymentUrl || "https://myfees.myenum.in/amarnath"}?student=${encodeURIComponent(stu.studentId)}`
     const bodyText = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${stu.studentName}*,\n\nThis is your monthly fee reminder for *${stu.course || "Course"}* (${stu.group || "Batch"}).\n\n• Student ID: *${stu.studentId}*\n• Monthly Fee: *₹${parseFloat(feeAmount).toLocaleString("en-IN")}*\n• Due Date: 5th of this month\n\nPlease tap the Pay Now button below to pay directly via UPI / Card:\n\n— ${activeProfile?.name || "MyFees"} Accounts Desk`
 
-    if (waState?.status === "ready") {
-      try {
-        await sendWaMessage({
-          to: phone,
-          message: bodyText,
-          cta: {
-            displayText: "Pay Now",
-            url: studentPaymentUrl,
-          },
-        })
-        alert(`WhatsApp reminder delivered to ${stu.studentName} (+91 ${phone})!`)
-      } catch (e: any) {
-        alert(`Failed to send WhatsApp: ${e?.message}`)
-      }
-    } else {
-      // Direct WhatsApp link fallback
-      const waUrl = `https://wa.me/91${phone}?text=${encodeURIComponent(bodyText + `\n\n👉 ${studentPaymentUrl}`)}`
-      window.open(waUrl, "_blank")
+    try {
+      await sendWaMessage({
+        to: phone,
+        message: bodyText,
+        cta: {
+          displayText: "Pay Now",
+          url: studentPaymentUrl,
+        },
+      })
+      alert(`WhatsApp reminder delivered to ${stu.studentName} (+91 ${phone})!`)
+    } catch (e: any) {
+      alert(`Failed to send WhatsApp reminder: ${e?.message ?? "Failed to send"}`)
     }
   }
 

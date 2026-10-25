@@ -118,7 +118,6 @@ export default function SettingsPage() {
       try {
         const s = await getWaStatus()
         setWa(s)
-        if (s.status === "ready") clearInterval(t)
       } catch {
         // keep polling; backend may still be booting
       }

@@ -8,6 +8,8 @@ postgres-data
 backend/.pgdata
 .wwebjs_auth
 .wwebjs_cache
+.baileys_auth
+backend/.baileys_auth
 backend/.pgdata.corrupt-*
 *.tsbuildinfo
 whatsapp-qr-*.png
