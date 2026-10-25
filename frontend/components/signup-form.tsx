@@ -213,7 +213,7 @@ export function SignupForm({
             <Input
               id="organization"
               type="text"
-              placeholder="Seeds of Success"
+              placeholder="MyFees"
               required
               value={organization}
               onChange={(e) => setOrganization(e.target.value)}

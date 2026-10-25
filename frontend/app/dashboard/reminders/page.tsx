@@ -169,7 +169,7 @@ export default function RemindersPage() {
     try {
       const res = await syncCronJob({
         apiKey: apiKey.trim(),
-        title: `Monthly Student Fee Reminder (${activeProfile?.name || "Seeds of Success"})`,
+        title: `Monthly Student Fee Reminder (${activeProfile?.name || "MyFees"})`,
         targetUrl: "https://myfees.myenum.in/api/reminders/cron/monthly",
         schedule: {
           timezone,
@@ -199,7 +199,7 @@ export default function RemindersPage() {
     }
 
     const studentPaymentUrl = `${activeProfile?.paymentUrl || "https://myfees.myenum.in/amarnath"}?student=${encodeURIComponent(stu.studentId)}`
-    const msg = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${stu.studentName}*,\n\nThis is your monthly fee reminder for *${stu.course || "Course"}* (${stu.group || "Batch"}).\n\n• Student ID: *${stu.studentId}*\n• Monthly Fee: *₹${parseFloat(feeAmount).toLocaleString("en-IN")}*\n• Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\n👉 ${studentPaymentUrl}\n\n— ${activeProfile?.name || "Seeds of Success"} Accounts Desk`
+    const msg = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${stu.studentName}*,\n\nThis is your monthly fee reminder for *${stu.course || "Course"}* (${stu.group || "Batch"}).\n\n• Student ID: *${stu.studentId}*\n• Monthly Fee: *₹${parseFloat(feeAmount).toLocaleString("en-IN")}*\n• Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\n👉 ${studentPaymentUrl}\n\n— ${activeProfile?.name || "MyFees"} Accounts Desk`
 
     if (waState?.status === "ready") {
       try {
@@ -563,7 +563,7 @@ export default function RemindersPage() {
                   </div>
                 }
                 body={`Dear Parent / Student *${previewStudent?.studentName || "Student"}*,\n\nThis is your monthly fee reminder for *${previewStudent?.course || "Science"}* (${previewStudent?.group || "Science Batch A"}).\n\n• Student ID: *${previewStudent?.studentId || "STU-001"}*\n• Monthly Fee: *₹${parseFloat(previewFee).toLocaleString("en-IN")}*\n• Due Date: 5th of this month\n\nPlease tap the button below to pay directly via UPI / Card:`}
-                footer={`${activeProfile?.name || "Seeds of Success"} · Tap Pay Now below to complete payment`}
+                footer={`${activeProfile?.name || "MyFees"} · Tap Pay Now below to complete payment`}
                 buttons={[
                   {
                     id: "pay-now",

@@ -331,7 +331,7 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
                 id="payment-payee-name"
                 value={payeeName}
                 onChange={(event) => setPayeeName(event.target.value)}
-                placeholder="Seed of Success"
+                placeholder="MyFees"
                 maxLength={120}
               />
               <FieldDescription>

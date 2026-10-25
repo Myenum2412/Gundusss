@@ -10,7 +10,7 @@ import "@/lib/appwrite";
 const inter = Inter({ subsets: ['latin'], display: 'swap' });
 
 export const metadata: Metadata = {
-  title: 'Seeds of Success · Fees Manager',
+  title: 'MyFees · Fees Manager',
   description: 'Students, fee structures, receipts, and WhatsApp announcements in one calm workspace.',
 };
 

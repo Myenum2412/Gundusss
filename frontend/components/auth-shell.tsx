@@ -20,7 +20,7 @@ export function AuthShell({
           <span className="flex size-8 items-center justify-center rounded-[10px] bg-primary text-primary-foreground shadow-sm">
             <SproutIcon className="size-4" />
           </span>
-          <span className="text-sm font-semibold tracking-tight">Seeds of Success</span>
+          <span className="text-sm font-semibold tracking-tight">MyFees</span>
         </a>
         <div className="flex flex-1 items-center justify-center py-10">
           <div className="w-full max-w-[360px]">
@@ -29,7 +29,7 @@ export function AuthShell({
             <div className="mt-6">{children}</div>
           </div>
         </div>
-        <p className="text-xs text-muted-foreground">© 2026 Seeds of Success · Fees Manager</p>
+        <p className="text-xs text-muted-foreground">© 2026 MyFees · Fees Manager</p>
       </div>
       <div className="relative hidden overflow-hidden lg:block">
         <div className="absolute inset-0 bg-[#101014]">

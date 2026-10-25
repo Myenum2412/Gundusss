@@ -948,7 +948,7 @@ export default function BusinessProfileForm() {
                     required
                     value={profile.name}
                     onChange={(value) => patch("name", value)}
-                    placeholder="e.g. Seeds of Success"
+                    placeholder="e.g. MyFees"
                     maxLength={200}
                   />
                   <TextField
@@ -1030,7 +1030,7 @@ export default function BusinessProfileForm() {
                   label="Description"
                   value={profile.description}
                   onChange={(value) => patch("description", value)}
-                  placeholder="Seeds of Success is a learning centre that helps students build strong foundations through small-group tuition, regular assessments, and personal attention…"
+                  placeholder="MyFees is a learning centre that helps students build strong foundations through small-group tuition, regular assessments, and personal attention…"
                   rows={6}
                   maxLength={750}
                   description="Up to 750 characters. Avoid promotional language, links, and prices."
@@ -1100,7 +1100,7 @@ export default function BusinessProfileForm() {
                     type="email"
                     value={profile.email}
                     onChange={(value) => patch("email", value)}
-                    placeholder="hello@seedsofsuccess.in"
+                    placeholder="hello@myfees.in"
                     autoComplete="email"
                   />
                   <TextField
@@ -1117,7 +1117,7 @@ export default function BusinessProfileForm() {
                     type="url"
                     value={profile.website}
                     onChange={(value) => patch("website", value)}
-                    placeholder="https://seedsofsuccess.in"
+                    placeholder="https://myfees.in"
                     className="sm:col-span-2"
                   />
                 </div>

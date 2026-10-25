@@ -75,7 +75,7 @@ function defaultSettings(): StoredReminderSettings {
     enabled: true,
     jobId: 8715234, // ID created on cron-job.org
     targetUrl: 'https://myfees.myenum.in/api/reminders/cron/monthly',
-    title: 'Monthly Student Fee Reminder (Seeds of Success)',
+    title: 'Monthly Student Fee Reminder (MyFees)',
     schedule: DEFAULT_SCHEDULE,
     lastRun: null,
     lastStatus: null,
@@ -177,7 +177,7 @@ async function executeMonthlyReminders(
   source: 'cron-job.org' | 'manual' | 'scheduled'
 ): Promise<ReminderRunLog> {
   const profile = await getProfile(profileId);
-  const companyName = profile?.name || 'Seeds of Success';
+  const companyName = profile?.name || 'MyFees';
   const paymentBaseUrl = profile?.paymentUrl || 'https://myfees.myenum.in/amarnath';
 
   // 1. Load active students for this profile
@@ -416,7 +416,7 @@ export async function reminderRoutes(app: FastifyInstance) {
     const body = (req.body as any) || {};
 
     const apiKey = cronJobKey(body.apiKey);
-    const title = body.title || 'Monthly Student Fee Reminder (Seeds of Success)';
+    const title = body.title || 'Monthly Student Fee Reminder (MyFees)';
     const targetUrl =
       body.targetUrl || 'https://myfees.myenum.in/api/reminders/cron/monthly';
     const schedule = body.schedule || DEFAULT_SCHEDULE;

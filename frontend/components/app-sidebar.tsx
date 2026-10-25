@@ -42,7 +42,7 @@ interface NavItem {
   items?: { title: string; url: string; permission?: Permission }[]
 }
 
-// Sidebar menu for Seeds of Success fees app. Items are filtered by the signed
+// Sidebar menu for MyFees fees app. Items are filtered by the signed
 // in user's role so a viewer never sees admin-only destinations.
 const navigation: { navMain: NavItem[]; navBottom: NavItem[] } = {
   navMain: [

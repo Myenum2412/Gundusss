@@ -120,7 +120,7 @@ function day(open: boolean): DayHours {
 
 export function defaultBusinessProfile(): BusinessProfile {
   return {
-    name: "Seeds of Success",
+    name: "MyFees",
     primaryCategory: "",
     additionalCategories: [],
     description: "",
