@@ -64,7 +64,6 @@ import {
   CreditCardIcon,
   EllipsisIcon,
   ExternalLinkIcon,
-  FilterIcon,
   Link2Icon,
   Loader2Icon,
   MessageSquareIcon,
@@ -106,132 +105,6 @@ const STATUS_OPTIONS = [
   "BLOCKED",
 ]
 
-const STATUS_CONFIG: Record<
-  string,
-  {
-    label: string
-    dotClass: string
-    barClass: string
-    activeClass: string
-    badgeClass: string
-    description: string
-  }
-> = {
-  SUCCESS: {
-    label: "Success",
-    dotClass: "bg-emerald-500",
-    barClass: "bg-emerald-500",
-    activeClass:
-      "border-emerald-500 bg-emerald-50 text-emerald-950 ring-2 ring-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-500",
-    badgeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-    description: "Paid & verified with receipt",
-  },
-  PROCESSING: {
-    label: "Processing",
-    dotClass: "bg-amber-500 animate-pulse",
-    barClass: "bg-amber-500",
-    activeClass:
-      "border-amber-500 bg-amber-50 text-amber-950 ring-2 ring-amber-500/30 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-500",
-    badgeClass: "bg-amber-500/15 text-amber-800 dark:text-amber-300",
-    description: "Gateway captured / pending confirmation",
-  },
-  INITIATED: {
-    label: "Initiated",
-    dotClass: "bg-amber-400",
-    barClass: "bg-amber-400",
-    activeClass:
-      "border-amber-400 bg-amber-50/70 text-amber-950 ring-2 ring-amber-400/30 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-500",
-    badgeClass: "bg-amber-400/15 text-amber-700 dark:text-amber-300",
-    description: "Awaiting payment / ready to collect",
-  },
-  QUEUED: {
-    label: "Queued",
-    dotClass: "bg-amber-500",
-    barClass: "bg-amber-500",
-    activeClass:
-      "border-amber-500 bg-amber-50/70 text-amber-950 ring-2 ring-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-500",
-    badgeClass: "bg-amber-500/15 text-amber-800 dark:text-amber-300",
-    description: "Queued by payment gateway",
-  },
-  ACTIVE: {
-    label: "Active",
-    dotClass: "bg-emerald-400",
-    barClass: "bg-emerald-400",
-    activeClass:
-      "border-emerald-500 bg-emerald-50/70 text-emerald-950 ring-2 ring-emerald-500/30 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-500",
-    badgeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-    description: "Live session ready to scan and pay",
-  },
-  FAILED: {
-    label: "Failed",
-    dotClass: "bg-red-500",
-    barClass: "bg-red-500",
-    activeClass:
-      "border-red-500 bg-red-50 text-red-950 ring-2 ring-red-500/30 dark:bg-red-950/40 dark:text-red-200 dark:border-red-500",
-    badgeClass: "bg-red-500/15 text-red-700 dark:text-red-300",
-    description: "Declined by bank or gateway",
-  },
-  CANCELLED: {
-    label: "Cancelled",
-    dotClass: "bg-rose-500",
-    barClass: "bg-rose-500",
-    activeClass:
-      "border-rose-500 bg-rose-50 text-rose-950 ring-2 ring-rose-500/30 dark:bg-rose-950/40 dark:text-rose-200 dark:border-rose-500",
-    badgeClass: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
-    description: "Cancelled by student or counter",
-  },
-  EXPIRED: {
-    label: "Expired",
-    dotClass: "bg-orange-500",
-    barClass: "bg-orange-500",
-    activeClass:
-      "border-orange-500 bg-orange-50 text-orange-950 ring-2 ring-orange-500/30 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-500",
-    badgeClass: "bg-orange-500/15 text-orange-800 dark:text-orange-300",
-    description: "Payment session timed out",
-  },
-  REFUNDED: {
-    label: "Refunded",
-    dotClass: "bg-sky-500",
-    barClass: "bg-sky-500",
-    activeClass:
-      "border-sky-500 bg-sky-50 text-sky-950 ring-2 ring-sky-500/30 dark:bg-sky-950/40 dark:text-sky-200 dark:border-sky-500",
-    badgeClass: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
-    description: "Refunded back to student",
-  },
-  SUSPICIOUS: {
-    label: "Suspicious",
-    dotClass: "bg-purple-500",
-    barClass: "bg-purple-500",
-    activeClass:
-      "border-purple-500 bg-purple-50 text-purple-950 ring-2 ring-purple-500/30 dark:bg-purple-950/40 dark:text-purple-200 dark:border-purple-500",
-    badgeClass: "bg-purple-500/15 text-purple-700 dark:text-purple-300",
-    description: "Flagged for manual security review",
-  },
-  BLOCKED: {
-    label: "Blocked",
-    dotClass: "bg-zinc-600",
-    barClass: "bg-zinc-600",
-    activeClass:
-      "border-zinc-500 bg-zinc-100 text-zinc-950 ring-2 ring-zinc-500/30 dark:bg-zinc-800 dark:text-zinc-200 dark:border-zinc-500",
-    badgeClass: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300",
-    description: "Blocked by risk or compliance policy",
-  },
-}
-
-function getStatusConfig(status: string) {
-  const norm = normalizeStatus(status)
-  return (
-    STATUS_CONFIG[norm] ?? {
-      label: norm,
-      dotClass: "bg-muted-foreground",
-      barClass: "bg-muted-foreground",
-      activeClass:
-        "border-foreground/30 bg-muted text-foreground ring-2 ring-foreground/10",
-      badgeClass: "bg-muted text-muted-foreground",
-      description: "Payment status",
-    }
-  )
-}
 
 const METHOD_ICONS: Record<string, LucideIcon> = {
   UPI: QrCodeIcon,
@@ -867,14 +740,7 @@ export default function PaymentsPage() {
   const [actionId, setActionId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
-  const filterTabsRef = useRef<HTMLDivElement>(null)
   const tableScrollRef = useRef<HTMLDivElement>(null)
-
-  const scrollFilterTabs = useCallback((direction: "left" | "right") => {
-    if (!filterTabsRef.current) return
-    const offset = direction === "left" ? -220 : 220
-    filterTabsRef.current.scrollBy({ left: offset, behavior: "smooth" })
-  }, [])
 
   const scrollTable = useCallback((direction: "left" | "right") => {
     if (!tableScrollRef.current) return
@@ -1444,8 +1310,8 @@ export default function PaymentsPage() {
         </div>
       )}
 
-      {/* Filter and Search Bar with horizontal scrolling status tabs */}
-      <div className="flex flex-col gap-3 rounded-xl border bg-card p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+      {/* Filter and Search Bar */}
+      <div className="rounded-xl border bg-card p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
         {/* Search Input and Controls */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative flex-1 sm:max-w-md">
@@ -1505,97 +1371,6 @@ export default function PaymentsPage() {
               {filteredRecords.length} of {unifiedRecords.length} shown
             </span>
           </div>
-        </div>
-
-        {/* Status Filter Tabs */}
-        <div className="flex items-center gap-1.5 border-t pt-2.5">
-          <span className="hidden shrink-0 items-center gap-1 text-xs font-medium text-muted-foreground lg:inline-flex">
-            <FilterIcon className="size-3.5" />
-            Status:
-          </span>
-
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            onClick={() => scrollFilterTabs("left")}
-            title="Scroll filter tabs left"
-            className="hidden shrink-0 text-muted-foreground hover:text-foreground sm:inline-flex"
-          >
-            <ChevronLeftIcon className="size-3.5" />
-          </Button>
-
-          <div
-            ref={filterTabsRef}
-            className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pb-1 custom-scroll scroll-smooth"
-          >
-            <Button
-              type="button"
-              variant={statusFilter === "ALL" ? "default" : "outline"}
-              size="xs"
-              onClick={() => setStatusFilter("ALL")}
-              className="rounded-lg gap-1.5 text-xs font-medium shrink-0"
-            >
-              <span>All Statuses</span>
-              <span
-                className={cn(
-                  "rounded-full px-1.5 text-[10px] font-semibold tabular-nums",
-                  statusFilter === "ALL"
-                    ? "bg-primary-foreground/20 text-primary-foreground"
-                    : "bg-muted text-muted-foreground"
-                )}
-              >
-                {unifiedRecords.length}
-              </span>
-            </Button>
-
-            {allStatuses.map((status) => {
-              const count = statusStats[status]?.count ?? 0
-              const cfg = getStatusConfig(status)
-              const isSelected = statusFilter === status
-
-              return (
-                <Button
-                  key={status}
-                  type="button"
-                  variant={isSelected ? "default" : "outline"}
-                  size="xs"
-                  onClick={() => setStatusFilter((curr) => (curr === status ? "ALL" : status))}
-                  className={cn(
-                    "rounded-lg gap-1.5 text-xs font-medium whitespace-nowrap shrink-0",
-                    !isSelected && count > 0 && "hover:border-foreground/30",
-                    !isSelected && count === 0 && "opacity-60 hover:opacity-100"
-                  )}
-                >
-                  <span className={cn("size-1.5 rounded-full", isSelected ? "bg-primary-foreground" : cfg.dotClass)} />
-                  <span>{status}</span>
-                  <span
-                    className={cn(
-                      "rounded-full px-1.5 text-[10px] font-semibold tabular-nums",
-                      isSelected
-                        ? "bg-primary-foreground/20 text-primary-foreground"
-                        : count > 0
-                        ? cfg.badgeClass
-                        : "bg-muted text-muted-foreground"
-                    )}
-                  >
-                    {count}
-                  </span>
-                </Button>
-              )
-            })}
-          </div>
-
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            onClick={() => scrollFilterTabs("right")}
-            title="Scroll filter tabs right"
-            className="hidden shrink-0 text-muted-foreground hover:text-foreground sm:inline-flex"
-          >
-            <ChevronRightIcon className="size-3.5" />
-          </Button>
         </div>
       </div>
 
