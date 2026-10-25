@@ -282,12 +282,14 @@ async function executeMonthlyReminders(
     if (workerMode && studentPhone.length >= 10) {
       if (isWaReady) {
         // Hand over to the queue worker; the run log gets merged when the
-        // worker reports results.
+        // worker reports results. The payment link rides along as a
+        // WhatsApp-native CTA-URL button ("Pay Now").
         jobItems.push({
           phone: studentPhone,
           message,
           studentId: student.studentId,
           studentName: student.studentName,
+          ctaUrl: { displayText: 'Pay Now', url: studentPaymentUrl },
         });
         recipientResults.push({
           studentId: student.studentId,
@@ -315,7 +317,10 @@ async function executeMonthlyReminders(
 
     if (studentPhone.length >= 10 && isWaReady) {
       try {
-        await sendWaMessage(studentPhone, message);
+        await sendWaMessage(studentPhone, message, [], {
+          displayText: 'Pay Now',
+          url: studentPaymentUrl,
+        });
         delivered = true;
         sentCount++;
       } catch (err: any) {

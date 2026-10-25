@@ -42,6 +42,7 @@ import { resolveStudentFee } from "@/lib/fee-lookup"
 import { loadFeeStructures, type StoredFeeStructure } from "@/lib/fee-structures-store"
 import { getWaStatus, sendWaMessage, type WaState } from "@/lib/api"
 import { InteractiveButtonBubble } from "@/components/ui/whatsapp/interactive-button-bubble"
+import { CtaUrlBubble } from "@/components/ui/whatsapp/cta-url-bubble"
 import "@/components/ui/whatsapp/styles/whatsapp.css"
 import {
   BellRingIcon,
@@ -1045,6 +1046,39 @@ export default function RemindersPage() {
 
               <div className="mt-3 text-center text-[10px] text-muted-foreground">
                 When students tap &ldquo;Pay Now&rdquo; in WhatsApp, it immediately opens your direct payment portal.
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-col items-center justify-center rounded-2xl border bg-[#e5ddd5]/60 dark:bg-[#0b141a] p-5 shadow-inner">
+              <span className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80">
+                CTA URL Button (official &ldquo;open link&rdquo; bubble)
+              </span>
+
+              {(() => {
+                const ctaUrl = previewStudent
+                  ? `${activeProfile?.paymentUrl || "https://myfees.myenum.in/amarnath"}?student=${encodeURIComponent(previewStudent.studentId)}`
+                  : "https://myfees.myenum.in/amarnath"
+                return (
+                  <CtaUrlBubble
+                    variant="outgoing"
+                    body={`Monthly fee for ${previewStudent?.studentName || "Student"} — ₹${parseFloat(previewFee).toLocaleString("en-IN")} due.`}
+                    footer={`${activeProfile?.name || "MyFees"} · Secured UPI / Card payment`}
+                    displayText="Pay Now"
+                    url={ctaUrl}
+                    timestamp="09:00 AM"
+                    status="delivered"
+                    showTail={true}
+                    renderAction={(props) => (
+                      <a href={props.href} target="_blank" rel="noopener noreferrer" className={props.className}>
+                        {props.children}
+                      </a>
+                    )}
+                  />
+                )
+              })()}
+
+              <div className="mt-3 text-center text-[10px] text-muted-foreground">
+                Sent via WhatsApp&rsquo;s native CTA-URL button — students who can&rsquo;t render it still get the plain link.
               </div>
             </div>
 

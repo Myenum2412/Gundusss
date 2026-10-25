@@ -17,6 +17,8 @@ export interface QueueItem {
   message: string;
   studentId?: string;
   studentName?: string;
+  /** Interactive CTA button (e.g. "Pay Now" → payment portal link). */
+  ctaUrl?: { displayText: string; url: string };
 }
 
 export interface ReminderQueueJob {

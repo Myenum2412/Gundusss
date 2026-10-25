@@ -287,10 +287,15 @@
   /* Chat Wallpaper */
   --wa-wallpaper-bg: #f5f0e8;
   --wa-wallpaper-fg: rgba(17, 27, 33, 0.05);
+  --wa-wallpaper-image: url("/wa-wallpaper.png");
   --wa-wallpaper-tint: rgba(229, 221, 213, 0.85);
 
   /* Template header placeholder */
   --wa-placeholder-bg: #ccd0d5;
+  --wa-placeholder-icon: brightness(0) saturate(100%) invert(42%) sepia(9%) saturate(621%) hue-rotate(155deg) brightness(94%) contrast(87%);
+
+  /* Template button icon — converts PNG to wa-emerald-500 (#00a884) */
+  --wa-btn-icon-filter: brightness(0) saturate(100%) invert(50%) sepia(97%) saturate(372%) hue-rotate(128deg) brightness(97%);
 
   /* === Additional Color Scales === */
   --wa-teal-300: #42c7b8;
@@ -392,10 +397,15 @@
   /* Chat Wallpaper */
   --wa-wallpaper-bg: #0b141a;
   --wa-wallpaper-fg: rgba(255, 255, 255, 0.06);
+  --wa-wallpaper-image: url("/wa-wallpaper.png");
   --wa-wallpaper-tint: rgba(11, 20, 26, 0.88);
 
   /* Template header placeholder */
   --wa-placeholder-bg: #2a3942;
+  --wa-placeholder-icon: brightness(0) saturate(100%) invert(62%) sepia(10%) saturate(400%) hue-rotate(155deg) brightness(95%) contrast(85%);
+
+  /* Template button icon — converts PNG to wa-emerald-400 (#06cf9c) */
+  --wa-btn-icon-filter: brightness(0) saturate(100%) invert(68%) sepia(60%) saturate(400%) hue-rotate(118deg) brightness(100%);
 
   /* === Semantic Text (dark) === */
   --wa-text-disabled: #3b4a54;
@@ -415,4 +425,32 @@
   --wa-filter-text: #8696a0;
   --wa-filter-active: #00a884;
   --wa-filter-bg-active: #005c4b;
+}
+
+/* === Wallpaper === */
+.wa-wallpaper {
+  position: relative;
+  background-color: var(--wa-wallpaper-bg);
+  background-image: var(--wa-wallpaper-image);
+  background-repeat: repeat;
+  background-size: 412px auto;
+  background-blend-mode: overlay;
+}
+
+.dark .wa-wallpaper,
+[data-theme="dark"] .wa-wallpaper {
+  background-blend-mode: soft-light;
+}
+
+/* === Layout Constants === */
+:root {
+  --wa-sidebar-width: 440px;
+  --wa-sidebar-min-width: 340px;
+  --wa-header-height: 59px;
+  --wa-compose-height: 62px;
+  --wa-chat-spacing: 15px;
+  --wa-avatar-size-sm: 40px;
+  --wa-avatar-size-md: 49px;
+  --wa-avatar-size-lg: 200px;
+  --wa-msg-max-width: 60%;
 }

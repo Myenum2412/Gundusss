@@ -22,6 +22,7 @@ function DoubleCheckIcon({ className }: { className?: string }) {
   );
 }
 
+/** WhatsApp's pending-message clock, shown until the server accepts the message. */
 function ClockIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 16 15" height="15" width="16" className={className} aria-label="Sending">
@@ -30,6 +31,28 @@ function ClockIcon({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Upload indicator for outgoing media that is still sending: dims the media and
+ * shows WhatsApp's spinning ring. Place inside a `relative` media container.
+ */
+export function MediaSendingOverlay({ className }: { className?: string }) {
+  return (
+    <div
+      role="status"
+      aria-label="Sending"
+      className={"absolute inset-0 z-[5] flex items-center justify-center bg-black/30 " + (className ?? "")}
+    >
+      <span className="flex h-[52px] w-[52px] items-center justify-center rounded-full bg-black/50">
+        <svg viewBox="0 0 44 44" width="40" height="40" className="animate-spin" aria-hidden="true">
+          <circle cx="22" cy="22" r="18" fill="none" stroke="currentColor" strokeWidth="3" className="text-white/25" />
+          <circle cx="22" cy="22" r="18" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeDasharray="28 200" className="text-white" />
+        </svg>
+      </span>
+    </div>
+  );
+}
+
+/** Renders the appropriate status icon for a given MessageStatus. */
 export function MessageStatusIcon({ status, className }: { status: MessageStatus; className?: string }) {
   switch (status) {
     case "sending":

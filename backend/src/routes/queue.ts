@@ -72,8 +72,12 @@ export async function queueRoutes(app: FastifyInstance) {
         .code(400)
         .send({ error: 'A phone and message are required.' });
     }
+    const cta =
+      body.ctaUrl && typeof body.ctaUrl.displayText === 'string' && typeof body.ctaUrl.url === 'string'
+        ? { displayText: body.ctaUrl.displayText, url: body.ctaUrl.url }
+        : undefined;
     try {
-      const result = await sendWaMessage(phone, message);
+      const result = await sendWaMessage(phone, message, [], cta);
       return { data: { delivered: true, id: result.id } };
     } catch (err: any) {
       return reply.code(err?.statusCode ?? 500).send({

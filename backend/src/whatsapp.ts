@@ -284,6 +284,11 @@ function jidToPhone(jid: string): string {
   return String(jid).split('@')[0].split(':')[0];
 }
 
+export interface WaCtaUrl {
+  displayText: string;
+  url: string;
+}
+
 export interface WaAttachment {
   name: string;
   mime: string;
@@ -331,16 +336,95 @@ function enqueueSend<T>(fn: () => Promise<T>): Promise<T> {
   return run as Promise<T>;
 }
 
+/**
+ * Interactive CTA-URL message — the WhatsApp "Tap the button to open the
+ * link" bubble. Renders natively on current WhatsApp clients; older clients
+ * simply show the body text.
+ */
+function buildCtaUrlMessage(body: string, footer: string, cta: WaCtaUrl) {
+  return {
+    interactiveMessage: {
+      body: { text: body },
+      footer: { text: footer },
+      nativeFlowMessage: {
+        messageParamsJson: JSON.stringify({
+          display_text: cta.displayText,
+          id: `${Date.now()}-${Math.floor(Math.random() * 1e9)}`,
+        }),
+        buttons: [
+          {
+            name: 'cta_url',
+            buttonParamsJson: JSON.stringify({
+              display_text: cta.displayText,
+              url: cta.url,
+              merchant_url: cta.url,
+            }),
+          },
+        ],
+      },
+    },
+  };
+}
+
 async function performSend(
   jid: string,
   message: string,
-  attachments: WaAttachment[]
+  attachments: WaAttachment[],
+  cta?: WaCtaUrl
 ): Promise<{ id: string | null }> {
   const s = sock;
   if (!s) throw new Error('WhatsApp socket is gone');
   let firstId: string | null = null;
-  if (message.trim()) {
-    const sent = await s.sendMessage(jid, { text: message });
+
+  const plainText = message.trim();
+
+  // Pure text + CTA fits in one interactive bubble on modern clients, with a
+  // plain-text safety net when the interactive send is rejected.
+  if (cta) {
+    const sawError = await (async () => {
+      try {
+        if (plainText || attachments.length === 0) {
+          const interactive = buildCtaUrlMessage(
+            plainText ||
+              `Tap the button below to continue.\n${cta.url}`,
+            'MyFees · Payment & updates',
+            cta
+          );
+          const sent = await s.sendMessage(jid, interactive);
+          firstId = sent?.key?.id ?? null;
+        }
+      } catch (err: any) {
+        console.log(`[wa] cta_url send fell back to plain text: ${err?.message ?? err}`);
+        return true;
+      }
+      return false;
+    })();
+
+    if (sawError && plainText) {
+      const sent = await s.sendMessage(jid, plainText);
+      firstId = firstId ?? sent?.key?.id ?? null;
+    }
+    if (sawError && !plainText) {
+      const sent = await s.sendMessage(jid, cta.url);
+      firstId = firstId ?? sent?.key?.id ?? null;
+    }
+    for (const att of attachments) {
+      const buf = Buffer.from(att.data, 'base64');
+      const sent = await s.sendMessage(
+        jid,
+        att.mime.startsWith('image/')
+          ? { image: buf, caption: att.name }
+          : att.mime.startsWith('video/')
+            ? { video: buf, mimetype: att.mime, fileName: att.name }
+            : { document: buf, mimetype: att.mime, fileName: att.name }
+      );
+      firstId = firstId ?? sent?.key?.id ?? null;
+    }
+    return { id: firstId };
+  }
+
+  if (plainText) {
+    const sent = await s.sendMessage(jid, { text: plainText });
     firstId = sent?.key?.id ?? null;
   }
   for (const att of attachments) {
@@ -361,7 +445,8 @@ async function performSend(
 export async function sendWaMessage(
   to: string,
   message: string,
-  attachments: WaAttachment[] = []
+  attachments: WaAttachment[] = [],
+  cta?: WaCtaUrl
 ) {
   if (!sock || status !== 'ready') {
     const err = new Error(
@@ -383,7 +468,7 @@ export async function sendWaMessage(
   // Funnel through the global paced queue so concurrent callers (cron run,
   // announcements, manual sends) can never burst-line WhatsApp.
   try {
-    return await enqueueSend(() => performSend(jid, message, attachments));
+    return await enqueueSend(() => performSend(jid, message, attachments, cta));
   } catch (err: any) {
     // Connection lost mid-queue: surface as 409 so callers show "not
     // connected" instead of a raw protocol error.

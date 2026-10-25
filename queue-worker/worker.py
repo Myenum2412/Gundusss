@@ -80,8 +80,14 @@ def claim_job():
     return (body.get("data") or {}).get("job")
 
 
-def send_one(phone: str, message: str):
-    body = post("/api/queue/send", {"phone": phone, "message": message})
+def send_one(phone: str, message: str, cta=None):
+    payload = {"phone": phone, "message": message}
+    if cta and isinstance(cta, dict) and cta.get("url"):
+        payload["ctaUrl"] = {
+            "displayText": str(cta.get("displayText") or "Open Link"),
+            "url": str(cta.get("url")),
+        }
+    body = post("/api/queue/send", payload)
     if not body:
         return False, "backend unreachable", False  # delivered, error, retain
     data = body.get("data") or {}
@@ -112,7 +118,9 @@ def process_job(job: dict) -> None:
             results.append({"phone": "", "delivered": False, "error": "missing phone"})
             continue
 
-        delivered, error, release_now = send_one(phone, message)
+        delivered, error, release_now = send_one(
+            phone, message, item.get("ctaUrl")
+        )
 
         # Double protection against a half-way job: if the engine dropped
         # mid-run, release everything back so nothing is silently skipped.
