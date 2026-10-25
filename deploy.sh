@@ -6,7 +6,10 @@ exec 9>/tmp/gundusss-deploy.lock
 flock -n 9 || exit 0   # never overlap with a running deploy
 
 cd /opt/gundusss
-git fetch origin main -q 2>/dev/null || exit 0
+if ! git fetch origin main -q 2>/dev/null; then
+  echo "fetch failed at $(date -Is) - will retry next cycle"
+  exit 0
+fi
 
 NEW=$(git rev-parse origin/main)
 OLD=$(git rev-parse HEAD 2>/dev/null || echo none)
