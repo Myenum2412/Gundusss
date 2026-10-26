@@ -1784,15 +1784,25 @@
             btnCashAlt.style.display = (serverIndicator.recommendedAlternative === 'CASH') ? 'inline-block' : 'none';
           }
         } else {
-          // RED
-          downtimeAlert.style.display = 'flex';
-          downtimeAlert.className = 'ypg-downtime-alert';
-          if (downtimeHeading) downtimeHeading.textContent = 'UPI Server Facing Issues';
-          if (downtimeMsg) {
-            downtimeMsg.textContent = serverIndicator.warning || 'It is not recommended to pay by UPI right now as the server is facing downtime. We recommend paying by cash instead.';
-          }
-          if (btnCashAlt) {
-            btnCashAlt.style.display = (serverIndicator.recommendedAlternative === 'CASH') ? 'inline-block' : 'none';
+          // RED — only show if there is an actual cash alternative to switch to.
+          // When no cash option exists the merchant is UPI-only: the QR payment works
+          // fine; background observers only enable *auto-verification*, not payment
+          // processing itself. Showing a scary downtime banner with no escape route
+          // is misleading and harms conversion.
+          if (serverIndicator.recommendedAlternative === 'CASH') {
+            downtimeAlert.style.display = 'flex';
+            downtimeAlert.className = 'ypg-downtime-alert';
+            if (downtimeHeading) downtimeHeading.textContent = 'UPI Server Facing Issues';
+            if (downtimeMsg) {
+              downtimeMsg.textContent = serverIndicator.warning || 'It is not recommended to pay by UPI right now as the server is facing downtime. We recommend paying by cash instead.';
+            }
+            if (btnCashAlt) btnCashAlt.style.display = 'inline-block';
+          } else {
+            // No cash fallback → hide the alert; treat as working from the customer's perspective
+            downtimeAlert.style.display = 'none';
+            // Also correct the health pill to green so the UI is consistent
+            if (healthPill) healthPill.className = 'ypg-server-health-indicator is-working';
+            if (healthLabel) healthLabel.textContent = 'Server Is Working';
           }
         }
       }
