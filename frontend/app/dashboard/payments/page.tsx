@@ -39,7 +39,9 @@ import {
 } from "@/components/ui/table"
 import {
   confirmCounterPayment,
+  createStudentCheckoutUrl,
   declineCounterPayment,
+  isGatewayCheckoutUrl,
   listPayments,
   paymentMethodLabel,
   type PaymentOrder,
@@ -61,7 +63,6 @@ import {
   CreditCardIcon,
   EllipsisIcon,
   ExternalLinkIcon,
-  Link2Icon,
   Loader2Icon,
   PhoneIcon,
   QrCodeIcon,
@@ -196,15 +197,15 @@ function getStudentSpecificPaymentUrl(basePayUrl: string, studentId?: string): s
 function generateReminderText({
   record,
   companyName,
-  workspacePaymentUrl,
+  paymentUrl,
 }: {
   record: UnifiedPaymentRecord
   companyName: string
-  workspacePaymentUrl: string
+  paymentUrl: string
 }) {
   const org = companyName ? companyName.trim() : "Institute Office"
   const isPaid = normalizeStatus(record.status) === "SUCCESS"
-  const base = record.paymentUrl || workspacePaymentUrl || ""
+  const base = record.paymentUrl || paymentUrl || ""
   const payUrl = getStudentSpecificPaymentUrl(base, record.studentId)
 
   if (isPaid) {
@@ -257,13 +258,11 @@ function FeeReminderDialog({
   open,
   onOpenChange,
   companyName,
-  workspacePaymentUrl,
 }: {
   record: UnifiedPaymentRecord | null
   open: boolean
   onOpenChange: (open: boolean) => void
   companyName: string
-  workspacePaymentUrl: string
 }) {
   const [phone, setPhone] = useState("")
   const [message, setMessage] = useState("")
@@ -272,27 +271,85 @@ function FeeReminderDialog({
   const [botSent, setBotSent] = useState(false)
   const [botError, setBotError] = useState<string | null>(null)
   const [waState, setWaState] = useState<WaState | null>(null)
+  const [paymentLink, setPaymentLink] = useState("")
+  const [preparingLink, setPreparingLink] = useState(false)
+  const [linkError, setLinkError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!record || !open) return
+    let cancelled = false
     const initialPhone = record.phone && record.phone !== "—" ? record.phone : ""
     setPhone(initialPhone)
-    setMessage(generateReminderText({ record, companyName, workspacePaymentUrl }))
     setCopied(false)
     setBotSent(false)
     setBotError(null)
+    setPaymentLink("")
+    setLinkError(null)
+    setPreparingLink(false)
+
+    const paidRecord = normalizeStatus(record.status) === "SUCCESS"
+    // Reuse an existing live order link; otherwise create a brand-new gateway
+    // checkout so the reminder never points at an expired or fabricated page.
+    const existing = (record.paymentUrl || "").trim()
+    const liveOrder =
+      Boolean(record.rawOrder) &&
+      !TERMINAL.has(normalizeStatus(record.status)) &&
+      isGatewayCheckoutUrl(existing)
+
+    if (paidRecord) {
+      // Paid records get an acknowledgment message, not a fresh payable link.
+      setMessage(generateReminderText({ record, companyName, paymentUrl: "" }))
+    } else if (liveOrder) {
+      setPaymentLink(getStudentSpecificPaymentUrl(existing, record.studentId))
+      setMessage(generateReminderText({ record, companyName, paymentUrl: existing }))
+    } else {
+      setMessage(generateReminderText({ record, companyName, paymentUrl: "" }))
+      setPreparingLink(true)
+      createStudentCheckoutUrl({
+        studentId: record.studentId === "—" ? undefined : record.studentId,
+        studentName: record.studentName,
+        amount: record.amount,
+        phone: cleanPhoneNumber(record.phone) || undefined,
+        description: `Fee payment reminder for ${record.studentName}`,
+      })
+        .then((url) => {
+          if (cancelled) return
+          setPaymentLink(url)
+          setMessage(generateReminderText({ record, companyName, paymentUrl: url }))
+        })
+        .catch((err) => {
+          if (cancelled) return
+          setLinkError(
+            err instanceof Error
+              ? err.message
+              : "Could not create a payment link for this student"
+          )
+        })
+        .finally(() => {
+          if (!cancelled) setPreparingLink(false)
+        })
+    }
 
     getWaStatus()
-      .then(setWaState)
-      .catch(() => setWaState(null))
-  }, [record, open, companyName, workspacePaymentUrl])
+      .then((state) => {
+        if (!cancelled) setWaState(state)
+      })
+      .catch(() => {
+        if (!cancelled) setWaState(null)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [record, open, companyName])
 
   if (!record) return null
 
   const isPaid = normalizeStatus(record.status) === "SUCCESS"
-  const baseLink = record.paymentUrl || workspacePaymentUrl || ""
-  const paymentLink = getStudentSpecificPaymentUrl(baseLink, record.studentId)
-  const canSendWa = Boolean(cleanPhoneNumber(phone))
+  const canSendWa =
+    Boolean(cleanPhoneNumber(phone)) &&
+    !preparingLink &&
+    (isPaid || Boolean(paymentLink))
 
   async function handleCopy() {
     try {
@@ -309,6 +366,15 @@ function FeeReminderDialog({
     const cleaned = cleanPhoneNumber(phone)
     if (!cleaned) {
       setBotError("Please provide a valid 10-digit mobile number")
+      return
+    }
+    if (!isPaid && !paymentLink) {
+      setBotError(
+        linkError ||
+          (preparingLink
+            ? "Creating the secure payment link. Try again in a moment."
+            : "No live payment link is available for this student.")
+      )
       return
     }
 
@@ -462,7 +528,7 @@ function FeeReminderDialog({
               <button
                 type="button"
                 onClick={() =>
-                  setMessage(generateReminderText({ record, companyName, workspacePaymentUrl }))
+                  setMessage(generateReminderText({ record, companyName, paymentUrl: paymentLink }))
                 }
                 className="text-[11px] text-primary hover:underline"
               >
@@ -490,6 +556,18 @@ function FeeReminderDialog({
           {botError && (
             <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400">
               {botError}
+            </div>
+          )}
+
+          {preparingLink && (
+            <div className="rounded-lg border border-sky-200 bg-sky-50 p-2.5 text-xs text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-300">
+              Creating a live gateway checkout for this student…
+            </div>
+          )}
+
+          {linkError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400">
+              {linkError}
             </div>
           )}
 
@@ -713,27 +791,6 @@ function BulkReminderDialog({
 export default function PaymentsPage() {
   const { can, activeProfile, profile } = useAuth()
   const companyName = activeProfile?.name || profile?.name || ""
-  const workspacePaymentUrl = useMemo(() => {
-    const slug = companyName
-      ? companyName
-          .trim()
-          .toLowerCase()
-          .replace(/[^a-z0-9_-]+/g, "-")
-          .replace(/^-+|-+$/g, "")
-      : ""
-    if (typeof window !== "undefined") {
-      const isLocal =
-        window.location.hostname === "localhost" ||
-        window.location.hostname === "127.0.0.1"
-      if (!isLocal && slug) {
-        return `${window.location.origin}/${encodeURIComponent(slug)}`
-      }
-    }
-    if (slug) {
-      return `https://myfees.myenum.in/${encodeURIComponent(slug)}`
-    }
-    return activeProfile?.paymentUrl || profile?.paymentUrl || ""
-  }, [companyName, activeProfile?.paymentUrl, profile?.paymentUrl])
 
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [orders, setOrders] = useState<PaymentOrder[]>([])
@@ -852,12 +909,11 @@ export default function PaymentsPage() {
       return "4500"
     }
 
-    // Helper to generate student-specific checkout URL
+    // Only real gateway checkout URLs are linkable. Students without one get a
+    // fresh checkout created when a reminder is opened.
     const buildStudentPaymentUrl = (studentId?: string, explicitUrl?: string) => {
-      if (explicitUrl && explicitUrl.startsWith("http")) {
-        return getStudentSpecificPaymentUrl(explicitUrl, studentId)
-      }
-      return getStudentSpecificPaymentUrl(workspacePaymentUrl, studentId)
+      if (!isGatewayCheckoutUrl(explicitUrl)) return ""
+      return getStudentSpecificPaymentUrl(explicitUrl as string, studentId)
     }
 
     // 2. Add online gateway orders
@@ -1234,62 +1290,6 @@ export default function PaymentsPage() {
           </div>
         }
       />
-
-      {workspacePaymentUrl ? (
-        <div className="flex flex-col gap-3 rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 items-start gap-3 sm:items-center">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <Link2Icon className="size-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Workspace Public Payment URL
-                </span>
-                <span className="inline-flex items-center rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/20">
-                  Online
-                </span>
-              </div>
-              <p className="mt-0.5 truncate font-mono text-sm font-medium text-foreground">
-                {workspacePaymentUrl}
-              </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Share this link with students and parents to collect fees online directly.
-              </p>
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2 self-start sm:self-auto">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void copyToClipboard(workspacePaymentUrl, "workspace-payment-url")}
-              className="gap-1.5"
-            >
-              {copiedKey === "workspace-payment-url" ? (
-                <>
-                  <CheckIcon className="size-3.5 text-emerald-600" />
-                  <span>Copied!</span>
-                </>
-              ) : (
-                <>
-                  <CopyIcon className="size-3.5" />
-                  <span>Copy URL</span>
-                </>
-              )}
-            </Button>
-            <a
-              href={workspacePaymentUrl}
-              target="_blank"
-              rel="noreferrer"
-              className={buttonVariants({ variant: "default", size: "sm", className: "gap-1.5" })}
-            >
-              <span>Visit Link</span>
-              <ExternalLinkIcon className="size-3.5" />
-            </a>
-          </div>
-        </div>
-      ) : null}
 
       <Stats01 stats={stats} />
 
@@ -1732,7 +1732,6 @@ export default function PaymentsPage() {
           if (!open) setReminderRecord(null)
         }}
         companyName={companyName}
-        workspacePaymentUrl={workspacePaymentUrl}
       />
 
       {/* Bulk Reminders Dialog */}

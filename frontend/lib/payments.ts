@@ -136,6 +136,51 @@ export function createPayment(input: CreatePaymentInput): Promise<PaymentOrder> 
   })
 }
 
+const CHECKOUT_PATH_RE = /\/checkout\/[A-Za-z0-9_-]+/
+
+/**
+ * A real gateway checkout URL, for example
+ * https://pay.myenum.in/checkout/3499aabc-0fd4-4dc5-8feb-b81a7abc59ca
+ */
+export function isGatewayCheckoutUrl(url: string | null | undefined): boolean {
+  if (!url) return false
+  try {
+    const parsed = new URL(url)
+    return (
+      (parsed.protocol === "https:" || parsed.protocol === "http:") &&
+      CHECKOUT_PATH_RE.test(parsed.pathname)
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Open a real YOUPI PG checkout for a student and return its payable URL.
+ * Throws when the gateway does not hand back a checkout link so callers never
+ * send a hand-built or expired workspace URL in a reminder.
+ */
+export async function createStudentCheckoutUrl(input: {
+  studentId?: string
+  studentName: string
+  amount: number | string
+  feeId?: number
+  phone?: string
+  email?: string
+  description?: string
+}): Promise<string> {
+  const order = await createPayment({ ...input, method: "UPI" })
+  const raw = (order.paymentUrl || order.checkoutUrl || "").trim()
+  if (!isGatewayCheckoutUrl(raw)) {
+    throw new Error(
+      "The payment gateway did not return a usable checkout link. Check Payments → UPI setup and retry."
+    )
+  }
+  if (!input.studentId) return raw
+  const sep = raw.includes("?") ? "&" : "?"
+  return `${raw}${sep}student=${encodeURIComponent(input.studentId)}`
+}
+
 /** @deprecated Use createPayment with an explicit method. */
 export function createUpiPayment(input: CreatePaymentInput): Promise<PaymentOrder> {
   return createPayment({ ...input, method: "UPI" })

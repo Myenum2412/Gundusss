@@ -41,6 +41,7 @@ import { loadReceipts, type StoredReceipt } from "@/lib/receipts-store"
 import { resolveStudentFee } from "@/lib/fee-lookup"
 import { loadFeeStructures, type StoredFeeStructure } from "@/lib/fee-structures-store"
 import { getWaStatus, sendWaMessage, type WaState } from "@/lib/api"
+import { createStudentCheckoutUrl } from "@/lib/payments"
 import { InteractiveButtonBubble } from "@/components/ui/whatsapp/interactive-button-bubble"
 import { CtaUrlBubble } from "@/components/ui/whatsapp/cta-url-bubble"
 import "@/components/ui/whatsapp/styles/whatsapp.css"
@@ -92,18 +93,6 @@ function deriveReminderDays(due: number, before: number, after: number): number[
 
 export default function RemindersPage() {
   const { user, activeProfile, can } = useAuth()
-  // Never fall back to another workspace's demo link. Derive this profile's
-  // own public page when the stored paymentUrl is missing.
-  const publicPaymentBaseUrl = useMemo(() => {
-    const stored = activeProfile?.paymentUrl?.trim()
-    if (stored) return stored.replace(/\/+$/, "")
-    const slug = (activeProfile?.name || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-    return slug ? `https://myfees.myenum.in/${encodeURIComponent(slug)}` : ""
-  }, [activeProfile?.paymentUrl, activeProfile?.name])
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<RemindersStatusResponse | null>(null)
   const [students, setStudents] = useState<StoredStudent[]>([])
@@ -111,6 +100,7 @@ export default function RemindersPage() {
   const [feeStructures, setFeeStructures] = useState<StoredFeeStructure[]>([])
   const [receipts, setReceipts] = useState<StoredReceipt[]>([])
   const [waState, setWaState] = useState<WaState | null>(null)
+  const [previewLinkBusy, setPreviewLinkBusy] = useState(false)
 
   // Actions state
   const [triggering, setTriggering] = useState(false)
@@ -326,10 +316,6 @@ export default function RemindersPage() {
       setReminderError("Write a message, a title, or attach a file.")
       return
     }
-    if (!publicPaymentBaseUrl) {
-      setReminderError("Your public payment link is unavailable. Reload the page and try again.")
-      return
-    }
     setReminderError("")
     setReminderSending(true)
 
@@ -353,8 +339,19 @@ export default function RemindersPage() {
       const stu = students.find((st) => st.studentId === id)
       recipientNames.push(stu ? `${stu.studentName} (${stu.studentId})` : id)
       try {
+        // Never invent a student or an amount for a payable link: unknown
+        // students must be reported as failures instead of sending a checkout.
+        if (!stu) throw new Error(`Student ${id} not found`)
         const titleLine = reminderForm.title.trim()
-        const stuPayUrl = `${publicPaymentBaseUrl}?student=${encodeURIComponent(stu?.studentId || id)}`
+        const feeInfo = resolveStudentFee(stu, feeStructures, groups)
+        const stuPayUrl = await createStudentCheckoutUrl({
+          studentId: stu.studentId,
+          studentName: stu.studentName,
+          amount: feeInfo.amount,
+          phone: (stu.phone || "").replace(/\D/g, ""),
+          email: stu.email || undefined,
+          description: `Fee reminder for ${stu.studentName}`,
+        })
         await sendWaMessage({
           to: stu?.phone ?? id,
           message: titleLine ? `*${titleLine}*\n${reminderForm.message.trim()}` : reminderForm.message.trim(),
@@ -419,12 +416,24 @@ export default function RemindersPage() {
       alert("Student does not have a valid phone number")
       return
     }
-    if (!publicPaymentBaseUrl) {
-      alert("Your public payment link is unavailable. Reload the page and try again.")
+
+    let studentPaymentUrl = ""
+    try {
+      studentPaymentUrl = await createStudentCheckoutUrl({
+        studentId: stu.studentId,
+        studentName: stu.studentName,
+        amount: feeAmount,
+        phone,
+        email: stu.email || undefined,
+        description: `Monthly fee payment for ${stu.studentName} (${stu.studentId})`,
+      })
+    } catch (e: any) {
+      alert(
+        `Could not create a payment link: ${e?.message ?? "Payment gateway unavailable"}`
+      )
       return
     }
 
-    const studentPaymentUrl = `${publicPaymentBaseUrl}?student=${encodeURIComponent(stu.studentId)}`
     const bodyText = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${stu.studentName}*,\n\nThis is your monthly fee reminder for *${stu.course || "Course"}* (${stu.group || "Batch"}).\n\n• Student ID: *${stu.studentId}*\n• Monthly Fee: *₹${parseFloat(feeAmount).toLocaleString("en-IN")}*\n• Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\n\n— ${activeProfile?.name || "MyFees"} Accounts Desk`
 
     try {
@@ -439,6 +448,37 @@ export default function RemindersPage() {
       alert(`WhatsApp reminder delivered to ${stu.studentName} (+91 ${phone})!`)
     } catch (e: any) {
       alert(`Failed to send WhatsApp reminder: ${e?.message ?? "Failed to send"}`)
+    }
+  }
+
+  const openPreviewCheckout = async () => {
+    if (!previewStudent || previewLinkBusy) return
+    // Reserve the tab synchronously so the async checkout fetch is not treated
+    // as a popup and blocked by the browser.
+    const checkoutWindow = window.open("about:blank", "_blank")
+    setPreviewLinkBusy(true)
+    try {
+      const url = await createStudentCheckoutUrl({
+        studentId: previewStudent.studentId,
+        studentName: previewStudent.studentName,
+        amount: previewFee,
+        phone: (previewStudent.phone || "").replace(/\D/g, ""),
+        email: previewStudent.email || undefined,
+        description: `Monthly fee payment for ${previewStudent.studentName} (${previewStudent.studentId})`,
+      })
+      if (checkoutWindow) {
+        checkoutWindow.opener = null
+        checkoutWindow.location.href = url
+      } else {
+        window.location.href = url
+      }
+    } catch (e: any) {
+      checkoutWindow?.close()
+      setActionError(
+        `Could not create a payment link: ${e?.message ?? "Payment gateway unavailable"}`
+      )
+    } finally {
+      setPreviewLinkBusy(false)
     }
   }
 
@@ -1074,14 +1114,12 @@ export default function RemindersPage() {
                 status="delivered"
                 showTail={true}
                 onButtonClick={() => {
-                  if (!publicPaymentBaseUrl) return
-                  const studentQuery = previewStudent ? `?student=${encodeURIComponent(previewStudent.studentId)}` : ""
-                  window.open(publicPaymentBaseUrl + studentQuery, "_blank")
+                  void openPreviewCheckout()
                 }}
               />
 
               <div className="mt-3 text-center text-[10px] text-muted-foreground">
-                When students tap &ldquo;Pay Now&rdquo; in WhatsApp, it immediately opens your direct payment portal.
+                When students tap &ldquo;Pay Now&rdquo; in WhatsApp, it immediately opens a real gateway checkout for this student.
               </div>
             </div>
 
@@ -1090,28 +1128,30 @@ export default function RemindersPage() {
                 CTA URL Button (official &ldquo;open link&rdquo; bubble)
               </span>
 
-              {(() => {
-                const ctaUrl = publicPaymentBaseUrl
-                  ? `${publicPaymentBaseUrl}${previewStudent ? `?student=${encodeURIComponent(previewStudent.studentId)}` : ""}`
-                  : "#"
-                return (
-                  <CtaUrlBubble
-                    variant="outgoing"
-                    body={`Monthly fee for ${previewStudent?.studentName || "Student"} — ₹${parseFloat(previewFee).toLocaleString("en-IN")} due.`}
-                    footer={`${activeProfile?.name || "MyFees"} · Secured UPI / Card payment`}
-                    displayText="Pay Now"
-                    url={ctaUrl}
-                    timestamp="09:00 AM"
-                    status="delivered"
-                    showTail={true}
-                    renderAction={(props) => (
-                      <a href={props.href} target="_blank" rel="noopener noreferrer" className={props.className}>
-                        {props.children}
-                      </a>
-                    )}
-                  />
-                )
-              })()}
+              <CtaUrlBubble
+                variant="outgoing"
+                body={`Monthly fee for ${previewStudent?.studentName || "Student"} — ₹${parseFloat(previewFee).toLocaleString("en-IN")} due.`}
+                footer={`${activeProfile?.name || "MyFees"} · Secured UPI / Card payment`}
+                displayText={previewLinkBusy ? "Preparing checkout..." : "Pay Now"}
+                url="#"
+                timestamp="09:00 AM"
+                status="delivered"
+                showTail={true}
+                renderAction={(props) => (
+                  <a
+                    href={props.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={props.className}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      void openPreviewCheckout()
+                    }}
+                  >
+                    {props.children}
+                  </a>
+                )}
+              />
 
               <div className="mt-3 text-center text-[10px] text-muted-foreground">
                 Sent via WhatsApp&rsquo;s native CTA-URL button — students who can&rsquo;t render it still get the plain link.
