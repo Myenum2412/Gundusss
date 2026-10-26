@@ -228,40 +228,7 @@ export interface PublicOrganizationProfile {
   students?: PublicStudentOption[]
 }
 
-const DEFAULT_AMARNATH_PROFILE: PublicOrganizationProfile = {
-  profileId: "ORG-XD3SLDDC",
-  name: "Amarnath",
-  ownerName: "Amarnath",
-  paymentUrl: "https://myfees.myenum.in/amarnath",
-  upiId: "6374984055@upi",
-  payeeName: "Amarnath",
-  qrCodeDataUrl: "",
-  logoUrl: "",
-  phone: "6374984055",
-  email: "testuser2412@gmail.com",
-  description: "Premier educational coaching and fee management center.",
-  students: [
-    {
-      studentId: "STU-001",
-      studentName: "Amarnath",
-      group: "Science Batch A",
-      course: "Science",
-      phone: "6374984055",
-      email: "testuser2412@gmail.com",
-    },
-    {
-      studentId: "STU-002",
-      studentName: "Gunduss",
-      group: "Science Batch A",
-      course: "Science",
-      phone: "7708920447",
-      email: "Gunduss1234@gmail.com",
-    },
-  ],
-}
-
 export async function getPublicProfile(slug: string): Promise<PublicOrganizationProfile> {
-  const clean = slug.trim().toLowerCase()
   const urls = [
     `/api/public/profile/${encodeURIComponent(slug)}`,
     `${BASE}/api/public/profile/${encodeURIComponent(slug)}`,
@@ -283,15 +250,10 @@ export async function getPublicProfile(slug: string): Promise<PublicOrganization
     }
   }
 
-  if (clean === "amarnath" || clean === "org-xd3slddc") {
-    return DEFAULT_AMARNATH_PROFILE
-  }
-
   throw lastError || new Error("Organization not found")
 }
 
 export async function getPublicStudents(slug: string): Promise<PublicStudentOption[]> {
-  const clean = slug.trim().toLowerCase()
   const urls = [
     `/api/public/students/${encodeURIComponent(slug)}`,
     `${BASE}/api/public/students/${encodeURIComponent(slug)}`,
@@ -307,10 +269,6 @@ export async function getPublicStudents(slug: string): Promise<PublicStudentOpti
     } catch {
       // try next
     }
-  }
-
-  if (clean === "amarnath" || clean === "org-xd3slddc") {
-    return DEFAULT_AMARNATH_PROFILE.students || []
   }
 
   return []

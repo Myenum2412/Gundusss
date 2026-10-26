@@ -185,6 +185,14 @@ export interface UnifiedPaymentRecord {
   rawStudent?: StoredStudent
 }
 
+function getStudentSpecificPaymentUrl(basePayUrl: string, studentId?: string): string {
+  if (!basePayUrl) return ""
+  if (!studentId || studentId === "—") return basePayUrl
+  if (basePayUrl.includes("student=")) return basePayUrl
+  const sep = basePayUrl.includes("?") ? "&" : "?"
+  return `${basePayUrl}${sep}student=${encodeURIComponent(studentId)}`
+}
+
 function generateReminderText({
   record,
   companyName,
@@ -196,7 +204,8 @@ function generateReminderText({
 }) {
   const org = companyName ? companyName.trim() : "Institute Office"
   const isPaid = normalizeStatus(record.status) === "SUCCESS"
-  const payUrl = record.paymentUrl || workspacePaymentUrl || ""
+  const base = record.paymentUrl || workspacePaymentUrl || ""
+  const payUrl = getStudentSpecificPaymentUrl(base, record.studentId)
 
   if (isPaid) {
     const lines = [
@@ -281,7 +290,8 @@ function FeeReminderDialog({
   if (!record) return null
 
   const isPaid = normalizeStatus(record.status) === "SUCCESS"
-  const paymentLink = record.paymentUrl || workspacePaymentUrl || ""
+  const baseLink = record.paymentUrl || workspacePaymentUrl || ""
+  const paymentLink = getStudentSpecificPaymentUrl(baseLink, record.studentId)
   const canSendWa = Boolean(cleanPhoneNumber(phone))
 
   async function handleCopy() {
@@ -704,15 +714,23 @@ export default function PaymentsPage() {
   const { can, activeProfile, profile } = useAuth()
   const companyName = activeProfile?.name || profile?.name || ""
   const workspacePaymentUrl = useMemo(() => {
-    if (companyName) {
-      const slug = companyName
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-      if (slug) {
-        return `https://myfees.myenum.in/${encodeURIComponent(slug)}`
+    const slug = companyName
+      ? companyName
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+      : ""
+    if (typeof window !== "undefined") {
+      const isLocal =
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1"
+      if (!isLocal && slug) {
+        return `${window.location.origin}/${encodeURIComponent(slug)}`
       }
+    }
+    if (slug) {
+      return `https://myfees.myenum.in/${encodeURIComponent(slug)}`
     }
     return activeProfile?.paymentUrl || profile?.paymentUrl || ""
   }, [companyName, activeProfile?.paymentUrl, profile?.paymentUrl])
@@ -834,6 +852,14 @@ export default function PaymentsPage() {
       return "4500"
     }
 
+    // Helper to generate student-specific checkout URL
+    const buildStudentPaymentUrl = (studentId?: string, explicitUrl?: string) => {
+      if (explicitUrl && explicitUrl.startsWith("http")) {
+        return getStudentSpecificPaymentUrl(explicitUrl, studentId)
+      }
+      return getStudentSpecificPaymentUrl(workspacePaymentUrl, studentId)
+    }
+
     // 2. Add online gateway orders
     for (const order of orders) {
       const stu =
@@ -849,11 +875,14 @@ export default function PaymentsPage() {
         studentsWithPayments.add(order.studentName.trim().toLowerCase())
       }
 
+      const effectiveStudentId = order.studentId || stu?.studentId || ""
+      const payUrl = buildStudentPaymentUrl(effectiveStudentId, order.paymentUrl || order.checkoutUrl)
+
       records.push({
         id: `ord-${order.orderId}`,
         orderId: order.orderId,
         paymentId: order.paymentId,
-        studentId: order.studentId || stu?.studentId || "—",
+        studentId: effectiveStudentId || "—",
         studentName: order.studentName || stu?.studentName || "—",
         course: stu?.course || "—",
         group: stu?.group || "—",
@@ -863,7 +892,7 @@ export default function PaymentsPage() {
         method: order.method || "UPI",
         status: normalizeStatus(order.status) || "INITIATED",
         gatewayStatus: order.gatewayStatus,
-        paymentUrl: order.paymentUrl || order.checkoutUrl || "",
+        paymentUrl: payUrl,
         utr: order.utr || "—",
         receiptId: order.receiptId,
         createdAt: order.createdAt || new Date().toISOString(),
@@ -908,11 +937,12 @@ export default function PaymentsPage() {
       else if (mappedMethod.toLowerCase() === "upi") mappedMethod = "UPI"
       else if (mappedMethod.toLowerCase() === "card") mappedMethod = "CARD_COUNTER"
 
+      const effectiveStudentId = receipt.studentId || stu?.studentId || ""
       records.push({
         id: `rcp-${receipt.receiptId}`,
         orderId: receipt.receiptId,
         paymentId: null,
-        studentId: receipt.studentId || stu?.studentId || "—",
+        studentId: effectiveStudentId || "—",
         studentName: receipt.studentName || stu?.studentName || "—",
         course: stu?.course || "—",
         group: stu?.group || "—",
@@ -922,7 +952,7 @@ export default function PaymentsPage() {
         method: mappedMethod,
         status: mappedStatus,
         gatewayStatus: mappedStatus === "SUCCESS" ? "SUCCESS" : undefined,
-        paymentUrl: "",
+        paymentUrl: buildStudentPaymentUrl(effectiveStudentId),
         utr: receipt.notes || "—",
         receiptId: receipt.receiptId,
         createdAt: receipt.paymentDate
@@ -961,7 +991,7 @@ export default function PaymentsPage() {
         method: "UPI",
         status: "INITIATED",
         gatewayStatus: undefined,
-        paymentUrl: "",
+        paymentUrl: buildStudentPaymentUrl(student.studentId),
         utr: "Awaiting fee payment",
         receiptId: null,
         createdAt: student.joiningDate
@@ -1615,12 +1645,20 @@ export default function PaymentsPage() {
                                 <span>Payment History</span>
                               </DropdownMenuItem>
 
-                              {/* 4. Open Checkout URL */}
+                              {/* 4. Open Student Payment URL */}
                               {paymentUrl && (
-                                <DropdownMenuItem onClick={() => window.open(paymentUrl, "_blank")}>
-                                  <ExternalLinkIcon className="size-4 text-muted-foreground" />
-                                  <span>Open Checkout URL</span>
-                                </DropdownMenuItem>
+                                <>
+                                  <DropdownMenuItem onClick={() => window.open(paymentUrl, "_blank")}>
+                                    <ExternalLinkIcon className="size-4 text-primary" />
+                                    <span>Open Student Payment Link</span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => void copyToClipboard(paymentUrl, `url-${record.id}`)}>
+                                    <CopyIcon className="size-4 text-emerald-600 dark:text-emerald-400" />
+                                    <span>
+                                      {copiedKey === `url-${record.id}` ? "Copied Link!" : "Copy Student Payment Link"}
+                                    </span>
+                                  </DropdownMenuItem>
+                                </>
                               )}
 
                               {/* 5. View Receipt */}

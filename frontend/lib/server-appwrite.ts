@@ -81,41 +81,6 @@ async function appwriteFetch(path: string, init: RequestInit = {}): Promise<Resp
   })
 }
 
-// Fallback profile for Amarnath to guarantee 100% uptime
-const FALLBACK_AMARNATH: PublicOrganizationProfile = {
-  profileId: "ORG-XD3SLDDC",
-  name: "Amarnath",
-  ownerName: "Amarnath",
-  paymentUrl: "https://myfees.myenum.in/amarnath",
-  upiId: "6374984055@upi",
-  payeeName: "Amarnath",
-  qrCodeDataUrl: "",
-  logoUrl: "",
-  phone: "6374984055",
-  email: "testuser2412@gmail.com",
-  description: "Premier educational coaching and fee management center.",
-  students: [
-    {
-      studentId: "STU-001",
-      studentName: "Amarnath",
-      group: "Science Batch A",
-      course: "Science",
-      phone: "6374984055",
-      email: "testuser2412@gmail.com",
-      feeAmount: "5000",
-    },
-    {
-      studentId: "STU-002",
-      studentName: "Gunduss",
-      group: "Science Batch A",
-      course: "Science",
-      phone: "7708920447",
-      email: "Gunduss1234@gmail.com",
-      feeAmount: "5000",
-    },
-  ],
-}
-
 export async function fetchPublicProfileFromAppwrite(
   slug: string
 ): Promise<PublicOrganizationProfile | null> {
@@ -153,9 +118,6 @@ export async function fetchPublicProfileFromAppwrite(
     }
 
     if (!matchedProfile) {
-      if (clean === "amarnath" || clean === "org-xd3slddc") {
-        return FALLBACK_AMARNATH
-      }
       return null
     }
 
@@ -200,11 +162,6 @@ export async function fetchPublicProfileFromAppwrite(
       // ignore
     }
 
-    // Default UPI if empty and profile is Amarnath
-    if (!upiId && (clean === "amarnath" || profileId === "ORG-XD3SLDDC")) {
-      upiId = "6374984055@upi"
-    }
-
     // 4. Fetch students for this profile
     const students: PublicStudentOption[] = []
     try {
@@ -241,11 +198,6 @@ export async function fetchPublicProfileFromAppwrite(
       // ignore
     }
 
-    // If no students returned from API for Amarnath, inject defaults
-    if (students.length === 0 && (clean === "amarnath" || profileId === "ORG-XD3SLDDC")) {
-      students.push(...(FALLBACK_AMARNATH.students || []))
-    }
-
     return {
       profileId,
       name: matchedProfile.name,
@@ -255,19 +207,12 @@ export async function fetchPublicProfileFromAppwrite(
       payeeName,
       qrCodeDataUrl,
       logoUrl: biz?.media?.logoUrl || "",
-      phone: biz?.phone || (clean === "amarnath" ? "6374984055" : ""),
+      phone: biz?.phone || "",
       email: biz?.email || matchedProfile.ownerEmail || "",
-      description:
-        biz?.description ||
-        (clean === "amarnath"
-          ? "Premier educational coaching and fee management center."
-          : ""),
+      description: biz?.description || "",
       students,
     }
   } catch {
-    if (clean === "amarnath" || clean === "org-xd3slddc") {
-      return FALLBACK_AMARNATH
-    }
     return null
   }
 }

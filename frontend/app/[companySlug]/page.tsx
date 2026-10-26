@@ -154,9 +154,9 @@ export default function PublicPaymentPage() {
     return "5000"
   }, [activeStudent])
 
-  const upiId = profile?.upiId || "6374984055@upi"
-  const payeeName = profile?.payeeName || profile?.name || "Amarnath"
-  const numAmount = parseFloat(fixedAmount) || 5000
+  const upiId = profile?.upiId || (profile?.phone ? `${profile.phone.replace(/\D/g, "")}@upi` : "")
+  const payeeName = profile?.payeeName || profile?.name || "Institution Office"
+  const numAmount = parseFloat(fixedAmount) || 0
   const amountFormatted = numAmount.toFixed(2)
 
   // Construct UPI payment URI for that specific student and fixed fee

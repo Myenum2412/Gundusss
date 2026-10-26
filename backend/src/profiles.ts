@@ -143,12 +143,31 @@ export async function findProfileBySlug(
   if (direct) return direct;
 
   const profiles = await listProfiles();
-  for (const p of profiles) {
-    if (p.profileId.toLowerCase() === clean) return p;
-    if (slugifyCompanyName(p.name) === clean) return p;
-    if (p.name.trim().toLowerCase() === clean) return p;
+  const matched = profiles.filter((p) => {
+    return (
+      p.profileId.toLowerCase() === clean ||
+      slugifyCompanyName(p.name) === clean ||
+      p.name.trim().toLowerCase() === clean
+    );
+  });
+
+  if (matched.length === 0) return null;
+  if (matched.length === 1) return matched[0];
+
+  // If multiple profiles match, prefer profiles tied to an active user
+  const users = await listUsers().catch(() => []);
+  const activeProfileIds = new Set(users.map((u) => u.profile_id));
+
+  const userMatched = matched.filter((p) => activeProfileIds.has(p.profileId));
+  if (userMatched.length > 0) {
+    return userMatched.sort((a, b) =>
+      String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
+    )[0];
   }
-  return null;
+
+  return matched.sort((a, b) =>
+    String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
+  )[0];
 }
 
 async function createProfile(input: {

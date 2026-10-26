@@ -1118,6 +1118,33 @@ export async function paymentRoutes(app: FastifyInstance) {
       }
     }
 
+    const feeStructures = await listScopedRecords<{
+      amount: string | number;
+      courseGroup?: string;
+      studentIds?: string[];
+      status?: string;
+    }>(APPWRITE_COLLECTIONS.feeStructures, profile.profileId);
+
+    const getStudentFeeAmount = (s: { studentId: string; group?: string; course?: string }) => {
+      for (const f of feeStructures) {
+        if (f.data.studentIds?.includes(s.studentId) && f.data.amount) {
+          return String(f.data.amount);
+        }
+      }
+      if (s.group && feeMap.has(s.group.toLowerCase())) {
+        return feeMap.get(s.group.toLowerCase())!;
+      }
+      for (const f of feeStructures) {
+        if (
+          (s.course && f.data.courseGroup?.toLowerCase().includes(s.course.toLowerCase())) ||
+          (s.group && f.data.courseGroup?.toLowerCase().includes(s.group.toLowerCase()))
+        ) {
+          if (f.data.amount) return String(f.data.amount);
+        }
+      }
+      return '5000';
+    };
+
     const students = studentRecords
       .map((r) => r.data)
       .filter((s) => (s.status ?? 'Active').toLowerCase() !== 'inactive')
@@ -1128,7 +1155,7 @@ export async function paymentRoutes(app: FastifyInstance) {
         course: s.course || '',
         phone: s.phone || '',
         email: s.email || '',
-        feeAmount: feeMap.get((s.group || '').toLowerCase()) || '5000',
+        feeAmount: getStudentFeeAmount(s),
       }));
 
     return {
