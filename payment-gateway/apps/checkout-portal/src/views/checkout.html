@@ -2013,6 +2013,19 @@
             if (codApiBox) codApiBox.style.display = 'none';
           }
 
+          // Populate official receipt card fields
+          const rRef = document.getElementById('receiptRefVal');
+          if (rRef) rRef.textContent = `#${data.orderId || data.id || PAYMENT_ID}`;
+          const rStudent = document.getElementById('receiptStudentVal');
+          const studentName = data.metadata?.studentName || data.customer?.name || (activeCustomer ? activeCustomer.name : '');
+          if (rStudent) rStudent.textContent = studentName || 'Student';
+          const rMerchant = document.getElementById('receiptMerchantVal');
+          if (rMerchant) rMerchant.textContent = data.merchantName || state?.branding?.brandName || 'Institution';
+          const rDate = document.getElementById('receiptDateVal');
+          if (rDate) rDate.textContent = data.completedAt ? new Date(data.completedAt).toLocaleString('en-IN') : new Date().toLocaleString('en-IN');
+          const rMethod = document.getElementById('receiptMethodVal');
+          if (rMethod) rMethod.textContent = data.method || 'UPI';
+
           emitTriggerHook('PAYMENT_COMPLETED', { amount: data.amount, method: data.method, isCod: isCodOrder });
 
           try {
@@ -2028,10 +2041,13 @@
             btnReturn.hidden = false;
             btnReturn.href = safeReturnUrl;
             if (window.parent === window) {
-              setTimeout(() => { window.location.href = safeReturnUrl; }, 2000);
+              setTimeout(() => { window.location.href = safeReturnUrl; }, 6000);
             }
           } else if (btnReturn) {
-            btnReturn.hidden = true;
+            btnReturn.hidden = false;
+            btnReturn.href = 'javascript:void(0)';
+            btnReturn.onclick = () => window.close();
+            btnReturn.textContent = 'Close Receipt';
           }
           return;
         }

@@ -385,9 +385,9 @@
                 </div>
               </div>
 
-              <!-- VIEW D: SUCCESS CELEBRATION VIEW -->
+              <!-- VIEW D: SUCCESS CELEBRATION VIEW / OFFICIAL RECEIPT -->
               <div id="viewSuccessContent" hidden>
-                <div class="ypg-success-box">
+                <div class="ypg-success-box" style="text-align: center; max-width: 440px; margin: 0 auto;">
                   <div class="ypg-success-circle" id="successIconCircle">
                     <svg class="ypg-check-svg" viewBox="0 0 24 24">
                       <polyline class="ypg-check-path" points="20 6 9 17 4 12"></polyline>
@@ -398,6 +398,35 @@
                   <div style="font-size:12px; color:var(--ypg-text-muted); margin-bottom:14px;" id="successDescText">
                     Your payment was automatically verified by YouPI PG banking observers.
                   </div>
+
+                  <!-- OFFICIAL RECEIPT CARD -->
+                  <div class="ypg-receipt-card" id="receiptSummaryCard" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:14px; padding:16px; margin:16px 0; text-align:left; font-size:12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:10px; margin-bottom:10px;">
+                      <span style="font-weight:700; color:#0f172a; text-transform:uppercase; letter-spacing:0.04em; font-size:11px;">Payment Receipt</span>
+                      <span style="background:#ecfdf5; color:#059669; font-weight:700; font-size:10px; padding:2px 8px; border-radius:9999px; border:1px solid #a7f3d0;">PAID &amp; VERIFIED</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                      <span style="color:#64748b;">Receipt / Ref</span>
+                      <span style="font-family:monospace; font-weight:700; color:#0f172a;" id="receiptRefVal">#{{ORDER_ID}}</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:6px;" id="receiptStudentRow">
+                      <span style="color:#64748b;">Student</span>
+                      <span style="font-weight:600; color:#0f172a;" id="receiptStudentVal">{{STUDENT_NAME}}</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                      <span style="color:#64748b;">Institution</span>
+                      <span style="font-weight:600; color:#0f172a;" id="receiptMerchantVal">{{MERCHANT_NAME}}</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                      <span style="color:#64748b;">Date &amp; Time</span>
+                      <span style="color:#0f172a;" id="receiptDateVal">—</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between;">
+                      <span style="color:#64748b;">Payment Method</span>
+                      <span style="font-weight:600; color:#0f172a;" id="receiptMethodVal">UPI</span>
+                    </div>
+                  </div>
+
                   <div id="successCodDevApiBox"
                     style="display:none; font-size:11.5px; background:#f1f5f9; padding:10px 14px; border-radius:8px; margin-bottom:14px; text-align:left; border:1px solid #e2e8f0;">
                     <span style="font-weight:700; color:#334155;">Developer Order API:</span>
@@ -405,7 +434,15 @@
                       style="word-break:break-all; font-family:monospace; color:#2563eb; margin-top:3px; font-size:11px;"
                       id="successCodDevApiUrl"></div>
                   </div>
-                  <a href="javascript:void(0)" class="btn-return-merchant" id="btnReturnStore">Return to Merchant</a>
+
+                  <!-- ACTION BUTTONS: PRINT RECEIPT & RETURN -->
+                  <div style="display:flex; gap:10px; margin-top:14px;">
+                    <button type="button" onclick="window.print()" class="ypg-btn-print-receipt" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:#fff; border:1px solid #cbd5e1; border-radius:10px; padding:10px 14px; font-weight:600; font-size:13px; color:#334155; cursor:pointer;">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                      Print Receipt
+                    </button>
+                    <a href="javascript:void(0)" class="btn-return-merchant" id="btnReturnStore" style="flex:1; margin-top:0; text-align:center;">Return to Store</a>
+                  </div>
                 </div>
               </div>
 

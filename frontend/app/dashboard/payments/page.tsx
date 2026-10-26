@@ -93,19 +93,18 @@ const TERMINAL = new Set([
   "REFUNDED",
 ])
 
-const STATUS_OPTIONS = [
-  "SUCCESS",
-  "PROCESSING",
-  "INITIATED",
-  "QUEUED",
-  "ACTIVE",
-  "FAILED",
-  "CANCELLED",
-  "EXPIRED",
-  "REFUNDED",
-  "SUSPICIOUS",
-  "BLOCKED",
-]
+function getSimplifiedStatus(
+  status?: string | null,
+  receiptId?: string | null
+): "PAID" | "UNPAID" {
+  const s = (status || "").trim().toUpperCase()
+  if (s === "SUCCESS" || s === "PAID" || s === "COMPLETED" || Boolean(receiptId)) {
+    return "PAID"
+  }
+  return "UNPAID"
+}
+
+const STATUS_OPTIONS = ["PAID", "UNPAID"]
 
 
 const METHOD_ICONS: Record<string, LucideIcon> = {
@@ -591,7 +590,7 @@ function BulkReminderDialog({
   onSelectRecord: (record: UnifiedPaymentRecord) => void
 }) {
   const pendingRecords = useMemo(
-    () => records.filter((r) => !TERMINAL.has(r.status)),
+    () => records.filter((r) => getSimplifiedStatus(r.status, r.receiptId) === "UNPAID"),
     [records]
   )
   const totalDue = useMemo(
@@ -1005,38 +1004,27 @@ export default function PaymentsPage() {
     )
   }, [orders, receipts, students, feeStructures])
 
-  const allStatuses = useMemo(() => {
-    const list = [...STATUS_OPTIONS]
-    for (const r of unifiedRecords) {
-      const s = normalizeStatus(r.status)
-      if (s && !list.includes(s)) {
-        list.push(s)
-      }
-    }
-    return list
-  }, [unifiedRecords])
+  const allStatuses = useMemo(() => ["PAID", "UNPAID"], [])
 
   const statusStats = useMemo(() => {
-    const map: Record<string, { count: number; totalAmount: number }> = {}
-    for (const status of allStatuses) {
-      map[status] = { count: 0, totalAmount: 0 }
+    const map: Record<string, { count: number; totalAmount: number }> = {
+      PAID: { count: 0, totalAmount: 0 },
+      UNPAID: { count: 0, totalAmount: 0 },
     }
     for (const r of unifiedRecords) {
-      const s = normalizeStatus(r.status)
-      if (!map[s]) {
-        map[s] = { count: 0, totalAmount: 0 }
-      }
+      const s = getSimplifiedStatus(r.status, r.receiptId)
       map[s].count += 1
       map[s].totalAmount += Number(r.amount) || 0
     }
     return map
-  }, [unifiedRecords, allStatuses])
+  }, [unifiedRecords])
 
-  // Filtered payment records by status and search query
+  // Filtered payment records by simplified status (PAID / UNPAID) and search query
   const filteredRecords = useMemo(() => {
     return unifiedRecords.filter((record) => {
-      if (statusFilter !== "ALL" && normalizeStatus(record.status) !== statusFilter) {
-        return false
+      if (statusFilter !== "ALL") {
+        const simplified = getSimplifiedStatus(record.status, record.receiptId)
+        if (simplified !== statusFilter) return false
       }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim()
@@ -1063,41 +1051,47 @@ export default function PaymentsPage() {
     })
   }, [unifiedRecords, statusFilter, searchQuery])
 
-  // Statistics calculation across all student records
-  const paid = unifiedRecords.filter((r) => r.status === "SUCCESS")
-  const awaiting = unifiedRecords.filter((r) => !TERMINAL.has(r.status)).length
+  // Statistics calculation across all student records: PAID vs UNPAID
+  const paidRecords = unifiedRecords.filter((r) => getSimplifiedStatus(r.status, r.receiptId) === "PAID")
+  const unpaidRecords = unifiedRecords.filter((r) => getSimplifiedStatus(r.status, r.receiptId) === "UNPAID")
+  const awaiting = unpaidRecords.length
   const receiptsCount = unifiedRecords.filter((r) => Boolean(r.receiptId)).length
-  const collected = paid.reduce(
+  const collected = paidRecords.reduce(
     (sum, record) => sum + (Number(record.amount) || 0),
     0
   )
-  const decided = unifiedRecords.filter((r) => TERMINAL.has(r.status)).length
-  const successRate =
-    decided === 0 ? 0 : Math.round((paid.length / decided) * 100)
+  const unpaidVolume = unpaidRecords.reduce(
+    (sum, record) => sum + (Number(record.amount) || 0),
+    0
+  )
+  const settlementRate =
+    unifiedRecords.length === 0
+      ? 0
+      : Math.round((paidRecords.length / unifiedRecords.length) * 100)
 
   const stats = [
     {
-      name: "Collected",
+      name: "Paid (Collected)",
       value: formatAmount(collected),
-      change: `${paid.length} settled`,
+      change: `${paidRecords.length} paid`,
       changeType: "positive" as const,
     },
     {
-      name: "Awaiting payment",
-      value: String(awaiting),
-      change: `${students.length} students enrolled`,
+      name: "Unpaid (Due)",
+      value: formatAmount(unpaidVolume),
+      change: `${unpaidRecords.length} unpaid`,
       changeType: "neutral" as const,
     },
     {
-      name: "Receipts created",
+      name: "Receipts Recorded",
       value: String(receiptsCount),
       change: "auto-recorded",
       changeType: "positive" as const,
     },
     {
-      name: "Settlement rate",
-      value: `${successRate}%`,
-      change: `${decided} total closed`,
+      name: "Settlement Rate",
+      value: `${settlementRate}%`,
+      change: `${paidRecords.length} of ${unifiedRecords.length} completed`,
       changeType: "neutral" as const,
     },
   ]
@@ -1308,14 +1302,11 @@ export default function PaymentsPage() {
                 id="payment-status-filter"
                 value={statusFilter}
                 onChange={(event) => setStatusFilter(event.target.value)}
-                className="h-8 rounded-lg border border-input bg-card px-2.5 text-xs shadow-xs outline-none transition-[border-color,box-shadow] hover:border-foreground/20 focus-visible:border-ring"
+                className="h-8 rounded-lg border border-input bg-card px-2.5 text-xs shadow-xs outline-none transition-[border-color,box-shadow] hover:border-foreground/20 focus-visible:border-ring font-medium"
               >
-                <option value="ALL">All statuses ({unifiedRecords.length})</option>
-                {allStatuses.map((status) => (
-                  <option key={status} value={status}>
-                    {status} ({statusStats[status]?.count ?? 0})
-                  </option>
-                ))}
+                <option value="ALL">All Payments ({unifiedRecords.length})</option>
+                <option value="PAID">PAID ({statusStats.PAID?.count ?? 0})</option>
+                <option value="UNPAID">UNPAID ({statusStats.UNPAID?.count ?? 0})</option>
               </select>
 
               {(statusFilter !== "ALL" || searchQuery) && (
@@ -1502,36 +1493,12 @@ export default function PaymentsPage() {
                       <TableCell className="min-w-[130px] whitespace-nowrap">
                         <MethodCell method={record.method} />
                       </TableCell>
-                      <TableCell className="min-w-[160px] whitespace-nowrap">
+                      <TableCell className="min-w-[140px] whitespace-nowrap">
                         <div className="flex flex-col items-start gap-1">
-                          <StatusBadge value={record.status} />
-                          {record.source === "student" && record.status === "INITIATED" ? (
-                            <span className="text-[10px] text-amber-600 dark:text-amber-400">
-                              Awaiting fee collection
-                            </span>
-                          ) : null}
-                          {record.gatewayStatus &&
-                          normalizeStatus(record.gatewayStatus) !==
-                            normalizeStatus(record.status) ? (
-                            <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                              <span className="text-[10px] font-medium text-muted-foreground/80">
-                                Gateway:
-                              </span>
-                              <StatusBadge
-                                value={record.gatewayStatus}
-                                className="h-5 px-1.5 py-0 text-[10px]"
-                              />
-                            </div>
-                          ) : null}
-                          {record.status === "PROCESSING" &&
-                          record.gatewayStatus === "SUCCESS" ? (
-                            <span className="text-[10px] leading-tight text-emerald-600 dark:text-emerald-400">
-                              Gateway confirmed · receipt pending
-                            </span>
-                          ) : null}
-                          {isCounter && !TERMINAL.has(record.status) ? (
+                          <StatusBadge value={getSimplifiedStatus(record.status, record.receiptId)} />
+                          {isCounter && getSimplifiedStatus(record.status, record.receiptId) === "UNPAID" ? (
                             <span className="text-[10px] leading-tight text-amber-600 dark:text-amber-400">
-                              Awaiting counter confirmation
+                              Awaiting counter payment
                             </span>
                           ) : null}
                         </div>

@@ -15,6 +15,7 @@ function toneFor(value: string): string {
   if (["paid", "active", "sent", "connected", "ready", "success", "settled"].includes(v)) return tones.green
   if (
     [
+      "unpaid",
       "pending",
       "partial",
       "starting",
