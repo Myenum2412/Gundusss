@@ -366,6 +366,26 @@ async function checkUpiServerHealth(ctx, enabledMethods = [], sellingMode = 'OFF
     };
   }
 
+  // When no cash alternative is available, the merchant is UPI-only.
+  // UPI QR payments work regardless of whether background observers are running —
+  // observers only handle automatic payment *verification*, not payment *processing*.
+  // Showing a scary downtime error when the customer cannot switch to cash is
+  // misleading and harmful to conversion. Show GREEN (working) in this case.
+  if (!hasCash) {
+    return {
+      status: 'WORKING',
+      tier: 'GREEN',
+      label: 'Server Is Working',
+      isWorking: true,
+      reason: 'UPI QR payment active — direct bank transfer does not require background observers',
+      smsHealthy,
+      gmailHealthy,
+      warning: null,
+      recommendedAlternative: null
+    };
+  }
+
+  // Both observers offline AND a cash alternative exists → inform customer
   return {
     status: 'ISSUES',
     tier: 'RED',
@@ -374,10 +394,8 @@ async function checkUpiServerHealth(ctx, enabledMethods = [], sellingMode = 'OFF
     reason: 'Both Gmail OAuth and SMS Gateway are offline or unconfigured',
     smsHealthy: false,
     gmailHealthy: false,
-    warning: hasCash
-      ? 'It is not recommended to pay by UPI right now as the server is facing downtime. We recommend paying by cash instead.'
-      : 'It is not recommended to pay by UPI right now as the server is facing downtime.',
-    recommendedAlternative: hasCash ? 'CASH' : null
+    warning: 'It is not recommended to pay by UPI right now as the server is facing downtime. We recommend paying by cash instead.',
+    recommendedAlternative: 'CASH'
   };
 }
 

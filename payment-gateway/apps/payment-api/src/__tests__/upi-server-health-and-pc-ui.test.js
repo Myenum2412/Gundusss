@@ -189,13 +189,16 @@ describe('UPI Server Health Indicator & Checkout State Invariants', () => {
     assert.equal(adminRes.body.enabled, false);
     assert.equal(adminRes.body.remainingSeconds, 0);
 
-    // Query server health - must automatically revert to live observer status (ISSUES)
+    // Query server health - must automatically revert to live observer status.
+    // The test merchant is UPI-only (no cash alternative), so when observers are offline
+    // the correct status is WORKING (UPI QR works without observers; observers only
+    // provide automatic payment verification, not payment processing).
     const healthRes = await request('/api/v1/checkout/server-health');
     assert.equal(healthRes.status, 200);
-    assert.equal(healthRes.body.status, 'ISSUES');
-    assert.equal(healthRes.body.label, 'Server Facing Issues');
-    assert.equal(healthRes.body.isWorking, false);
-    assert.ok(healthRes.body.warning.includes('not recommended to pay by UPI'));
+    assert.equal(healthRes.body.status, 'WORKING');
+    assert.equal(healthRes.body.label, 'Server Is Working');
+    assert.equal(healthRes.body.isWorking, true);
+    assert.equal(healthRes.body.warning, null);
   });
 
   test('Dev settings: Disabling false narrative explicitly immediately reverts to live status', async () => {
@@ -214,11 +217,12 @@ describe('UPI Server Health Indicator & Checkout State Invariants', () => {
     assert.equal(disableRes.body.enabled, false);
     assert.equal(disableRes.body.falseNarrativeUntil, null);
 
-    // 3. Health check reverts to live status
+    // 3. Health check reverts to live status.
+    // Test merchant is UPI-only so correct live status is WORKING (no cash alternative).
     const healthRes = await request('/api/v1/checkout/server-health');
     assert.equal(healthRes.status, 200);
-    assert.equal(healthRes.body.status, 'ISSUES');
-    assert.equal(healthRes.body.isWorking, false);
+    assert.equal(healthRes.body.status, 'WORKING');
+    assert.equal(healthRes.body.isWorking, true);
   });
 });
 
