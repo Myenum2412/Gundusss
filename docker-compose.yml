@@ -20,6 +20,8 @@ services:
       CRONJOB_API_KEY: ${CRONJOB_API_KEY:?Set CRONJOB_API_KEY before starting Compose}
       # YOUPI PG runs on the host in the default local setup.
       YOUPI_PAYMENT_API_URL: ${YOUPI_PAYMENT_API_URL:-http://host.docker.internal:6100}
+      # Public checkout portal origin (for example https://pay.myenum.in).
+      YOUPI_PUBLIC_CHECKOUT_URL: ${YOUPI_PUBLIC_CHECKOUT_URL:-}
       YOUPI_WEBHOOK_SECRET: ${YOUPI_WEBHOOK_SECRET:-}
       YOUPI_ADMIN_TOKEN: ${YOUPI_ADMIN_TOKEN:-}
 

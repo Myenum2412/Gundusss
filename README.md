@@ -72,6 +72,12 @@ Useful options: `npm run dev -- --no-gateway` (skip the gateway) or
 | YOUPI checkout | http://localhost:7000 |
 | YOUPI merchant admin | http://localhost:6001 |
 
+In production, set `YOUPI_PUBLIC_CHECKOUT_URL` in `backend/.env` (or the Compose
+environment) to the public checkout portal origin, for example
+`https://pay.myenum.in`. It is used to build the checkout links shown to staff
+and students when the gateway itself advertises a loopback URL behind a reverse
+proxy. If it is unset, the URL returned by the gateway is used unchanged.
+
 ### Troubleshooting
 
 **`Cannot reach the payments backend at http://127.0.0.1:4000`**
@@ -177,6 +183,14 @@ card.
 > display. At checkout YOUPI PG creates a fresh **amount-specific** QR from the
 > same UPI ID so its banking observers can match the exact transfer. This is what
 > makes automatic receipt creation reliable.
+
+The public payment link (`/<organisation-slug>?student=...`) only shows a UPI QR
+and app launchers when the workspace has a usable merchant VPA. Placeholder seed
+values such as `merchant@upi` are rejected, and a missing VPA falls back to the
+cash-counter pass instead of inventing one from the organisation phone number.
+GPay, PhonePe and Paytm launchers are built with their own schemes
+(`tez://upi/pay?`, `phonepe://pay?`, `paytmmp://pay?`) from the same validated
+query, so they do not double the `pay?` path.
 
 ### Counter payments
 
