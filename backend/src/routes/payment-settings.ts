@@ -18,6 +18,19 @@ import { scopedEntityId } from '../tenant.js';
 
 const DEFAULT_PAYEE_NAME = 'Fees';
 const VPA_RE = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z0-9.\-_]{2,64}$/;
+/**
+ * Seed values used by the gateway's local database and older demos. They pass
+ * the VPA regex but cannot receive money, so they must never reach a payer.
+ */
+const PLACEHOLDER_VPAS = new Set([
+  'merchant@upi',
+  'demo@upi',
+  'test@upi',
+  'sample@upi',
+  'example@upi',
+  'yourupi@bank',
+  'upi@upi',
+]);
 const MAX_QR_BYTES = 2 * 1024 * 1024;
 const MAX_QR_DATA_URL_CHARS = 3_500_000;
 // QR encoding is deterministic and comparatively expensive; the preview calls
@@ -75,7 +88,16 @@ async function readLocalSettings(
   return record?.data ?? null;
 }
 
-async function fetchGatewaySettings(): Promise<GatewayInfo> {
+/** True for a syntactically valid, non-placeholder merchant VPA. */
+export function isUsableUpiId(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const clean = value.trim();
+  return VPA_RE.test(clean) && !PLACEHOLDER_VPAS.has(clean.toLowerCase());
+}
+
+export async function fetchGatewaySettings(
+  timeoutMs = 6000
+): Promise<GatewayInfo> {
   const token = adminToken();
   if (!token) {
     return {
@@ -87,7 +109,7 @@ async function fetchGatewaySettings(): Promise<GatewayInfo> {
   try {
     const res = await fetch(`${gatewayBaseUrl()}/api/v1/admin/upi-settings`, {
       headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const json = (await res.json().catch(() => null)) as GatewayAccountResponse | null;
     if (!res.ok) {
@@ -164,7 +186,7 @@ export async function ensureGatewayUpiSynced(
 ): Promise<GatewayInfo | null> {
   const local = await readLocalSettings(profileId);
   const upiId = local?.upi_id?.trim() ?? '';
-  if (!upiId) return null;
+  if (!isUsableUpiId(upiId)) return null;
 
   const payeeName = local?.payee_name?.trim() || DEFAULT_PAYEE_NAME;
   const current = await fetchGatewaySettings();
@@ -174,6 +196,77 @@ export async function ensureGatewayUpiSynced(
     return { ...current, synced: true };
   }
   return syncGatewaySettings(upiId, payeeName);
+}
+
+export interface CheckoutUpiState {
+  ready: boolean;
+  upiId: string;
+  payeeName: string;
+  source: 'settings' | 'gateway' | 'none';
+  error?: string;
+}
+
+/**
+ * Resolves the VPA that a public checkout will actually use.
+ *
+ * Preference order: the workspace's saved UPI ID (synced to the gateway), then
+ * the gateway's active receiving account. A placeholder or missing VPA is
+ * reported as not ready instead of silently creating an unpayable order.
+ */
+export async function getEffectiveCheckoutUpi(
+  profileId: string
+): Promise<CheckoutUpiState> {
+  const local = await readLocalSettings(profileId);
+  const localUpi = local?.upi_id?.trim() ?? '';
+  const localPayee = local?.payee_name?.trim() || DEFAULT_PAYEE_NAME;
+
+  if (isUsableUpiId(localUpi)) {
+    const gateway = await ensureGatewayUpiSynced(profileId);
+    // A reachable gateway that refused the sync would charge the wrong VPA.
+    if (gateway?.connected && gateway.synced === false && gateway.error) {
+      return {
+        ready: false,
+        upiId: localUpi,
+        payeeName: localPayee,
+        source: 'settings',
+        error: gateway.error,
+      };
+    }
+    return {
+      ready: true,
+      upiId: localUpi,
+      payeeName: localPayee,
+      source: 'settings',
+    };
+  }
+
+  const gateway = await fetchGatewaySettings();
+  if (!gateway.connected) {
+    return {
+      ready: false,
+      upiId: '',
+      payeeName: localPayee,
+      source: 'none',
+      error: gateway.error || 'YOUPI PG is unreachable.',
+    };
+  }
+  if (!isUsableUpiId(gateway.upiId)) {
+    return {
+      ready: false,
+      upiId: '',
+      payeeName: gateway.payeeName || localPayee,
+      source: 'none',
+      error:
+        gateway.error ||
+        'No merchant UPI ID is configured in YOUPI PG. Save one under Payments → UPI setup.',
+    };
+  }
+  return {
+    ready: true,
+    upiId: gateway.upiId,
+    payeeName: gateway.payeeName || localPayee,
+    source: 'gateway',
+  };
 }
 
 function validateQrDataUrl(value: unknown): { ok: true; value: string } | { ok: false; error: string } {

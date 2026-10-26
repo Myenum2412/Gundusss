@@ -18,13 +18,44 @@ import {
   isValidProfileId,
   scopedEntityId,
 } from '../tenant.js';
-import { ensureGatewayUpiSynced } from './payment-settings.js';
+import {
+  fetchGatewaySettings,
+  getEffectiveCheckoutUpi,
+  isUsableUpiId,
+} from './payment-settings.js';
 import { getWaState, sendWaMessage, type WaAttachment } from '../whatsapp.js';
 import { generateReceiptPdf } from '../receipt-pdf.js';
 
 const YOUPI_API = (process.env.YOUPI_PAYMENT_API_URL ?? 'http://localhost:6100').replace(/\/+$/, '');
 const YOUPI_WEBHOOK_SECRET = process.env.YOUPI_WEBHOOK_SECRET ?? '';
 const YOUPI_ADMIN_TOKEN = (process.env.YOUPI_ADMIN_TOKEN ?? '').trim();
+
+/**
+ * Public origin of the YOUPI checkout portal. The gateway knows this too, but
+ * a reverse proxy or split deployment can make its response point at
+ * localhost, so an explicit override wins when configured.
+ */
+function publicCheckoutBaseUrl(): string {
+  return (
+    process.env.YOUPI_PUBLIC_CHECKOUT_URL ||
+    process.env.YOUPI_CHECKOUT_URL ||
+    ''
+  )
+    .trim()
+    .replace(/\/+$/, '');
+}
+
+/** Prefer the configured public portal over a gateway-supplied URL. */
+function resolveCheckoutUrl(
+  gatewayUrl: string | undefined,
+  paymentId: string | null | undefined
+): string {
+  const base = publicCheckoutBaseUrl();
+  if (base && paymentId) {
+    return `${base}/checkout/${encodeURIComponent(paymentId)}`;
+  }
+  return (gatewayUrl ?? '').trim();
+}
 
 const ORDERS = APPWRITE_COLLECTIONS.paymentOrders;
 const EVENTS = APPWRITE_COLLECTIONS.paymentEvents;
@@ -182,10 +213,13 @@ function normalizeStoredOrder(
   order: LocalOrder,
   profileId: string
 ): LocalOrder {
+  const configuredCheckoutBase = publicCheckoutBaseUrl();
   const paymentUrl =
-    order.paymentUrl ||
-    order.checkoutUrl ||
-    (order.paymentId ? `http://localhost:7000/checkout/${order.paymentId}` : '');
+    configuredCheckoutBase && order.paymentId
+      ? resolveCheckoutUrl(undefined, order.paymentId)
+      : order.paymentUrl ||
+        order.checkoutUrl ||
+        resolveCheckoutUrl(undefined, order.paymentId);
   return {
     ...order,
     profileId: (order.profileId ?? '').trim() || profileId,
@@ -435,13 +469,22 @@ export async function paymentRoutes(app: FastifyInstance) {
     };
 
     // A save made while YOUPI PG was offline is retried here, so the new
-    // checkout uses the UPI ID shown in this workspace.
-    const upiSync = await ensureGatewayUpiSynced(profileId);
-    if (upiSync?.error) {
-      app.log.warn(
-        { gatewayError: upiSync.error, profileId },
-        'YOUPI PG UPI settings were not synced before checkout'
-      );
+    // checkout uses the UPI ID shown in this workspace. A missing or
+    // placeholder VPA must fail before an unpayable session is created.
+    if (method === 'UPI') {
+      const upi = await getEffectiveCheckoutUpi(profileId);
+      if (!upi.ready) {
+        app.log.warn(
+          { gatewayError: upi.error, profileId },
+          'YOUPI PG UPI settings are not ready for checkout'
+        );
+        return reply.code(409).send({
+          error:
+            upi.error ??
+            'No merchant UPI ID is configured. Save one under Payments → UPI setup.',
+          code: 'UPI_NOT_CONFIGURED',
+        });
+      }
     }
 
     let upstream: Response;
@@ -475,7 +518,11 @@ export async function paymentRoutes(app: FastifyInstance) {
     // Reusing an order id must not regress a settled/terminal local record if
     // the gateway returns the original session for the same idempotency key.
     const alreadyTerminal = existing ? TERMINAL_STATUSES.has(existing.status) : false;
-    const paymentUrl = json.checkoutUrl ?? (existing?.paymentUrl || existing?.checkoutUrl) ?? '';
+    const paymentUrl =
+      resolveCheckoutUrl(json.checkoutUrl, json.paymentId) ||
+      existing?.paymentUrl ||
+      existing?.checkoutUrl ||
+      '';
     const order: LocalOrder = existing
       ? {
           ...existing,
@@ -1158,14 +1205,31 @@ export async function paymentRoutes(app: FastifyInstance) {
         feeAmount: getStudentFeeAmount(s),
       }));
 
+    // A phone number is not a UPI handle. Only a saved, usable merchant VPA may
+    // reach the public page; otherwise it must offer the counter. If the office
+    // configured the VPA in YOUPI PG rather than in this workspace, reuse it so
+    // the public link does not falsely report that UPI is unavailable.
+    const savedUpi = settingsRecord?.data?.upi_id ?? '';
+    let publicUpiId = isUsableUpiId(savedUpi) ? savedUpi.trim() : '';
+    let publicPayeeName =
+      settingsRecord?.data?.payee_name?.trim() || profile.name;
+
+    if (!publicUpiId) {
+      const gateway = await fetchGatewaySettings(2000);
+      if (gateway.connected && isUsableUpiId(gateway.upiId)) {
+        publicUpiId = gateway.upiId.trim();
+        publicPayeeName = gateway.payeeName?.trim() || publicPayeeName;
+      }
+    }
+
     return {
       data: {
         profileId: profile.profileId,
         name: profile.name,
         ownerName: profile.ownerName,
         paymentUrl: profile.paymentUrl,
-        upiId: settingsRecord?.data?.upi_id || (biz?.phone ? `${biz.phone}@upi` : ''),
-        payeeName: settingsRecord?.data?.payee_name ?? profile.name,
+        upiId: publicUpiId,
+        payeeName: publicPayeeName,
         qrCodeDataUrl: settingsRecord?.data?.qr_code_data_url ?? '',
         logoUrl: biz?.media?.logoUrl ?? '',
         phone: biz?.phone ?? '',
@@ -1233,7 +1297,32 @@ export async function paymentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'Student name is required' });
     }
 
-    const method = normalizePaymentMethod(body.method) || 'UPI';
+    const method = normalizePaymentMethod(body.method);
+    if (!method) {
+      return reply.code(400).send({
+        error: 'Invalid payment method. Use UPI, CASH_COUNTER, or CARD_COUNTER.',
+        code: 'PAYMENT_METHOD_NOT_ALLOWED',
+      });
+    }
+    if (method === 'UPI') {
+      // Retry a save made while the gateway was offline and refuse to start a
+      // checkout that would pay a missing or placeholder VPA.
+      const upi = await getEffectiveCheckoutUpi(profileId);
+
+      if (!upi.ready) {
+        app.log.warn(
+          { gatewayError: upi.error, profileId },
+          'Public UPI checkout blocked because the receiving VPA is not usable'
+        );
+        return reply.code(409).send({
+          error:
+            upi.error ??
+            'Online UPI is not configured for this institution. Please pay at the counter.',
+          code: 'UPI_NOT_CONFIGURED',
+        });
+      }
+    }
+
     const orderId = body.orderId?.trim() || `FEE-${Date.now()}-${randomUUID().slice(0, 8)}`;
     const amountStr = amount.toFixed(2);
 
@@ -1257,14 +1346,20 @@ export async function paymentRoutes(app: FastifyInstance) {
       },
     };
 
+    const gatewayHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': orderId,
+    };
+    // An empty X-Merchant-Key is treated as an invalid key by the gateway.
+    if (YOUPI_WEBHOOK_SECRET) {
+      gatewayHeaders['X-Merchant-Key'] = YOUPI_WEBHOOK_SECRET;
+    }
+
     let upstream: Response;
     try {
       upstream = await fetch(`${YOUPI_API}/api/v1/payments`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Merchant-Key': YOUPI_WEBHOOK_SECRET,
-        },
+        headers: gatewayHeaders,
         body: JSON.stringify(gatewayPayload),
         signal: AbortSignal.timeout(8000),
       });
@@ -1275,7 +1370,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     }
 
     const json = (await upstream.json().catch(() => ({}))) as UpstreamPayment;
-    if (!upstream.ok && !json.checkoutUrl) {
+    if (!upstream.ok) {
       return reply.code(upstream.status || 502).send({
         error: json.error ?? json.message ?? 'Payment gateway rejected the order',
       });
@@ -1283,7 +1378,13 @@ export async function paymentRoutes(app: FastifyInstance) {
 
     const initialStatus = json.status ?? 'INITIATED';
     const timestamp = nowIso();
-    const paymentUrl = json.checkoutUrl ?? (json.paymentId ? `http://localhost:7000/checkout/${json.paymentId}` : '');
+    const paymentUrl = resolveCheckoutUrl(json.checkoutUrl, json.paymentId);
+    if (method === 'UPI' && !paymentUrl) {
+      return reply.code(502).send({
+        error:
+          'The payment gateway did not return a checkout URL. Set YOUPI_PUBLIC_CHECKOUT_URL to the public checkout portal.',
+      });
+    }
 
     const order: LocalOrder = {
       profileId,
