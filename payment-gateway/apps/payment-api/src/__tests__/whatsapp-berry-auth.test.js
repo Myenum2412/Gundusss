@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-process.env.NODE_ENV = process.env.NODE_ENV || 'test';
+// Force test mode: the gateway's .env sets NODE_ENV=development, so a `|| 'test'`
+// fallback leaves direct `node --test` runs in development mode and the WhatsApp
+// test guardrail never engages.
+process.env.NODE_ENV = 'test';
 
 import { createPaymentApp } from '../index.js';
 import { Database } from '@youpi/db';
