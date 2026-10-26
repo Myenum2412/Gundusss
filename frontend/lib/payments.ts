@@ -2,7 +2,7 @@ import { API_BASE, apiFetch } from "./api-base"
 
 const BASE = API_BASE
 
-export type PaymentMethod = "UPI" | "CASH_COUNTER"
+export type PaymentMethod = "UPI" | "CASH_COUNTER" | "CARD_COUNTER"
 
 export interface PaymentEvent {
   id: number | string
@@ -48,11 +48,13 @@ export interface CreatePaymentInput {
 export const PAYMENT_METHOD_LABELS: Record<string, string> = {
   UPI: "UPI",
   CASH_COUNTER: "Cash at counter",
+  CARD_COUNTER: "Card at counter",
 }
 
 export const PAYMENT_METHOD_NOTES: Record<string, string> = {
   UPI: "Pay now with any UPI app using a single-use QR.",
   CASH_COUNTER: "Create a counter pass and collect cash at the office.",
+  CARD_COUNTER: "Collect the card payment on the office POS terminal.",
 }
 
 export function paymentMethodLabel(method: string): string {
@@ -284,10 +286,9 @@ export async function createPublicPayment(input: {
   description?: string
   method?: string
 }): Promise<PaymentOrder> {
-  const urls = [
-    `/api/public/payments/create`,
-    `${BASE}/api/public/payments/create`,
-  ]
+  const urls = Array.from(
+    new Set([`/api/public/payments/create`, `${BASE}/api/public/payments/create`])
+  )
 
   let lastError: any = null
   for (const url of urls) {
@@ -300,69 +301,60 @@ export async function createPublicPayment(input: {
       if (res.ok) {
         const json = (await res.json()) as { data: PaymentOrder }
         if (json?.data) return json.data
+        lastError = new Error("Payment checkout returned an empty response.")
       } else {
         const err = await res.json().catch(() => ({}))
-        lastError = new Error(err.error || `Payment checkout failed (HTTP ${res.status})`)
+        // Any HTTP response is a real answer (validation, missing UPI setup,
+        // method disabled, upstream failure). Retrying another URL could
+        // create a second order, so surface it immediately.
+        throw new Error(
+          err.error || `Payment checkout failed (HTTP ${res.status})`
+        )
       }
     } catch (e) {
+      if (e instanceof Error && !(e instanceof TypeError)) throw e
       lastError = e
     }
   }
 
-  // Resilient fallback order creation
-  const orderId = `ORD-${Date.now()}`
-  return {
-    orderId,
-    paymentId: null,
-    status: "CREATED",
-    gatewayStatus: "PENDING",
-    method: input.method || "UPI",
-    utr: "",
-    amount: String(input.amount),
-    studentId: input.studentId || "STU-001",
-    studentName: input.studentName,
-    feeId: null,
-    checkoutUrl: `upi://pay?pa=6374984055@upi&pn=Amarnath&am=${encodeURIComponent(String(input.amount))}&cu=INR`,
-    paymentUrl: `upi://pay?pa=6374984055@upi&pn=Amarnath&am=${encodeURIComponent(String(input.amount))}&cu=INR`,
-    receiptId: null,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  }
+  // Never invent an order here. A fabricated order cannot be verified or
+  // reconciled, and its hardcoded UPI fallback routed real payments to an
+  // unrelated personal VPA when the backend was down.
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Could not create the payment order. Please retry in a moment.")
 }
 
 export async function getPublicPaymentStatus(orderId: string): Promise<PaymentOrder> {
-  const urls = [
-    `/api/public/payments/${encodeURIComponent(orderId)}`,
-    `${BASE}/api/public/payments/${encodeURIComponent(orderId)}`,
-  ]
+  const urls = Array.from(
+    new Set([
+      `/api/public/payments/${encodeURIComponent(orderId)}`,
+      `${BASE}/api/public/payments/${encodeURIComponent(orderId)}`,
+    ])
+  )
 
+  let lastError: unknown = null
   for (const url of urls) {
     try {
       const res = await fetch(url, { cache: "no-store" })
       if (res.ok) {
         const json = (await res.json()) as { data: PaymentOrder }
         if (json?.data) return json.data
+      } else {
+        const err = await res.json().catch(() => ({}))
+        lastError = new Error(
+          err.error || `Payment status check failed (HTTP ${res.status})`
+        )
       }
-    } catch {
-      // try next
+    } catch (e) {
+      lastError = e
     }
   }
 
-  return {
-    orderId,
-    paymentId: null,
-    status: "CREATED",
-    gatewayStatus: "PENDING",
-    method: "UPI",
-    utr: "",
-    amount: "5000",
-    studentId: "STU-001",
-    studentName: "Amarnath",
-    feeId: null,
-    checkoutUrl: "",
-    receiptId: null,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  }
+  // A synthetic "CREATED" response would hide a broken status feed and could
+  // make the page look like a real pending payment. Fail loudly instead.
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Could not verify the payment status. Please retry in a moment.")
 }
 

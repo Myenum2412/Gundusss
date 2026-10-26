@@ -11,6 +11,12 @@ import {
   type PublicOrganizationProfile,
   type PublicStudentOption,
 } from "@/lib/payments"
+import {
+  buildUpiPaymentUri,
+  isUsableUpiVpa,
+  toUpiAppUri,
+  type UpiApp,
+} from "@/lib/upi"
 import { Button } from "@/components/ui/button"
 import {
   CheckCircle2Icon,
@@ -87,6 +93,7 @@ export default function PublicPaymentPage() {
   const [generatingQr, setGeneratingQr] = useState(false)
   const [copiedUpi, setCopiedUpi] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [cashError, setCashError] = useState<string | null>(null)
   const [order, setOrder] = useState<PaymentOrder | null>(null)
   const [cashPass, setCashPass] = useState<{
     passId: string
@@ -154,24 +161,51 @@ export default function PublicPaymentPage() {
     return "5000"
   }, [activeStudent])
 
-  const upiId = profile?.upiId || (profile?.phone ? `${profile.phone.replace(/\D/g, "")}@upi` : "")
+  // Never synthesise a VPA from the organisation phone number. A phone number
+  // is not a UPI handle, so the old `${phone}@upi` fallback sent payers to an
+  // address that does not exist. If the office has not saved a merchant VPA,
+  // the page must say so and offer the counter instead.
+  const upiId = isUsableUpiVpa(profile?.upiId) ? profile.upiId.trim() : ""
+  const upiConfigured = Boolean(upiId)
   const payeeName = profile?.payeeName || profile?.name || "Institution Office"
   const numAmount = parseFloat(fixedAmount) || 0
   const amountFormatted = numAmount.toFixed(2)
 
-  // Construct UPI payment URI for that specific student and fixed fee
+  // Construct a canonical UPI payment URI for that specific student and fee.
   const upiUri = useMemo(() => {
+    if (!upiId) return ""
     const studentNote = activeStudent
       ? `Fee-${activeStudent.studentName.replace(/\s+/g, "")}-${activeStudent.studentId}`
       : `Fee-Payment`
-    return `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(
-      payeeName
-    )}&am=${encodeURIComponent(amountFormatted)}&cu=INR&tn=${encodeURIComponent(studentNote)}`
+    try {
+      return buildUpiPaymentUri({
+        vpa: upiId,
+        payeeName,
+        amount: amountFormatted,
+        note: studentNote,
+      })
+    } catch {
+      return ""
+    }
   }, [upiId, payeeName, amountFormatted, activeStudent])
+
+  // If no merchant UPI ID is configured, start on the counter tab instead of
+  // presenting a QR that cannot be paid.
+  useEffect(() => {
+    if (profile && !upiConfigured) setActiveTab("CASH")
+  }, [profile, upiConfigured])
 
   // Generate dynamic QR Code live for that specific student fee
   useEffect(() => {
     let active = true
+    if (!upiUri) {
+      setQrDataUrl("")
+      setGeneratingQr(false)
+      return () => {
+        active = false
+      }
+    }
+
     setGeneratingQr(true)
     QRCode.toDataURL(upiUri, {
       width: 260,
@@ -241,38 +275,44 @@ export default function PublicPaymentPage() {
     }
   }
 
-  // Open in UPI App
-  const handleOpenUpiApp = (schemePrefix?: string) => {
-    if (schemePrefix) {
-      const customUri = upiUri.replace(/^upi:/, schemePrefix)
-      window.location.href = customUri
-      setTimeout(() => {
-        window.location.href = upiUri
-      }, 500)
-    } else {
-      window.location.href = upiUri
-    }
+  // Open in UPI App. Each app scheme expects the query directly after `?`;
+  // replacing the `upi:` prefix on the whole URI produced `...pay?//pay?`.
+  const handleOpenUpiApp = (app: UpiApp = "generic") => {
+    if (!upiUri) return
+    window.location.href = toUpiAppUri(upiUri, app)
   }
 
-  // Cash pass generation
+  // Cash pass generation. The pass is only shown after the backend accepts the
+  // order; a locally fabricated pass could never be confirmed at the counter.
   const handleGenerateCashPass = async () => {
+    if (!activeStudent) {
+      setCashError("Select a student before generating a cash pass.")
+      return
+    }
     setSubmitting(true)
+    setCashError(null)
+    setCashPass(null)
     try {
-      const passId = `PASS-${Date.now().toString().slice(-6)}`
-      setCashPass({
-        passId,
-        studentName: activeStudent?.studentName || "Student",
-        studentId: activeStudent?.studentId || "STU-001",
-        amount: fixedAmount,
-        timestamp: new Date().toISOString(),
-      })
-      await createPublicPayment({
+      const created = await createPublicPayment({
         slug,
-        studentName: activeStudent?.studentName || "Student",
-        studentId: activeStudent?.studentId || "STU-001",
+        studentName: activeStudent.studentName,
+        studentId: activeStudent.studentId,
         amount: numAmount,
         method: "CASH_COUNTER",
-      }).catch(() => null)
+      })
+      setCashPass({
+        passId: created.orderId,
+        studentName: created.studentName || activeStudent.studentName,
+        studentId: created.studentId || activeStudent.studentId,
+        amount: created.amount || fixedAmount,
+        timestamp: created.createdAt || new Date().toISOString(),
+      })
+    } catch (err) {
+      setCashError(
+        err instanceof Error
+          ? err.message
+          : "Could not generate a cash pass. Please try again."
+      )
     } finally {
       setSubmitting(false)
     }
@@ -596,6 +636,30 @@ export default function PublicPaymentPage() {
             {/* 3. Method Content */}
             <div className="p-4 sm:p-5">
               {activeTab === "UPI" ? (
+                !upiConfigured ? (
+                  <div className="flex flex-col items-center gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-6 text-center dark:border-amber-500/20 dark:bg-amber-500/10">
+                    <TriangleAlertIcon className="size-6 text-amber-600" />
+                    <div>
+                      <p className="text-xs font-bold text-foreground">
+                        Online UPI is not configured
+                      </p>
+                      <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                        {profile.name} has not saved a merchant UPI ID yet. Pay
+                        at the accounts counter instead, or contact the office.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setActiveTab("CASH")}
+                      className="h-8 gap-1.5 text-[11px]"
+                    >
+                      <SvglCash className="size-3.5" />
+                      Show cash pass
+                    </Button>
+                  </div>
+                ) : (
                 <div className="flex flex-col items-center space-y-3.5">
                   {/* Dynamic QR Box */}
                   <div className="relative flex size-[195px] items-center justify-center rounded-2xl border bg-white p-2 shadow-inner">
@@ -667,7 +731,7 @@ export default function PublicPaymentPage() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => handleOpenUpiApp("tez://upi/pay?")}
+                      onClick={() => handleOpenUpiApp("gpay")}
                       className="h-8 text-[11px] font-semibold gap-1.5 border-muted bg-card hover:bg-muted/40 shadow-2xs"
                     >
                       <SvglGoogle className="size-3.5" />
@@ -677,7 +741,7 @@ export default function PublicPaymentPage() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => handleOpenUpiApp("phonepe://pay?")}
+                      onClick={() => handleOpenUpiApp("phonepe")}
                       className="h-8 text-[11px] font-semibold gap-1.5 border-muted bg-card hover:bg-muted/40 shadow-2xs"
                     >
                       <SvglPhonePe className="size-3.5 rounded-full" />
@@ -687,7 +751,7 @@ export default function PublicPaymentPage() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => handleOpenUpiApp("paytmmp://pay?")}
+                      onClick={() => handleOpenUpiApp("paytm")}
                       className="h-8 text-[11px] font-semibold gap-1.5 border-muted bg-card hover:bg-muted/40 shadow-2xs"
                     >
                       <SvglPaytmIcon className="size-3.5 rounded-xs" />
@@ -695,6 +759,7 @@ export default function PublicPaymentPage() {
                     </Button>
                   </div>
                 </div>
+                )
               ) : (
                 /* Cash Counter Tab */
                 <div className="flex flex-col items-center py-2 text-center space-y-3">
@@ -709,11 +774,21 @@ export default function PublicPaymentPage() {
                       Generate a cash pass to deposit {formatInr(fixedAmount)} at {profile.name} accounts desk.
                     </p>
                   </div>
+                  {cashError && (
+                    <p className="w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400">
+                      {cashError}
+                    </p>
+                  )}
+                  {!activeStudent && (
+                    <p className="w-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400">
+                      Select a student above to generate a cash pass.
+                    </p>
+                  )}
                   <Button
                     type="button"
                     size="sm"
                     onClick={handleGenerateCashPass}
-                    disabled={submitting}
+                    disabled={submitting || !activeStudent}
                     className="w-full h-9 text-xs font-semibold gap-1.5"
                   >
                     {submitting ? (

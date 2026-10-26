@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto"
+import { isUsableUpiVpa } from "./upi"
 
 const ENDPOINT = (
   process.env.APPWRITE_ENDPOINT ?? "https://nyc.cloud.appwrite.io/v1"
@@ -227,9 +228,18 @@ export async function createPublicOrderInAppwrite(input: {
   description?: string
 }): Promise<PaymentOrder> {
   const profile = await fetchPublicProfileFromAppwrite(input.slug)
-  const profileId = profile?.profileId || "ORG-XD3SLDDC"
-  const payeeName = profile?.payeeName || profile?.name || "Amarnath"
-  const upiId = profile?.upiId || "6374984055@upi"
+  if (!profile?.profileId) {
+    throw new Error("Organization not found for this payment page.")
+  }
+  if (!isUsableUpiVpa(profile.upiId)) {
+    throw new Error(
+      "Online UPI is not configured for this institution. Ask the office to save a merchant UPI ID."
+    )
+  }
+
+  const profileId = profile.profileId
+  const payeeName = profile.payeeName || profile.name
+  const upiId = profile.upiId.trim()
 
   const orderId = `ORD-${Date.now()}-${randomBytes(3).toString("hex").toUpperCase()}`
   const numAmount = Number(input.amount).toFixed(2)

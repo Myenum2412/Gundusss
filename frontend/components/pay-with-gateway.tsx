@@ -62,6 +62,7 @@ const METHOD_OPTIONS: Array<{
 }> = [
   { value: "UPI", label: "UPI", icon: QrCodeIcon },
   { value: "CASH_COUNTER", label: "Cash at counter", icon: BanknoteIcon },
+  { value: "CARD_COUNTER", label: "Card at counter", icon: CreditCardIcon },
 ]
 
 function formatInr(value: string | number) {
@@ -266,7 +267,8 @@ export function PayWithGateway({
   }, [open, orderId, status, onCompleted])
 
   const activeMethod = (order?.method || method) as PaymentMethod
-  const isCounter = activeMethod === "CASH_COUNTER"
+  const isCounter =
+    activeMethod === "CASH_COUNTER" || activeMethod === "CARD_COUNTER"
   const methodLabel = paymentMethodLabel(activeMethod)
 
   const successful = order?.status === "SUCCESS"
@@ -602,7 +604,7 @@ export function PayWithGateway({
                           <p className="mt-3 text-sm text-muted-foreground">
                             {order.method === "CASH_COUNTER"
                               ? "Collect cash at the front desk, then confirm this payment in the Payments page."
-                              : "Collect the card payment at the front desk, then confirm this payment in the Payments page."}
+                              : "Collect the card payment on the office POS terminal, then confirm it in the Payments page."}
                           </p>
                           <p className="mt-2 text-xs text-muted-foreground">
                             This dialog updates automatically when the cashier
