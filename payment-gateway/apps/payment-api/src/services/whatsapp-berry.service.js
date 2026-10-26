@@ -635,6 +635,63 @@ export class WhatsAppBerryService extends EventEmitter {
   }
 
   /**
+   * Deliver through the fees app's linked WhatsApp bot when this gateway's own
+   * session is not connected. Returns null when the bridge is not configured.
+   * @param {string} to
+   * @param {string} message
+   */
+  async sendViaFeesBridge(to, message) {
+    const baseUrl = (process.env.FEES_WHATSAPP_BRIDGE_URL || 'http://127.0.0.1:4000')
+      .trim()
+      .replace(/\/+$/, '');
+    const token = (
+      process.env.FEES_WHATSAPP_BRIDGE_TOKEN ||
+      process.env.COIN_STORE_WEBHOOK_SECRET ||
+      ''
+    ).trim();
+
+    if (!baseUrl || !token) return null;
+
+    const cleanTo = String(to || '').replace(/[^0-9]/g, '');
+    if (cleanTo.length < 10) {
+      return { success: false, delivered: false, bridge: true, error: `Invalid recipient phone number: ${to}` };
+    }
+
+    try {
+      const res = await fetch(`${baseUrl}/api/whatsapp/internal/send`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-WhatsApp-Bridge-Token': token
+        },
+        body: JSON.stringify({ to: cleanTo, message }),
+        signal: AbortSignal.timeout(20000)
+      });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        const error = json?.error || `Fees WhatsApp bridge rejected the message (HTTP ${res.status})`;
+        console.warn(`[WhatsAppBerryService] Fees bridge delivery failed for ${cleanTo}: ${error}`);
+        return { success: false, delivered: false, bridge: true, error, status: this.status };
+      }
+
+      console.log(`[WhatsAppBerryService] Message delivered through the fees WhatsApp bridge to ${cleanTo}`);
+      return {
+        success: true,
+        delivered: true,
+        bridge: true,
+        id: json?.data?.id || `bridge_${Date.now()}`,
+        status: this.status,
+        result: json?.data
+      };
+    } catch (err) {
+      const error = `Fees WhatsApp bridge unreachable at ${baseUrl}: ${err.message}`;
+      console.warn(`[WhatsAppBerryService] ${error}`);
+      return { success: false, delivered: false, bridge: true, error, status: this.status };
+    }
+  }
+
+  /**
    * Universal message sender via BerryProtocol
    * @param {string} to
    * @param {string} message
@@ -683,18 +740,26 @@ export class WhatsAppBerryService extends EventEmitter {
     }
 
     if (!this.client || this.status !== 'CONNECTED') {
+      const bridgeResult = await this.sendViaFeesBridge(to, message);
+      if (bridgeResult) {
+        if (bridgeResult.delivered) return bridgeResult;
+        console.warn(`[WhatsAppBerryService] Fees bridge fallback failed for ${to}: ${bridgeResult.error || 'unknown error'}`);
+      }
+      const bridgeNote = bridgeResult?.error ? ` Fees app bridge: ${bridgeResult.error}` : '';
       console.warn(`[WhatsAppBerryService] WhatsApp BerryProtocol not connected (Status: ${this.status}). Message logged for ${to}.`);
       return {
         success: false,
         delivered: false,
         queued: true,
         status: this.status,
-        message: `WhatsApp is not connected (Status: ${this.status}). Please link WhatsApp in Merchant Admin.`
+        message: `WhatsApp is not connected (Status: ${this.status}).${bridgeNote} Please link WhatsApp in Merchant Admin.`
       };
     }
 
     const jid = this.formatJid(to);
     if (!jid) {
+      const bridgeResult = await this.sendViaFeesBridge(to, message);
+      if (bridgeResult) return bridgeResult;
       return { success: false, delivered: false, error: `Invalid recipient phone number: ${to}` };
     }
 
@@ -727,7 +792,17 @@ export class WhatsAppBerryService extends EventEmitter {
         console.log(`[WhatsAppBerryService] Detected broken socket during send. Triggering immediate reconnect...`);
         this.initialize().catch(() => {});
       }
-      return { success: false, delivered: false, error: err.message, status: this.status };
+
+      const bridgeResult = await this.sendViaFeesBridge(to, message);
+      if (bridgeResult?.delivered) return bridgeResult;
+      return {
+        success: false,
+        delivered: false,
+        error: bridgeResult?.error
+          ? `${err.message} (fees bridge: ${bridgeResult.error})`
+          : err.message,
+        status: this.status
+      };
     }
   }
 }
