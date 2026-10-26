@@ -235,7 +235,9 @@ describe('Checkout Portal XSS / Redirect Hardening', () => {
 
     test('the case-sensitive javascript: prefix check is gone', () => {
       assert.equal(view.includes("startsWith('javascript:')"), false);
-      assert.ok(view.includes('sanitizeRedirectUrl(storeUrl)'));
+      // The cancelled screen now starts a fresh payment instead of navigating
+      // away, but successful checkouts still sanitise their store return URL.
+      assert.ok(view.includes('sanitizeRedirectUrl(data.returnUrl)'));
     });
 
     test('no postMessage is broadcast to a wildcard origin', () => {

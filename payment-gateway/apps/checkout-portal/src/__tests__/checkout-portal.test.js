@@ -206,5 +206,25 @@ describe('Checkout Portal Integration Tests', () => {
       assert.ok(res.text.includes('STORAGE_KEY_IDENTITY'));
       assert.ok(res.text.includes('sanitizeRedirectUrl'));
     });
+
+    test('GET /checkout/:id redirects (302) to replacedBySessionId when session was replaced', async () => {
+      // Mock fetchPaymentState for this test by stubbing it on server
+      const targetServer = serverInstance.server;
+      const originalFetch = targetServer.fetchPaymentState;
+      targetServer.fetchPaymentState = async (id) => {
+        if (id === 'old_cancelled_sess') {
+          return { id, status: 'CANCELLED', replacedBySessionId: 'new_active_sess_999' };
+        }
+        return originalFetch.call(targetServer, id);
+      };
+
+      try {
+        const res = await get('/checkout/old_cancelled_sess');
+        assert.equal(res.status, 302);
+        assert.equal(res.headers['location'], '/checkout/new_active_sess_999');
+      } finally {
+        targetServer.fetchPaymentState = originalFetch;
+      }
+    });
   });
 });

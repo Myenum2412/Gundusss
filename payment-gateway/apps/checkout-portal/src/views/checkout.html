@@ -1477,6 +1477,12 @@
           return;
         }
 
+        if (data.replacedBySessionId && data.replacedBySessionId !== PAYMENT_ID && data.status !== 'SUCCESS') {
+          const search = window.location.search || '';
+          window.location.replace(`/checkout/${encodeURIComponent(data.replacedBySessionId)}${search}`);
+          return;
+        }
+
         if (!res.ok) {
           dismissSplashScreen();
           return;
@@ -1884,29 +1890,17 @@
           if (footer) footer.style.display = 'none';
 
           const titleEl = document.getElementById('failedTitleText');
-          if (titleEl) titleEl.textContent = 'Payment Cancelled';
+          if (titleEl) titleEl.textContent = 'Payment Link Expired';
           const descEl = document.getElementById('failedDescriptionText');
-          if (descEl) descEl.textContent = 'You cancelled this payment session. Click below to return to the store.';
+          if (descEl) descEl.textContent = 'This payment session timed out or was closed. Tap below to resume and complete your payment securely.';
 
           const btnAction = document.getElementById('btnFailedAction');
           if (btnAction) {
-            btnAction.textContent = 'Back to Store';
-            btnAction.onclick = () => {
-              const storeUrl = getStoreReturnUrl();
-              const isEmbedded = (window.parent && window.parent !== window) || location.search.includes('embedded=1');
-              if (isEmbedded) {
-                try {
-                  postToMerchant({ event: 'youpi.modal_close', redirectUrl: storeUrl });
-                  postToMerchant({ event: 'youpi.close', redirectUrl: storeUrl });
-                  postToMerchant({ event: 'youpi.cancel', redirectUrl: storeUrl });
-                  postToMerchant({ event: 'youpi.payment_cancelled', redirectUrl: storeUrl });
-                } catch (e) {}
-              } else if (storeUrl && storeUrl !== '#' && sanitizeRedirectUrl(storeUrl)) {
-                window.location.href = sanitizeRedirectUrl(storeUrl);
-              } else {
-                window.history.back();
-              }
-            };
+            btnAction.textContent = 'Resume & Pay Now';
+            btnAction.className = 'ypg-btn-auth-action';
+            btnAction.style.background = '#10b981';
+            btnAction.style.color = '#ffffff';
+            btnAction.onclick = () => handleEndAndStartNewPayment();
           }
           return;
         }
@@ -2604,7 +2598,10 @@
     }
 
     async function handleEndAndStartNewPayment() {
-      const btn = document.getElementById('btnEndAndRestartPayment');
+      const btn =
+        document.getElementById('btnEndAndRestartPayment') ||
+        document.getElementById('btnFailedAction');
+      const originalLabel = btn ? btn.textContent : '';
       if (btn) {
         btn.disabled = true;
         btn.innerHTML = '<span class="ypg-spinner" style="display:inline-block;width:15px;height:15px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:rzpRotate 0.8s linear infinite;margin-right:8px;vertical-align:middle;"></span> CREATING NEW PAYMENT...';
@@ -2634,7 +2631,7 @@
           alert(data.error || 'Failed to start new payment session. Please try again.');
           if (btn) {
             btn.disabled = false;
-            btn.innerHTML = '<span>END SESSION &amp; START NEW PAYMENT</span>';
+            btn.textContent = originalLabel || 'Start New Payment';
           }
         }
       } catch (err) {
@@ -2709,7 +2706,7 @@
 
     // Continuous 2-second fallback polling: guarantees instant response when cashier confirms/declines or queues clear
     setInterval(() => {
-      if (state && (state.status === 'SUCCESS' || state.status === 'FAILED' || state.status === 'EXPIRED' || state.status === 'BLOCKED' || state.isBanned)) {
+      if (state && (state.status === 'SUCCESS' || state.status === 'CANCELLED' || state.status === 'FAILED' || state.status === 'EXPIRED' || state.status === 'BLOCKED' || state.isBanned)) {
         return;
       }
       loadState();

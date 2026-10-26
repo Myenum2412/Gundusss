@@ -64,6 +64,20 @@ describe('Issue #64 hardening: returnUrl, branding sinks, postMessage, framing',
     });
   });
 
+  describe('terminal status polling', () => {
+    test('stops the fallback poll for a cancelled session', () => {
+      const guard = checkoutView.match(
+        /if \(state && \(state\.status === 'SUCCESS'[\s\S]*?\)\) \{/
+      );
+      assert.ok(guard, 'terminal-status polling guard not found');
+      assert.match(
+        guard[0],
+        /state\.status === 'CANCELLED'/,
+        'a cancelled session must stop the 2-second fallback poll so it does not keep emitting CANCEL_CONFIRMED hooks'
+      );
+    });
+  });
+
   describe('postToMerchant / resolveMerchantOrigin (live code from checkout.html)', () => {
     const lifted = liftCheckoutFunctions('resolveMerchantOrigin', 'postToMerchant');
 

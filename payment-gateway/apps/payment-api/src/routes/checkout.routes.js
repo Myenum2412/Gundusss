@@ -435,6 +435,22 @@ export function registerCheckoutRoutes(server, ctx) {
     if ([PaymentStatus.SUCCESS, PaymentStatus.FAILED, PaymentStatus.EXPIRED, PaymentStatus.CANCELLED].includes(session.status)) {
       const merchant = ctx.merchantRepo.findById(session.merchantId);
       const branding = sanitizePublicBranding(merchant?.branding || {});
+
+      // Check if this terminal session was replaced by an active/initiated session for the same order
+      let replacedBySessionId = session.metadata?.replacedBySessionId || null;
+      if (!replacedBySessionId && [PaymentStatus.CANCELLED, PaymentStatus.EXPIRED].includes(session.status) && session.orderId) {
+        try {
+          const replacementRow = ctx.db.queryOne(`
+            SELECT id FROM payment_sessions
+            WHERE merchant_id = ? AND order_id = ? AND id != ? AND status IN ('INITIATED', 'ACTIVE', 'QUEUED', 'PROCESSING')
+            ORDER BY created_at DESC LIMIT 1
+          `, [session.merchantId, session.orderId, session.id]);
+          if (replacementRow?.id) {
+            replacedBySessionId = replacementRow.id;
+          }
+        } catch (e) {}
+      }
+
       HttpServer.json(res, 200, {
         id: session.id,
         paymentId: session.id,
@@ -445,13 +461,8 @@ export function registerCheckoutRoutes(server, ctx) {
         status: session.status,
         timeRemainingSeconds: 0,
         isTerminal: true,
-        // The return URL belongs to the terminal payload too. The checkout
-        // page reads it from the *state* it was last given, and a terminal
-        // session is answered by this branch — so a session that ends without
-        // it loses the merchant's return address, and the customer is left
-        // staring at a success screen with no way back to the store. The
-        // field is already public in the non-terminal payload below, so
-        // including it here exposes nothing new.
+        replacedBySessionId,
+        canRestart: session.status !== PaymentStatus.SUCCESS,
         returnUrl: session.returnUrl,
         branding
       });
@@ -1936,6 +1947,30 @@ export function registerCheckoutRoutes(server, ctx) {
         reboundAt: new Date().toISOString()
       }
     });
+
+    // Link previous session(s) to newSession so static customer links (e.g. WhatsApp) can smoothly forward
+    const oldSessionsToForward = new Set([sourceSession?.id, targetSession?.id, ...sessionsToTerminate.keys()].filter(Boolean));
+    for (const oldId of oldSessionsToForward) {
+      if (oldId === newSession.id) continue;
+      try {
+        const oldSess = ctx.sessionRepo.findById(oldId);
+        if (oldSess) {
+          const oldMeta = typeof oldSess.metadata === 'string' ? JSON.parse(oldSess.metadata) : (oldSess.metadata || {});
+          const updatedMeta = {
+            ...oldMeta,
+            replacedBySessionId: newSession.id,
+            replacedAt: new Date().toISOString()
+          };
+          ctx.db.execute(`
+            UPDATE payment_sessions
+            SET metadata = ?, updated_at = ?
+            WHERE id = ?
+          `, [JSON.stringify(updatedMeta), new Date().toISOString(), oldId]);
+        }
+      } catch (err) {
+        console.warn('[handleEndAndRestartPayment] failed to update replacedBySessionId:', err.message);
+      }
+    }
 
     if (customerId && ctx.deviceRepo) {
       try { ctx.deviceRepo.associateCustomer(newDeviceId, customerId); } catch {}

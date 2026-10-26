@@ -451,6 +451,18 @@ export class CheckoutServer {
         const paymentId = checkoutMatch[1];
         const state = await this.fetchPaymentState(paymentId);
 
+        // If this session was replaced by an active/initiated session, smoothly forward payer
+        if (state?.replacedBySessionId && state.replacedBySessionId !== paymentId && state.status !== 'SUCCESS') {
+          const qs = url.search || '';
+          res.writeHead(302, {
+            'Location': `/checkout/${encodeURIComponent(state.replacedBySessionId)}${qs}`,
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+            ...BASE_SECURITY_HEADERS
+          });
+          res.end();
+          return;
+        }
+
         const rendered = this.renderHtml(paymentId, state);
         res.writeHead(200, {
           'Content-Type': 'text/html; charset=utf-8',

@@ -17,6 +17,7 @@ export function startCheckoutServer(port = null, options = {}) {
       console.log(`[Checkout Portal] Server listening on port ${finalPort}`);
       resolve({
         port: finalPort,
+        server: checkoutServer,
         close: () => new Promise(cb => instance.close(cb))
       });
     });

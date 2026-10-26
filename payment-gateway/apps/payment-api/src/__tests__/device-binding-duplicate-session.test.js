@@ -898,4 +898,60 @@ describe('YOUPI PG: Device Binding & Duplicate Session Detection', () => {
     assert.equal(restartBareCust.status, 401);
     assert.equal(restartBareCust.body.error, 'CUSTOMER_AUTH_REQUIRED');
   });
+
+  test('14. a cancelled checkout can mint a fresh payment session for the same order', async () => {
+    testDb.execute("UPDATE payment_sessions SET status = 'CANCELLED' WHERE status IN ('ACTIVE', 'PROCESSING', 'QUEUED')");
+    testDb.execute("UPDATE payment_receiving_accounts SET is_slot_busy = 0, current_active_session_id = NULL");
+
+    const regDev = await request('/api/v1/devices/register', {
+      method: 'POST',
+      body: { publicKey: 'key_cancelled_restart', signals: { userAgent: 'Cancelled Restart Agent' } }
+    });
+    const devId = regDev.body.deviceId;
+    const devToken = regDev.body.deviceToken;
+
+    const payRes = await request('/api/v1/payments', {
+      method: 'POST',
+      headers: { 'x-device-id': devId, 'x-device-token': devToken },
+      body: { orderId: 'ORDER_CANCELLED_RESTART_1', amount: 149.00, autoActivate: true }
+    });
+    assert.equal(payRes.status, 201);
+    const oldSessionId = payRes.body.paymentId;
+
+    const stateRes = await request(`/api/v1/checkout/${oldSessionId}/state`, {
+      headers: { 'x-device-id': devId, 'x-device-token': devToken }
+    });
+    assert.equal(stateRes.status, 200);
+
+    const cancelRes = await request(`/api/v1/checkout/${oldSessionId}/cancel`, {
+      method: 'POST',
+      headers: { 'x-device-id': devId, 'x-device-token': devToken }
+    });
+    assert.equal(cancelRes.status, 200);
+    assert.equal(cancelRes.body.status, 'CANCELLED');
+
+    const restartRes = await request(`/api/v1/checkout/${oldSessionId}/end-and-restart-payment`, {
+      method: 'POST',
+      headers: { 'x-device-id': devId, 'x-device-token': devToken },
+      body: { deviceId: devId, deviceToken: devToken }
+    });
+
+    assert.equal(restartRes.status, 201);
+    assert.equal(restartRes.body.success, true);
+    assert.ok(restartRes.body.newSessionId);
+    assert.notEqual(restartRes.body.newSessionId, oldSessionId);
+    assert.equal(restartRes.body.orderId, 'ORDER_CANCELLED_RESTART_1');
+    assert.ok(['INITIATED', 'ACTIVE', 'QUEUED'].includes(restartRes.body.status));
+
+    const oldRow = testDb.db.prepare('SELECT status FROM payment_sessions WHERE id = ?').get(oldSessionId);
+    assert.equal(oldRow.status, 'CANCELLED');
+
+    // Accessing old session state must expose replacedBySessionId so links forward
+    const oldStateRes = await request(`/api/v1/checkout/${oldSessionId}/state`, {
+      headers: { 'x-device-id': devId, 'x-device-token': devToken }
+    });
+    assert.equal(oldStateRes.status, 200);
+    assert.equal(oldStateRes.body.status, 'CANCELLED');
+    assert.equal(oldStateRes.body.replacedBySessionId, restartRes.body.newSessionId);
+  });
 });

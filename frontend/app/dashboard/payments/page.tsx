@@ -46,6 +46,11 @@ import {
   paymentMethodLabel,
   type PaymentOrder,
 } from "@/lib/payments"
+import {
+  decideReminderCheckout,
+  generateReminderText,
+  getStudentSpecificPaymentUrl,
+} from "@/lib/reminder-message"
 import { loadStudents, type StoredStudent } from "@/lib/students-store"
 import { loadReceipts, type StoredReceipt } from "@/lib/receipts-store"
 import { loadFeeStructures, type StoredFeeStructure } from "@/lib/fee-structures-store"
@@ -186,72 +191,6 @@ export interface UnifiedPaymentRecord {
   rawStudent?: StoredStudent
 }
 
-function getStudentSpecificPaymentUrl(basePayUrl: string, studentId?: string): string {
-  if (!basePayUrl) return ""
-  if (!studentId || studentId === "—") return basePayUrl
-  if (basePayUrl.includes("student=")) return basePayUrl
-  const sep = basePayUrl.includes("?") ? "&" : "?"
-  return `${basePayUrl}${sep}student=${encodeURIComponent(studentId)}`
-}
-
-function generateReminderText({
-  record,
-  companyName,
-  paymentUrl,
-}: {
-  record: UnifiedPaymentRecord
-  companyName: string
-  paymentUrl: string
-}) {
-  const org = companyName ? companyName.trim() : "Institute Office"
-  const isPaid = normalizeStatus(record.status) === "SUCCESS"
-  const base = record.paymentUrl || paymentUrl || ""
-  const payUrl = getStudentSpecificPaymentUrl(base, record.studentId)
-
-  if (isPaid) {
-    const lines = [
-      `*Payment Acknowledgment - ${org}*`,
-      ``,
-      `Dear Parent / Student ${record.studentName},`,
-      `Thank you for completing your fee payment.`,
-      ``,
-      `• *Student ID:* ${record.studentId || "—"}`,
-      `• *Course:* ${record.course || "General"} (${record.group || "Regular"})`,
-      `• *Amount Paid:* ${formatAmount(record.amount)}`,
-      `• *Receipt ID:* ${record.receiptId || record.orderId}`,
-      `• *Status:* Verified & Paid`,
-      ``,
-      `For any questions, feel free to contact our administrative desk.`,
-      `Thank you!`,
-    ]
-    return lines.join("\n")
-  }
-
-  const lines = [
-    `*Fee Payment Reminder - ${org}*`,
-    ``,
-    `Dear Parent / Student ${record.studentName},`,
-    `This is a gentle reminder regarding the pending fee payment for *${record.course || "General Course"}* (${record.group || "Batch"}).`,
-    ``,
-    `• *Student ID:* ${record.studentId || "—"}`,
-    `• *Amount Due:* ${formatAmount(record.amount)}`,
-    `• *Reference ID:* ${record.orderId}`,
-  ]
-
-  if (payUrl) {
-    lines.push(``)
-    lines.push(`👉 *Click to Pay Now:*`)
-    lines.push(`${payUrl}`)
-  }
-
-  lines.push(``)
-  lines.push(`You can pay securely with any UPI app (GPay, PhonePe, Paytm) or at the counter. If already paid, please ignore this message.`)
-  lines.push(`Thank you,`)
-  lines.push(`${org}`)
-
-  return lines.join("\n")
-}
-
 // Single Student Fee Reminder Dialog using interactive-button-bubble
 function FeeReminderDialog({
   record,
@@ -288,20 +227,19 @@ function FeeReminderDialog({
     setPreparingLink(false)
 
     const paidRecord = normalizeStatus(record.status) === "SUCCESS"
-    // Reuse an existing live order link; otherwise create a brand-new gateway
-    // checkout so the reminder never points at an expired or fabricated page.
-    const existing = (record.paymentUrl || "").trim()
-    const liveOrder =
-      Boolean(record.rawOrder) &&
-      !TERMINAL.has(normalizeStatus(record.status)) &&
-      isGatewayCheckoutUrl(existing)
+    // A local INITIATED row is not proof that its gateway session is still
+    // payable. Cancellation/expiry can happen without the local row being
+    // reconciled, so every unpaid reminder gets a newly minted checkout.
+    const checkoutDecision = decideReminderCheckout({
+      isPaid: paidRecord,
+      localStatus: record.status,
+      gatewayStatus: record.gatewayStatus,
+      cachedPaymentUrl: record.paymentUrl,
+    })
 
-    if (paidRecord) {
+    if (checkoutDecision.kind === "acknowledgment") {
       // Paid records get an acknowledgment message, not a fresh payable link.
       setMessage(generateReminderText({ record, companyName, paymentUrl: "" }))
-    } else if (liveOrder) {
-      setPaymentLink(getStudentSpecificPaymentUrl(existing, record.studentId))
-      setMessage(generateReminderText({ record, companyName, paymentUrl: existing }))
     } else {
       setMessage(generateReminderText({ record, companyName, paymentUrl: "" }))
       setPreparingLink(true)
@@ -451,8 +389,12 @@ function FeeReminderDialog({
                   rel="noopener noreferrer"
                   className={props.className}
                   onClick={(e) => {
+                    // Never open the real checkout from the preview bubble:
+                    // doing so binds the gateway session to this staff device,
+                    // and the customer's WhatsApp link is then rejected as a
+                    // duplicate session.
+                    e.preventDefault()
                     if (!props.href) {
-                      e.preventDefault()
                       alert("No payment URL configured for this record")
                     }
                   }}
