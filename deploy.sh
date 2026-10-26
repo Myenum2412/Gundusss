@@ -35,8 +35,13 @@ if echo "$CHANGED" | grep -qE '^backend/(src/|package(-lock)?\.json|tsconfig)'; 
   fi
   (cd backend && npx tsc) || { echo "!! backend build FAILED - keeping old dist"; exit 1; }
   systemctl restart fees-backend
-  sleep 4
-  echo "   health: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/api/health)"
+  for i in $(seq 1 20); do
+    if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/api/health | grep -q '^200$'; then
+      echo "   backend: healthy (attempt $i)"
+      break
+    fi
+    sleep 1
+  done
 fi
 
 # --- payment gateway (runs from source, no build, systemd: youpi-gateway)
@@ -47,7 +52,13 @@ if echo "$CHANGED" | grep -qE '^payment-gateway/'; then
     (cd payment-gateway && npm ci --no-audit --no-fund >/dev/null 2>&1) || (cd payment-gateway && npm install --no-audit --no-fund)
   fi
   systemctl restart youpi-gateway
-  sleep 3
+  for i in $(seq 1 25); do
+    if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6100/health | grep -q '^200$'; then
+      echo "   gateway: healthy (attempt $i)"
+      break
+    fi
+    sleep 1
+  done
   echo "   gateway: $(systemctl is-active youpi-gateway)"
 fi
 

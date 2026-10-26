@@ -95,6 +95,26 @@ export function isUsableUpiId(value: unknown): value is string {
   return VPA_RE.test(clean) && !PLACEHOLDER_VPAS.has(clean.toLowerCase());
 }
 
+async function fetchGatewayWithRetry(
+  url: string,
+  options: RequestInit,
+  maxAttempts = 3,
+  baseDelayMs = 500
+): Promise<Response> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fetch(url, options);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * baseDelayMs));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 export async function fetchGatewaySettings(
   timeoutMs = 6000
 ): Promise<GatewayInfo> {
@@ -107,7 +127,7 @@ export async function fetchGatewaySettings(
   }
 
   try {
-    const res = await fetch(`${gatewayBaseUrl()}/api/v1/admin/upi-settings`, {
+    const res = await fetchGatewayWithRetry(`${gatewayBaseUrl()}/api/v1/admin/upi-settings`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(timeoutMs),
     });

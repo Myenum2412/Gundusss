@@ -31,6 +31,31 @@ const YOUPI_WEBHOOK_SECRET = process.env.YOUPI_WEBHOOK_SECRET ?? '';
 const YOUPI_ADMIN_TOKEN = (process.env.YOUPI_ADMIN_TOKEN ?? '').trim();
 
 /**
+ * Executes a fetch against YOUPI PG with automatic retry on transient connection / network failures.
+ * During deploys or server restarts, gateway services take 2-5 seconds to bind to ports.
+ * Automatic retry prevents transient 502 GATEWAY_UNREACHABLE errors.
+ */
+async function fetchYoupiWithRetry(
+  url: string,
+  options: RequestInit,
+  maxAttempts = 3,
+  baseDelayMs = 600
+): Promise<Response> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fetch(url, options);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * baseDelayMs));
+      }
+    }
+  }
+  throw lastErr;
+}
+
+/**
  * Public origin of the YOUPI checkout portal. The gateway knows this too, but
  * a reverse proxy or split deployment can make its response point at
  * localhost, so an explicit override wins when configured.
@@ -197,7 +222,7 @@ async function fetchGatewayPayment(
   if (YOUPI_WEBHOOK_SECRET) headers['X-Merchant-Key'] = YOUPI_WEBHOOK_SECRET;
 
   try {
-    const upstream = await fetch(`${YOUPI_API}/api/v1/payments/${encodeURIComponent(id)}`, {
+    const upstream = await fetchYoupiWithRetry(`${YOUPI_API}/api/v1/payments/${encodeURIComponent(id)}`, {
       headers,
       signal: AbortSignal.timeout(5000),
     });
@@ -550,7 +575,7 @@ export async function createGatewayCheckout(
 
   let upstream: Response;
   try {
-    upstream = await fetch(`${YOUPI_API}/api/v1/payments`, {
+    upstream = await fetchYoupiWithRetry(`${YOUPI_API}/api/v1/payments`, {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
@@ -810,7 +835,7 @@ export async function paymentRoutes(app: FastifyInstance) {
 
     let upstream: Response;
     try {
-      upstream = await fetch(`${YOUPI_API}/api/v1/admin/counter-confirm`, {
+      upstream = await fetchYoupiWithRetry(`${YOUPI_API}/api/v1/admin/counter-confirm`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${YOUPI_ADMIN_TOKEN}`,
@@ -891,7 +916,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     const reason = body.reason?.trim() || 'Declined at the counter';
     let upstream: Response;
     try {
-      upstream = await fetch(`${YOUPI_API}/api/v1/admin/counter-decline`, {
+      upstream = await fetchYoupiWithRetry(`${YOUPI_API}/api/v1/admin/counter-decline`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${YOUPI_ADMIN_TOKEN}`,
