@@ -88,6 +88,21 @@ describe('Payment API End-to-End HTTP Integration Tests', () => {
     assert.ok(res.body.recoveryStats);
   });
 
+  test('POST /api/v1/payments rejects an unknown payment mode', async () => {
+    const res = await request('/api/v1/payments', {
+      method: 'POST',
+      body: {
+        orderId: 'HTTP-BAD-MODE-001',
+        amount: '10.00',
+        method: 'BITCOIN'
+      }
+    });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 'PAYMENT_MODE_NOT_ALLOWED');
+    assert.match(res.body.error, /Payment mode 'BITCOIN' is not allowed/);
+  });
+
   test('Complete payment lifecycle: creation, queue, payment-done, observation attribution & promotion', async () => {
     // 1. Create first payment session (Customer A -> ₹200)
     const payA = await request('/api/v1/payments', {

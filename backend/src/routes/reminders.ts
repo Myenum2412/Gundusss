@@ -8,7 +8,7 @@ import {
   putRecord,
 } from '../appwrite.js';
 import { getProfile, listProfiles, resolveProfileId } from '../profiles.js';
-import { scopedEntityId } from '../tenant.js';
+import { paymentUrlFor, scopedEntityId } from '../tenant.js';
 import { getWaState, sendWaMessage } from '../whatsapp.js';
 import { enqueueReminderJob, workerSecret, type QueueItem } from '../queue.js';
 
@@ -232,7 +232,10 @@ async function executeMonthlyReminders(
 ): Promise<ReminderRunLog> {
   const profile = await getProfile(profileId);
   const companyName = profile?.name || 'MyFees';
-  const paymentBaseUrl = profile?.paymentUrl || 'https://myfees.myenum.in/amarnath';
+  // Never fall back to another workspace's demo link: a reminder must always
+  // point at this profile's own payment page.
+  const paymentBaseUrl =
+    profile?.paymentUrl || paymentUrlFor(profileId, profile?.name);
 
   // 1. Load active students for this profile
   const studentRecords = await listScopedRecords<any>(

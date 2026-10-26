@@ -87,14 +87,19 @@ describe('Checkout Portal Integration Tests', () => {
     });
 
     test('GET /checkout/:id framing is controlled by CHECKOUT_FRAME_ANCESTORS', async () => {
-      // No allowlist configured: the checkout page stays framable by any origin, because
-      // merchant storefronts embed it cross-origin. Deployments can pin the allowlist.
-      const before = await get('/checkout/pay_test_uuid_12345');
-      assert.equal(before.headers['x-frame-options'], undefined);
-      assert.ok(before.headers['content-security-policy'].includes('frame-ancestors *;'));
-
-      process.env.CHECKOUT_FRAME_ANCESTORS = 'https://shop.example.com, javascript:alert(1) https://x.test/path *';
+      // The portal loads payment-gateway/.env at import time on dev machines,
+      // which may pin an allowlist. Start from a clean state so the test is
+      // hermetic and actually exercises the "no allowlist" branch.
+      const previousFrameAncestors = process.env.CHECKOUT_FRAME_ANCESTORS;
+      delete process.env.CHECKOUT_FRAME_ANCESTORS;
       try {
+        // No allowlist configured: the checkout page stays framable by any origin, because
+        // merchant storefronts embed it cross-origin. Deployments can pin the allowlist.
+        const before = await get('/checkout/pay_test_uuid_12345');
+        assert.equal(before.headers['x-frame-options'], undefined);
+        assert.ok(before.headers['content-security-policy'].includes('frame-ancestors *;'));
+
+        process.env.CHECKOUT_FRAME_ANCESTORS = 'https://shop.example.com, javascript:alert(1) https://x.test/path *';
         const res = await get('/checkout/pay_test_uuid_12345');
         assert.equal(res.headers['x-frame-options'], undefined);
         assert.ok(res.headers['content-security-policy'].includes("frame-ancestors 'self' https://shop.example.com;"));
@@ -102,7 +107,11 @@ describe('Checkout Portal Integration Tests', () => {
         const qr = await get('/checkout/pay_test_uuid_12345/qr.svg');
         assert.equal(qr.headers['x-frame-options'], 'SAMEORIGIN');
       } finally {
-        delete process.env.CHECKOUT_FRAME_ANCESTORS;
+        if (previousFrameAncestors === undefined) {
+          delete process.env.CHECKOUT_FRAME_ANCESTORS;
+        } else {
+          process.env.CHECKOUT_FRAME_ANCESTORS = previousFrameAncestors;
+        }
       }
       assert.deepEqual(frameAncestorOrigins('https://a.test http://localhost:5000/'), ['https://a.test', 'http://localhost:5000']);
       // Entries that are not a bare http(s) origin are rejected outright, so the value can
@@ -113,12 +122,13 @@ describe('Checkout Portal Integration Tests', () => {
       assert.deepEqual(frameAncestorOrigins('https://user:pass@x.test'), []);
     });
 
-    test('GET /checkout/:id/qr.svg returns dynamic SVG image', async () => {
+    test('GET /checkout/:id/qr.svg refuses to render a QR without a configured VPA', async () => {
       const res = await get('/checkout/pay_test_uuid_12345/qr.svg');
-      assert.equal(res.status, 200);
-      assert.ok(res.headers['content-type'].includes('image/svg+xml'));
-      assert.ok(res.text.includes('<svg'));
-      assert.ok(res.text.includes('</svg>'));
+      // No payment API is running for this id, so there is no payee VPA. The
+      // portal must not fall back to the old `merchant@upi` placeholder.
+      assert.equal(res.status, 404);
+      const json = JSON.parse(res.text);
+      assert.equal(json.code, 'UPI_NOT_CONFIGURED');
     });
 
     test('GET /icons/:filename returns official Play Store icons with correct MIME type', async () => {

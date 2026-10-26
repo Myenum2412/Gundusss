@@ -92,6 +92,18 @@ function deriveReminderDays(due: number, before: number, after: number): number[
 
 export default function RemindersPage() {
   const { user, activeProfile, can } = useAuth()
+  // Never fall back to another workspace's demo link. Derive this profile's
+  // own public page when the stored paymentUrl is missing.
+  const publicPaymentBaseUrl = useMemo(() => {
+    const stored = activeProfile?.paymentUrl?.trim()
+    if (stored) return stored.replace(/\/+$/, "")
+    const slug = (activeProfile?.name || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+    return slug ? `https://myfees.myenum.in/${encodeURIComponent(slug)}` : ""
+  }, [activeProfile?.paymentUrl, activeProfile?.name])
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<RemindersStatusResponse | null>(null)
   const [students, setStudents] = useState<StoredStudent[]>([])
@@ -314,6 +326,10 @@ export default function RemindersPage() {
       setReminderError("Write a message, a title, or attach a file.")
       return
     }
+    if (!publicPaymentBaseUrl) {
+      setReminderError("Your public payment link is unavailable. Reload the page and try again.")
+      return
+    }
     setReminderError("")
     setReminderSending(true)
 
@@ -338,7 +354,7 @@ export default function RemindersPage() {
       recipientNames.push(stu ? `${stu.studentName} (${stu.studentId})` : id)
       try {
         const titleLine = reminderForm.title.trim()
-        const stuPayUrl = `${activeProfile?.paymentUrl || "https://myfees.myenum.in/amarnath"}?student=${encodeURIComponent(stu?.studentId || id)}`
+        const stuPayUrl = `${publicPaymentBaseUrl}?student=${encodeURIComponent(stu?.studentId || id)}`
         await sendWaMessage({
           to: stu?.phone ?? id,
           message: titleLine ? `*${titleLine}*\n${reminderForm.message.trim()}` : reminderForm.message.trim(),
@@ -403,8 +419,12 @@ export default function RemindersPage() {
       alert("Student does not have a valid phone number")
       return
     }
+    if (!publicPaymentBaseUrl) {
+      alert("Your public payment link is unavailable. Reload the page and try again.")
+      return
+    }
 
-    const studentPaymentUrl = `${activeProfile?.paymentUrl || "https://myfees.myenum.in/amarnath"}?student=${encodeURIComponent(stu.studentId)}`
+    const studentPaymentUrl = `${publicPaymentBaseUrl}?student=${encodeURIComponent(stu.studentId)}`
     const bodyText = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${stu.studentName}*,\n\nThis is your monthly fee reminder for *${stu.course || "Course"}* (${stu.group || "Batch"}).\n\n• Student ID: *${stu.studentId}*\n• Monthly Fee: *₹${parseFloat(feeAmount).toLocaleString("en-IN")}*\n• Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\n\n— ${activeProfile?.name || "MyFees"} Accounts Desk`
 
     try {
@@ -1054,8 +1074,9 @@ export default function RemindersPage() {
                 status="delivered"
                 showTail={true}
                 onButtonClick={() => {
+                  if (!publicPaymentBaseUrl) return
                   const studentQuery = previewStudent ? `?student=${encodeURIComponent(previewStudent.studentId)}` : ""
-                  window.open((activeProfile?.paymentUrl || "https://myfees.myenum.in/amarnath") + studentQuery, "_blank")
+                  window.open(publicPaymentBaseUrl + studentQuery, "_blank")
                 }}
               />
 
@@ -1070,9 +1091,9 @@ export default function RemindersPage() {
               </span>
 
               {(() => {
-                const ctaUrl = previewStudent
-                  ? `${activeProfile?.paymentUrl || "https://myfees.myenum.in/amarnath"}?student=${encodeURIComponent(previewStudent.studentId)}`
-                  : "https://myfees.myenum.in/amarnath"
+                const ctaUrl = publicPaymentBaseUrl
+                  ? `${publicPaymentBaseUrl}${previewStudent ? `?student=${encodeURIComponent(previewStudent.studentId)}` : ""}`
+                  : "#"
                 return (
                   <CtaUrlBubble
                     variant="outgoing"

@@ -5,6 +5,9 @@
 | Variable | Default Value | Description |
 | :--- | :--- | :--- |
 | `NODE_ENV` | `development` | Runtime environment (`development` or `production`) |
+| `BASE_PAYMENT_API_URL` | `http://localhost:6100` | Public origin of the Payment Core API. Use the public HTTPS origin in production |
+| `BASE_CHECKOUT_URL` | `http://localhost:7000` | Public origin of the checkout portal. Checkout links are built from this value, so it must not stay on `localhost` in production |
+| `YOUPI_REJECT_PLACEHOLDER_VPA` | unset (enabled when `NODE_ENV=production`) | Reject UPI session creation when the active receiving account is a seed value such as `merchant@upi` |
 | `CONTROL_CENTER_PORT` | `8090` | Host port for the Local Process Supervisor |
 | `PAYMENT_API_PORT` | `6100` | Host port for the central Payment Core REST API |
 | `CHECKOUT_PORTAL_PORT` | `7000` | Host port for the customer-facing Checkout page |
