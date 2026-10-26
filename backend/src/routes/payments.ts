@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   APPWRITE_COLLECTIONS,
@@ -422,161 +422,279 @@ async function findFeeByStudentAndAmount(
   return matches[0] ?? null;
 }
 
+export class GatewayCheckoutError extends Error {
+  statusCode: number;
+  code?: string;
+  details?: unknown;
+
+  constructor(
+    message: string,
+    statusCode = 502,
+    code?: string,
+    details?: unknown
+  ) {
+    super(message);
+    this.name = 'GatewayCheckoutError';
+    this.statusCode = statusCode;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+export interface CreateGatewayCheckoutInput {
+  profileId: string;
+  studentId?: string;
+  studentName: string;
+  amount: number | string;
+  feeId?: number | null;
+  email?: string;
+  phone?: string;
+  description?: string;
+  method?: string;
+  orderId?: string;
+  source: string;
+  eventMessage?: string;
+}
+
+export interface GatewayCheckoutResult {
+  order: LocalOrder;
+  paymentUrl: string;
+  initialStatus: string;
+}
+
+/**
+ * Create (or idempotently reuse) a real YOUPI PG checkout for a fee and persist
+ * the local order. Both the dashboard and the public portal go through this so
+ * every link handed to a student is an actual payable gateway session — never a
+ * hand-built workspace URL.
+ */
+export async function createGatewayCheckout(
+  input: CreateGatewayCheckoutInput
+): Promise<GatewayCheckoutResult> {
+  const amount = Number(input.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new GatewayCheckoutError('A valid positive amount is required', 400);
+  }
+
+  const studentName = (input.studentName ?? '').trim();
+  if (!studentName) {
+    throw new GatewayCheckoutError('studentName is required', 400);
+  }
+
+  const method = normalizePaymentMethod(input.method);
+  if (!method) {
+    throw new GatewayCheckoutError(
+      'Invalid payment method. Use UPI, CASH_COUNTER, or CARD_COUNTER.',
+      400,
+      'PAYMENT_METHOD_NOT_ALLOWED'
+    );
+  }
+
+  // A save made while YOUPI PG was offline is retried here, so the new checkout
+  // uses the UPI ID shown in this workspace. A missing or placeholder VPA must
+  // fail before an unpayable session is created.
+  if (method === 'UPI') {
+    const upi = await getEffectiveCheckoutUpi(input.profileId);
+    if (!upi.ready) {
+      throw new GatewayCheckoutError(
+        upi.error ??
+          'No merchant UPI ID is configured. Save one under Payments → UPI setup.',
+        409,
+        'UPI_NOT_CONFIGURED'
+      );
+    }
+  }
+
+  const orderId =
+    input.orderId?.trim() || `FEE-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const amountStr = amount.toFixed(2);
+
+  const payload = {
+    orderId,
+    amount: amountStr,
+    currency: 'INR',
+    method,
+    customer: {
+      name: studentName,
+      ...(input.email ? { email: input.email } : {}),
+      ...(input.phone ? { phoneNumber: input.phone } : {}),
+    },
+    description: input.description ?? `Fee payment for ${studentName}`,
+    metadata: {
+      profileId: input.profileId,
+      studentId: input.studentId ?? '',
+      studentName,
+      feeId: input.feeId ?? null,
+      source: input.source,
+    },
+  };
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Idempotency-Key': orderId,
+  };
+  // An empty X-Merchant-Key is treated as an invalid key by the gateway.
+  if (YOUPI_WEBHOOK_SECRET) {
+    headers['X-Merchant-Key'] = YOUPI_WEBHOOK_SECRET;
+  }
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${YOUPI_API}/api/v1/payments`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (err) {
+    throw new GatewayCheckoutError(
+      `Payment gateway unreachable. Is YOUPI PG running at ${YOUPI_API}?`,
+      502,
+      'GATEWAY_UNREACHABLE',
+      err instanceof Error ? err.message : err
+    );
+  }
+
+  const json = (await upstream.json().catch(() => null)) as UpstreamPayment | null;
+  if (!upstream.ok || !json) {
+    throw new GatewayCheckoutError(
+      json?.error ??
+        json?.message ??
+        `Failed to create payment session (HTTP ${upstream.status})`,
+      upstream.ok ? 502 : upstream.status,
+      json?.code,
+      json
+    );
+  }
+
+  const initialStatus = json.status ?? 'INITIATED';
+  const existing = await getLocalOrder(input.profileId, orderId);
+  const timestamp = nowIso();
+  // Reusing an order id must not regress a settled/terminal local record if
+  // the gateway returns the original session for the same idempotency key.
+  const alreadyTerminal = existing ? TERMINAL_STATUSES.has(existing.status) : false;
+  const paymentUrl =
+    resolveCheckoutUrl(json.checkoutUrl, json.paymentId) ||
+    existing?.paymentUrl ||
+    existing?.checkoutUrl ||
+    '';
+
+  if (method === 'UPI' && !paymentUrl) {
+    throw new GatewayCheckoutError(
+      'The payment gateway did not return a checkout URL. Set YOUPI_PUBLIC_CHECKOUT_URL to the public checkout portal.',
+      502,
+      'CHECKOUT_URL_MISSING',
+      json
+    );
+  }
+
+  const order: LocalOrder = existing
+    ? {
+        ...existing,
+        profileId: input.profileId,
+        paymentId: json.paymentId ?? existing.paymentId,
+        status: alreadyTerminal ? existing.status : initialStatus,
+        gatewayStatus: alreadyTerminal ? existing.gatewayStatus : initialStatus,
+        method,
+        checkoutUrl: paymentUrl || existing.checkoutUrl,
+        paymentUrl: paymentUrl || existing.paymentUrl,
+        updatedAt: timestamp,
+      }
+    : {
+        profileId: input.profileId,
+        orderId,
+        paymentId: json.paymentId ?? null,
+        status: initialStatus,
+        gatewayStatus: initialStatus,
+        method,
+        utr: '',
+        amount: amountStr,
+        studentId: input.studentId ?? '',
+        studentName,
+        feeId: input.feeId ?? null,
+        checkoutUrl: paymentUrl,
+        paymentUrl,
+        receiptId: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+  await saveLocalOrder(order);
+
+  await recordPaymentEvent(input.profileId, {
+    orderId,
+    status: initialStatus,
+    gatewayStatus: initialStatus,
+    method,
+    source: input.source,
+    message:
+      input.eventMessage ??
+      `${method.replace('_', ' ')} payment session created.`,
+  });
+
+  return {
+    order,
+    paymentUrl: order.paymentUrl || order.checkoutUrl,
+    initialStatus,
+  };
+}
+
+function checkoutErrorReply(
+  reply: FastifyReply,
+  err: unknown
+): FastifyReply {
+  if (err instanceof GatewayCheckoutError) {
+    return reply.code(err.statusCode).send({
+      error: err.message,
+      ...(err.code ? { code: err.code } : {}),
+      ...(err.details ? { details: err.details } : {}),
+    });
+  }
+  throw err;
+}
+
 export async function paymentRoutes(app: FastifyInstance) {
   // POST /api/payments/create — open a YOUPI PG checkout session for a fee.
   app.post('/api/payments/create', async (req, reply) => {
     const body = (req.body ?? {}) as CreatePaymentBody;
     const profileId = await resolveProfileId(req);
 
-    const amount = Number(body.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return reply.code(400).send({ error: 'A valid positive amount is required' });
-    }
-
-    const studentName = (body.studentName ?? '').trim();
-    if (!studentName) {
-      return reply.code(400).send({ error: 'studentName is required' });
-    }
-
-    const method = normalizePaymentMethod(body.method);
-    if (!method) {
-      return reply.code(400).send({
-        error: 'Invalid payment method. Use UPI, CASH_COUNTER, or CARD_COUNTER.',
-      });
-    }
-
-    const orderId = body.orderId?.trim() || `FEE-${Date.now()}-${randomUUID().slice(0, 8)}`;
-    const amountStr = amount.toFixed(2);
-
-    const payload = {
-      orderId,
-      amount: amountStr,
-      currency: 'INR',
-      method,
-      customer: {
-        name: studentName,
-        ...(body.email ? { email: body.email } : {}),
-        ...(body.phone ? { phoneNumber: body.phone } : {}),
-      },
-      description: body.description ?? `Fee payment for ${studentName}`,
-      metadata: {
-        profileId,
-        studentId: body.studentId ?? '',
-        studentName,
-        feeId: body.feeId ?? null,
-        source: 'fees-monorepo',
-      },
-    };
-
-    // A save made while YOUPI PG was offline is retried here, so the new
-    // checkout uses the UPI ID shown in this workspace. A missing or
-    // placeholder VPA must fail before an unpayable session is created.
-    if (method === 'UPI') {
-      const upi = await getEffectiveCheckoutUpi(profileId);
-      if (!upi.ready) {
-        app.log.warn(
-          { gatewayError: upi.error, profileId },
-          'YOUPI PG UPI settings are not ready for checkout'
-        );
-        return reply.code(409).send({
-          error:
-            upi.error ??
-            'No merchant UPI ID is configured. Save one under Payments → UPI setup.',
-          code: 'UPI_NOT_CONFIGURED',
-        });
-      }
-    }
-
-    let upstream: Response;
     try {
-      upstream = await fetch(`${YOUPI_API}/api/v1/payments`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': orderId,
-        },
-        body: JSON.stringify(payload),
+      const { order, paymentUrl, initialStatus } = await createGatewayCheckout({
+        profileId,
+        orderId: body.orderId,
+        studentId: body.studentId,
+        studentName: body.studentName ?? '',
+        amount: body.amount ?? 0,
+        feeId: body.feeId ?? null,
+        email: body.email,
+        phone: body.phone,
+        description: body.description,
+        method: body.method,
+        source: 'fees-monorepo',
       });
-    } catch (err) {
-      app.log.error({ err }, 'YOUPI PG payment gateway unreachable');
-      return reply.code(502).send({
-        error: `Payment gateway unreachable. Is YOUPI PG running at ${YOUPI_API}?`,
-      });
-    }
 
-    const json = (await upstream.json().catch(() => null)) as UpstreamPayment | null;
-    if (!upstream.ok || !json) {
-      return reply.code(upstream.ok ? 502 : upstream.status).send({
-        error: json?.error ?? json?.message ?? 'Failed to create payment session',
-        details: json,
-      });
-    }
-
-    const initialStatus = json.status ?? 'INITIATED';
-    const existing = await getLocalOrder(profileId, orderId);
-    const timestamp = nowIso();
-    // Reusing an order id must not regress a settled/terminal local record if
-    // the gateway returns the original session for the same idempotency key.
-    const alreadyTerminal = existing ? TERMINAL_STATUSES.has(existing.status) : false;
-    const paymentUrl =
-      resolveCheckoutUrl(json.checkoutUrl, json.paymentId) ||
-      existing?.paymentUrl ||
-      existing?.checkoutUrl ||
-      '';
-    const order: LocalOrder = existing
-      ? {
-          ...existing,
-          profileId,
-          paymentId: json.paymentId ?? existing.paymentId,
-          status: alreadyTerminal ? existing.status : initialStatus,
-          gatewayStatus: alreadyTerminal ? existing.gatewayStatus : initialStatus,
-          method,
-          checkoutUrl: paymentUrl,
-          paymentUrl,
-          updatedAt: timestamp,
-        }
-      : {
-          profileId,
-          orderId,
-          paymentId: json.paymentId ?? null,
+      return reply.send({
+        data: {
+          orderId: order.orderId,
+          paymentId: order.paymentId,
           status: initialStatus,
           gatewayStatus: initialStatus,
-          method,
-          utr: '',
-          amount: amountStr,
-          studentId: body.studentId ?? '',
-          studentName,
-          feeId: body.feeId ?? null,
-          checkoutUrl: paymentUrl,
+          method: order.method,
+          checkoutUrl: order.checkoutUrl,
           paymentUrl,
-          receiptId: null,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        };
-    await saveLocalOrder(order);
-
-    await recordPaymentEvent(profileId, {
-      orderId,
-      status: initialStatus,
-      gatewayStatus: initialStatus,
-      method,
-      source: 'create',
-      message: `${method.replace('_', ' ')} payment session created.`,
-    });
-
-    return reply.code(upstream.ok ? 200 : 201).send({
-      data: {
-        orderId,
-        paymentId: json.paymentId,
-        status: initialStatus,
-        gatewayStatus: initialStatus,
-        method,
-        checkoutUrl: order.checkoutUrl,
-        paymentUrl: order.paymentUrl ?? order.checkoutUrl,
-        amount: amountStr,
-        currency: json.currency ?? 'INR',
-      },
-    });
+          amount: order.amount,
+          currency: 'INR',
+        },
+      });
+    } catch (err) {
+      if (err instanceof GatewayCheckoutError) {
+        app.log.warn(
+          { err: err.message, code: err.code, profileId },
+          'Could not create a YOUPI PG checkout'
+        );
+      }
+      return checkoutErrorReply(reply, err);
+    }
   });
 
   // GET /api/payments — list payment sessions created in this workspace.
@@ -1287,147 +1405,60 @@ export async function paymentRoutes(app: FastifyInstance) {
     }
 
     const profileId = profile.profileId;
-    const amount = Number(body.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return reply.code(400).send({ error: 'A valid positive amount is required' });
-    }
 
-    const studentName = (body.studentName ?? '').trim();
-    if (!studentName) {
-      return reply.code(400).send({ error: 'Student name is required' });
-    }
-
-    const method = normalizePaymentMethod(body.method);
-    if (!method) {
-      return reply.code(400).send({
-        error: 'Invalid payment method. Use UPI, CASH_COUNTER, or CARD_COUNTER.',
-        code: 'PAYMENT_METHOD_NOT_ALLOWED',
-      });
-    }
-    if (method === 'UPI') {
-      // Retry a save made while the gateway was offline and refuse to start a
-      // checkout that would pay a missing or placeholder VPA.
-      const upi = await getEffectiveCheckoutUpi(profileId);
-
-      if (!upi.ready) {
-        app.log.warn(
-          { gatewayError: upi.error, profileId },
-          'Public UPI checkout blocked because the receiving VPA is not usable'
-        );
-        return reply.code(409).send({
-          error:
-            upi.error ??
-            'Online UPI is not configured for this institution. Please pay at the counter.',
-          code: 'UPI_NOT_CONFIGURED',
-        });
-      }
-    }
-
-    const orderId = body.orderId?.trim() || `FEE-${Date.now()}-${randomUUID().slice(0, 8)}`;
-    const amountStr = amount.toFixed(2);
-
-    const gatewayPayload = {
-      orderId,
-      amount: amountStr,
-      currency: 'INR',
-      method,
-      customer: {
-        name: studentName,
-        ...(body.email ? { email: body.email } : {}),
-        ...(body.phone ? { phoneNumber: body.phone } : {}),
-      },
-      description: body.description ?? `Fee payment for ${studentName} - ${profile.name}`,
-      metadata: {
-        profileId,
-        studentId: body.studentId ?? '',
-        studentName,
-        feeId: body.feeId ?? null,
-        source: 'fees-public-portal',
-      },
-    };
-
-    const gatewayHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Idempotency-Key': orderId,
-    };
-    // An empty X-Merchant-Key is treated as an invalid key by the gateway.
-    if (YOUPI_WEBHOOK_SECRET) {
-      gatewayHeaders['X-Merchant-Key'] = YOUPI_WEBHOOK_SECRET;
-    }
-
-    let upstream: Response;
     try {
-      upstream = await fetch(`${YOUPI_API}/api/v1/payments`, {
-        method: 'POST',
-        headers: gatewayHeaders,
-        body: JSON.stringify(gatewayPayload),
-        signal: AbortSignal.timeout(8000),
+      const { order, paymentUrl, initialStatus } = await createGatewayCheckout({
+        profileId,
+        orderId: body.orderId,
+        studentId: body.studentId,
+        studentName: body.studentName ?? '',
+        amount: body.amount ?? 0,
+        feeId: body.feeId ?? null,
+        email: body.email,
+        phone: body.phone,
+        description:
+          body.description ??
+          `Fee payment for ${(body.studentName ?? '').trim()} - ${profile.name}`,
+        method: body.method,
+        source: 'fees-public-portal',
+        eventMessage: `Online UPI checkout initiated by ${(body.studentName ?? '').trim()}.`,
       });
-    } catch {
-      return reply.code(502).send({
-        error: `Payment gateway unreachable. Is YOUPI PG running at ${YOUPI_API}?`,
+
+      return reply.send({
+        data: {
+          orderId: order.orderId,
+          paymentId: order.paymentId,
+          status: initialStatus,
+          gatewayStatus: initialStatus,
+          method: order.method,
+          checkoutUrl: order.checkoutUrl,
+          paymentUrl,
+          amount: order.amount,
+          currency: 'INR',
+        },
       });
+    } catch (err) {
+      if (err instanceof GatewayCheckoutError) {
+        app.log.warn(
+          { err: err.message, code: err.code, profileId },
+          'Public UPI checkout creation failed'
+        );
+        if (err.code === 'UPI_NOT_CONFIGURED') {
+          return reply.code(err.statusCode).send({
+            error:
+              'Online UPI is not configured for this institution. Please pay at the counter.',
+            code: err.code,
+          });
+        }
+        if (err.code === 'PAYMENT_METHOD_NOT_ALLOWED') {
+          return reply.code(err.statusCode).send({
+            error: err.message,
+            code: err.code,
+          });
+        }
+      }
+      return checkoutErrorReply(reply, err);
     }
-
-    const json = (await upstream.json().catch(() => ({}))) as UpstreamPayment;
-    if (!upstream.ok) {
-      return reply.code(upstream.status || 502).send({
-        error: json.error ?? json.message ?? 'Payment gateway rejected the order',
-      });
-    }
-
-    const initialStatus = json.status ?? 'INITIATED';
-    const timestamp = nowIso();
-    const paymentUrl = resolveCheckoutUrl(json.checkoutUrl, json.paymentId);
-    if (method === 'UPI' && !paymentUrl) {
-      return reply.code(502).send({
-        error:
-          'The payment gateway did not return a checkout URL. Set YOUPI_PUBLIC_CHECKOUT_URL to the public checkout portal.',
-      });
-    }
-
-    const order: LocalOrder = {
-      profileId,
-      orderId,
-      paymentId: json.paymentId ?? null,
-      status: initialStatus,
-      gatewayStatus: initialStatus,
-      method,
-      utr: '',
-      amount: amountStr,
-      studentId: body.studentId ?? '',
-      studentName,
-      feeId: body.feeId ?? null,
-      checkoutUrl: paymentUrl,
-      paymentUrl,
-      receiptId: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    await saveLocalOrder(order);
-
-    await recordPaymentEvent(profileId, {
-      orderId,
-      status: initialStatus,
-      gatewayStatus: initialStatus,
-      method,
-      source: 'public-checkout',
-      message: `Online UPI checkout initiated by ${studentName}.`,
-    });
-
-    return reply.code(upstream.ok ? 200 : 201).send({
-      data: {
-        orderId,
-        paymentId: json.paymentId,
-        status: initialStatus,
-        gatewayStatus: initialStatus,
-        method,
-        checkoutUrl: order.checkoutUrl,
-        paymentUrl: order.paymentUrl,
-        amount: amountStr,
-        currency: json.currency ?? 'INR',
-      },
-    });
   });
 
   // GET /api/public/payments/:id — public status poll for checkout page

@@ -8,14 +8,31 @@ import {
   putRecord,
 } from '../appwrite.js';
 import { getProfile, listProfiles, resolveProfileId } from '../profiles.js';
-import { paymentUrlFor, scopedEntityId } from '../tenant.js';
+import { scopedEntityId } from '../tenant.js';
 import { getWaState, sendWaMessage } from '../whatsapp.js';
 import { enqueueReminderJob, workerSecret, type QueueItem } from '../queue.js';
+import { createGatewayCheckout } from './payments.js';
 
 const CRONJOB_API_BASE = 'https://api.cron-job.org';
 // Never hardcode this: set CRONJOB_API_KEY in backend/.env (gitignored) and in
 // the deployment environment. An unset key simply surfaces as an API error.
 const CRONJOB_API_KEY = (process.env.CRONJOB_API_KEY ?? '').trim();
+
+/**
+ * Attach the student id to a real gateway checkout URL so the reminder link can
+ * be reconciled with the student. URLSearchParams keeps any query string the
+ * gateway may already have added.
+ */
+function studentCheckoutUrl(paymentUrl: string, studentId: string): string {
+  try {
+    const parsed = new URL(paymentUrl);
+    parsed.searchParams.set('student', studentId);
+    return parsed.toString();
+  } catch {
+    const sep = paymentUrl.includes('?') ? '&' : '?';
+    return `${paymentUrl}${sep}student=${encodeURIComponent(studentId)}`;
+  }
+}
 
 function cronJobKey(storedKey?: string): string {
   const key = (storedKey || CRONJOB_API_KEY).trim();
@@ -232,10 +249,6 @@ async function executeMonthlyReminders(
 ): Promise<ReminderRunLog> {
   const profile = await getProfile(profileId);
   const companyName = profile?.name || 'MyFees';
-  // Never fall back to another workspace's demo link: a reminder must always
-  // point at this profile's own payment page.
-  const paymentBaseUrl =
-    profile?.paymentUrl || paymentUrlFor(profileId, profile?.name);
 
   // 1. Load active students for this profile
   const studentRecords = await listScopedRecords<any>(
@@ -279,11 +292,42 @@ async function executeMonthlyReminders(
     const amountStr = `₹${parseFloat(studentFee).toLocaleString('en-IN')}`;
     const studentPhone = (student.phone || '').replace(/\D/g, '');
 
-    const studentPaymentUrl = `${paymentBaseUrl}?student=${encodeURIComponent(student.studentId)}`;
     const message = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${student.studentName}*,\n\nThis is your monthly fee reminder for *${student.course || 'Course'}* (${student.group || 'Batch'}).\n\n• Student ID: *${student.studentId}*\n• Monthly Fee: *${amountStr}*\n• Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\n\n— ${companyName} Accounts Desk`;
 
+    // Every reminder must carry a real, payable gateway checkout. Never fall
+    // back to a hand-built workspace page URL: those links could not be
+    // reconciled with a gateway order and often pointed at another tenant.
+    let studentPaymentUrl = '';
+    let linkError: string | undefined;
+    if (studentPhone.length >= 10 && isWaReady) {
+      try {
+        const checkout = await createGatewayCheckout({
+          profileId,
+          studentId: student.studentId,
+          studentName: student.studentName,
+          amount: studentFee,
+          email: student.email,
+          phone: studentPhone,
+          description: `Monthly fee payment for ${student.studentName} (${student.studentId})`,
+          method: 'UPI',
+          source: 'fee-reminder',
+          eventMessage: 'Monthly reminder checkout created.',
+        });
+        studentPaymentUrl = studentCheckoutUrl(
+          checkout.paymentUrl,
+          student.studentId
+        );
+      } catch (err: any) {
+        linkError =
+          err?.message || 'Could not create a payment link for this student.';
+        console.warn(
+          `[reminders] Could not create a gateway checkout for ${student.studentId}: ${linkError}`
+        );
+      }
+    }
+
     if (workerMode && studentPhone.length >= 10) {
-      if (isWaReady) {
+      if (isWaReady && studentPaymentUrl) {
         // Hand over to the queue worker; the run log gets merged when the
         // worker reports results. The payment link rides along as a
         // WhatsApp-native CTA-URL button ("Pay Now").
@@ -309,7 +353,9 @@ async function executeMonthlyReminders(
           phone: student.phone,
           amount: studentFee,
           delivered: false,
-          error: 'WhatsApp bot offline (queued for auto-send)',
+          error:
+            linkError ??
+            'WhatsApp bot offline (queued for auto-send)',
         });
       }
       continue;
@@ -318,7 +364,7 @@ async function executeMonthlyReminders(
     let delivered = false;
     let errorMsg: string | undefined;
 
-    if (studentPhone.length >= 10 && isWaReady) {
+    if (studentPhone.length >= 10 && isWaReady && studentPaymentUrl) {
       try {
         await sendWaMessage(studentPhone, message, [], {
           displayText: 'Pay Now',
@@ -330,9 +376,10 @@ async function executeMonthlyReminders(
         errorMsg = err?.message || 'WhatsApp send failed';
       }
     } else if (studentPhone.length >= 10) {
-      // WhatsApp bot not connected, simulate/record queued
       delivered = false;
-      errorMsg = isWaReady ? 'Invalid phone' : 'WhatsApp bot offline (queued for auto-send)';
+      errorMsg =
+        linkError ??
+        (isWaReady ? 'Invalid phone' : 'WhatsApp bot offline (queued for auto-send)');
     }
 
     recipientResults.push({
@@ -375,7 +422,7 @@ async function executeMonthlyReminders(
   } else {
     // WhatsApp client is offline / waiting for QR: nothing was delivered.
     status = 'FAILED';
-    details = `WhatsApp bot is offline — no messages delivered. Reminders were generated for ${students.length} student(s) and payment links remain active; connect the bot on the Settings page and re-run.`;
+    details = `WhatsApp bot is offline — no messages delivered. Reminders were generated for ${students.length} student(s); connect the bot on the Settings page and re-run.`;
   }
 
   const runLog: ReminderRunLog = {

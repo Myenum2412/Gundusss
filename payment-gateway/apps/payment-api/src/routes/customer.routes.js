@@ -252,6 +252,31 @@ export function registerCustomerRoutes(server, ctx) {
 
     console.log(`[CustomerAuth] OTP generated for +91${cleanMobile} (expires in 5 mins)`);
 
+    if (!dispatchResult || dispatchResult.delivered !== true) {
+      // Nothing reached the customer: release the cooldown so they can retry
+      // immediately, and discard the undelivered challenge. Reporting success
+      // here used to leave the checkout UI on an OTP screen forever.
+      otpRequestLog.delete(cleanMobile);
+      if (!existingUser) {
+        pendingOtpChallenges.delete(cleanMobile);
+      }
+      const deliveryError =
+        dispatchResult?.error ||
+        dispatchResult?.message ||
+        (dispatchResult?.status
+          ? `WhatsApp is not connected (Status: ${dispatchResult.status}).`
+          : 'WhatsApp OTP delivery failed.');
+      console.warn(`[CustomerAuth] OTP NOT delivered to +91${cleanMobile}: ${deliveryError}`);
+      HttpServer.json(res, 502, {
+        success: false,
+        error: deliveryError,
+        code: 'OTP_DELIVERY_FAILED',
+        mobileNumber: cleanMobile,
+        dispatch: dispatchResult
+      });
+      return;
+    }
+
     HttpServer.json(res, 200, {
       success: true,
       message: 'OTP sent to your WhatsApp number.',

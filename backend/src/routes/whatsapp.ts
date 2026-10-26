@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getWaState, startWa, logoutWa, sendWaMessage } from '../whatsapp.js';
@@ -25,6 +26,21 @@ const SendSchema = z.object({
   attachment: AttachmentSchema.optional(),
   cta: CtaSchema.optional(),
 });
+
+/** Shared secret the payment gateway presents when it asks this app to send an OTP. */
+function bridgeToken(): string {
+  return (
+    process.env.WHATSAPP_BRIDGE_TOKEN?.trim() ||
+    process.env.YOUPI_WEBHOOK_SECRET?.trim() ||
+    ''
+  );
+}
+
+function secureEquals(a: string, b: string): boolean {
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
+  return ha.length === hb.length && timingSafeEqual(ha, hb);
+}
 
 export async function whatsappRoutes(app: FastifyInstance) {
   // GET /api/whatsapp/status (auto-starts the client on first call)
@@ -81,6 +97,62 @@ export async function whatsappRoutes(app: FastifyInstance) {
     } catch (err: any) {
       const code = err?.statusCode === 409 ? 409 : err?.statusCode === 400 ? 400 : 500;
       return reply.code(code).send({ error: err?.message ?? 'Failed to send' });
+    }
+  });
+
+  // POST /api/whatsapp/internal/send — machine-to-machine bridge for the
+  // payment gateway. The gateway cannot share a user session, so this route is
+  // exempt from the normal auth guard and authenticates with a shared token
+  // instead. It must never be exposed without WHATSAPP_BRIDGE_TOKEN set.
+  app.post('/api/whatsapp/internal/send', async (req, reply) => {
+    const expected = bridgeToken();
+    if (!expected) {
+      return reply.code(503).send({
+        error:
+          'WhatsApp bridge is not configured. Set WHATSAPP_BRIDGE_TOKEN on the backend.',
+      });
+    }
+
+    const presented =
+      (typeof req.headers['x-whatsapp-bridge-token'] === 'string'
+        ? req.headers['x-whatsapp-bridge-token']
+        : '') ||
+      (typeof req.headers.authorization === 'string' &&
+      req.headers.authorization.startsWith('Bearer ')
+        ? req.headers.authorization.slice('Bearer '.length)
+        : '');
+
+    if (!presented.trim() || !secureEquals(presented.trim(), expected)) {
+      return reply.code(401).send({ error: 'Invalid WhatsApp bridge token' });
+    }
+
+    const parsed = SendSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply
+        .code(400)
+        .send({ error: 'Invalid body', details: parsed.error.flatten() });
+    }
+
+    const { to, message, attachment, cta } = parsed.data;
+    if (!message.trim() && !attachment && !cta) {
+      return reply
+        .code(400)
+        .send({ error: 'A message, attachment, or CTA button is required.' });
+    }
+
+    try {
+      const result = await sendWaMessage(
+        to,
+        message,
+        attachment ? [attachment] : [],
+        cta
+      );
+      return { data: result };
+    } catch (err: any) {
+      const code = err?.statusCode === 409 ? 409 : err?.statusCode === 400 ? 400 : 500;
+      return reply.code(code).send({
+        error: err?.message ?? 'WhatsApp bridge could not deliver the message',
+      });
     }
   });
 }

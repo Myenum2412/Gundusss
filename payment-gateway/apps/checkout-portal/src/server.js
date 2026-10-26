@@ -58,7 +58,10 @@ export function isProductionLike(env = process.env) {
  * effect because it cannot express a list and would block the allowlisted storefronts.
  */
 export function checkoutFrameHeaders(env = process.env) {
-  const configured = frameAncestorOrigins(env.CHECKOUT_FRAME_ANCESTORS);
+  // When the caller supplies an env object, honour only that object. Falling back
+  // to process.env here leaks ambient configuration (e.g. a local .env) into
+  // callers that pass a partial env, such as unit tests.
+  const configured = frameAncestorOrigins(env.CHECKOUT_FRAME_ANCESTORS || '');
   const frameAncestors = configured.length
     ? `'self' ${configured.join(' ')}`
     : (isProductionLike(env) ? "'self'" : '*');

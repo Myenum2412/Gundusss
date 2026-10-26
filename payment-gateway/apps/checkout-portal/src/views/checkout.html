@@ -602,6 +602,10 @@
           });
           const sendData = await sendRes.json();
           if (sendData && sendData.devOtp) lastReceivedDevOtp = sendData.devOtp;
+          if (!sendRes.ok) {
+            showOptionToast(sendData.error || 'Could not deliver the WhatsApp OTP. Please try again.');
+            return;
+          }
 
           const greetingEl = document.getElementById('authOtpGreeting');
           if (greetingEl) {
@@ -627,6 +631,10 @@
           });
           const sendData = await sendRes.json();
           if (sendData && sendData.devOtp) lastReceivedDevOtp = sendData.devOtp;
+          if (!sendRes.ok) {
+            showOptionToast(sendData.error || 'Could not deliver the WhatsApp OTP. Please try again.');
+            return;
+          }
 
           const greetingEl = document.getElementById('authOtpGreeting');
           if (greetingEl) {
@@ -1928,7 +1936,7 @@
           const btnAction = document.getElementById('btnFailedAction');
           if (btnAction) {
             btnAction.textContent = isExpired ? 'Start New Payment' : 'Try Again';
-            btnAction.onclick = () => retryNewPayment();
+            btnAction.onclick = () => handleEndAndStartNewPayment();
           }
           return;
         }
