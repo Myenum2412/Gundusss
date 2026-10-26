@@ -155,6 +155,37 @@ export function PaymentTimeline({
         </DialogHeader>
 
         <div className="max-h-[62vh] overflow-y-auto px-6 py-5">
+          {order && (
+            <div className="mb-4 grid grid-cols-2 gap-2 text-xs bg-muted/20 p-3 rounded-xl border">
+              <div>
+                <span className="text-muted-foreground block text-[11px]">Method</span>
+                <span className="font-semibold text-foreground">{paymentMethodLabel(order.method)}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-[11px]">Status</span>
+                <span className="font-semibold text-foreground">{order.status}</span>
+              </div>
+              {order.upiId && (
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Receiver UPI</span>
+                  <span className="font-mono font-medium text-primary">{order.upiId}</span>
+                </div>
+              )}
+              {order.utr && (
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Bank Ref / UTR</span>
+                  <span className="font-mono font-medium text-foreground">{order.utr}</span>
+                </div>
+              )}
+              {order.receiptId && (
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Receipt</span>
+                  <span className="font-mono font-bold text-emerald-600">{order.receiptId}</span>
+                </div>
+              )}
+            </div>
+          )}
+
           {order && (order.paymentUrl || order.checkoutUrl) ? (
             <div className="mb-5 flex flex-col gap-2 rounded-xl border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 flex-1">

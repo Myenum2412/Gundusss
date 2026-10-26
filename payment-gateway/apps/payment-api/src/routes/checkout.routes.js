@@ -471,6 +471,30 @@ export function registerCheckoutRoutes(server, ctx) {
         } catch (e) {}
       }
 
+      // Resolve UTR and payer details from session or attributed observation
+      let utr = session.utr || session.bankReferenceNumber || session.bank_reference_number || '';
+      let payerVpa = session.payerVpa || session.payer_vpa || null;
+      if (session.attributedObservationId) {
+        try {
+          const obsRow = ctx.db.queryOne(
+            'SELECT bank_reference_number, payer_vpa FROM payment_observations WHERE id = ?',
+            [session.attributedObservationId]
+          );
+          if (!utr && obsRow?.bank_reference_number) utr = obsRow.bank_reference_number;
+          if (!payerVpa && obsRow?.payer_vpa) payerVpa = obsRow.payer_vpa;
+        } catch {}
+      }
+
+      const snapshot = session.metadata?.receivingAccountSnapshot;
+      let receivingAccount = session.receivingAccountId
+        ? ctx.accountRepo.findById(session.receivingAccountId)
+        : null;
+      if (!receivingAccount && snapshot?.id) {
+        receivingAccount = ctx.accountRepo.findById(snapshot.id);
+      }
+      const payeeVpa = snapshot?.upiId || receivingAccount?.upiId || session.metadata?.payeeVpa || session.metadata?.upiId || null;
+      const payeeName = snapshot?.payeeName || receivingAccount?.payeeName || session.metadata?.merchantName || merchant?.businessName || 'Merchant';
+
       HttpServer.json(res, 200, {
         id: session.id,
         paymentId: session.id,
@@ -480,6 +504,12 @@ export function registerCheckoutRoutes(server, ctx) {
         amountPaise: session.amountPaise.toString(),
         currency: session.currency,
         status: session.status,
+        method: session.method || 'UPI',
+        payeeVpa,
+        payeeName,
+        payerVpa,
+        utr: utr || null,
+        completedAt: session.completedAt ? (typeof session.completedAt.toISOString === 'function' ? session.completedAt.toISOString() : String(session.completedAt)) : (session.updatedAt ? (typeof session.updatedAt.toISOString === 'function' ? session.updatedAt.toISOString() : String(session.updatedAt)) : new Date().toISOString()),
         studentId: session.metadata?.studentId || null,
         studentName: session.metadata?.studentName || null,
         timeRemainingSeconds: 0,
@@ -487,7 +517,8 @@ export function registerCheckoutRoutes(server, ctx) {
         replacedBySessionId,
         canRestart: session.status !== PaymentStatus.SUCCESS,
         returnUrl: session.returnUrl,
-        branding
+        branding,
+        metadata: session.metadata || {}
       });
       return;
     }
@@ -708,6 +739,8 @@ export function registerCheckoutRoutes(server, ctx) {
       upiUri,
       payeeVpa,
       payeeName,
+      payerVpa: session.payerVpa || null,
+      utr: session.utr || session.bankReferenceNumber || null,
       isMerchantEnabled,
       upiMode,
       upiServerIndicator,

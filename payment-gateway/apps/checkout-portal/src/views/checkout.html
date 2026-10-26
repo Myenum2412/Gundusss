@@ -2017,14 +2017,49 @@
           const rRef = document.getElementById('receiptRefVal');
           if (rRef) rRef.textContent = `#${data.orderId || data.id || PAYMENT_ID}`;
           const rStudent = document.getElementById('receiptStudentVal');
-          const studentName = data.metadata?.studentName || data.customer?.name || (activeCustomer ? activeCustomer.name : '');
-          if (rStudent) rStudent.textContent = studentName || 'Student';
+          const studentName = data.metadata?.studentName || data.studentName || data.customer?.name || (activeCustomer ? activeCustomer.name : '');
+          const studentId = data.metadata?.studentId || data.studentId || '';
+          if (rStudent) rStudent.textContent = studentId ? `${studentName} (${studentId})` : (studentName || 'Student');
           const rMerchant = document.getElementById('receiptMerchantVal');
           if (rMerchant) rMerchant.textContent = data.merchantName || state?.branding?.brandName || 'Institution';
           const rDate = document.getElementById('receiptDateVal');
           if (rDate) rDate.textContent = data.completedAt ? new Date(data.completedAt).toLocaleString('en-IN') : new Date().toLocaleString('en-IN');
           const rMethod = document.getElementById('receiptMethodVal');
-          if (rMethod) rMethod.textContent = data.method || 'UPI';
+          let methodDisplay = data.method || 'UPI';
+          if (methodDisplay === 'CASH_COUNTER' || methodDisplay === 'CASH') methodDisplay = 'Cash at Counter';
+          else if (methodDisplay === 'CARD_COUNTER' || methodDisplay === 'CARD') methodDisplay = 'Card POS';
+          else if (methodDisplay === 'UPI') methodDisplay = 'UPI (Direct)';
+          if (rMethod) rMethod.textContent = methodDisplay;
+
+          const rUpiRow = document.getElementById('receiptUpiRow');
+          const rUpiVal = document.getElementById('receiptUpiIdVal');
+          const upiId = data.payeeVpa || data.metadata?.payeeVpa || state?.payeeVpa || '';
+          if (rUpiVal && upiId) {
+            rUpiVal.textContent = upiId;
+            if (rUpiRow) rUpiRow.style.display = 'flex';
+          } else if (rUpiRow) {
+            rUpiRow.style.display = upiId ? 'flex' : 'none';
+          }
+
+          const rUtrRow = document.getElementById('receiptUtrRow');
+          const rUtrVal = document.getElementById('receiptUtrVal');
+          const utr = data.utr || data.bankReferenceNumber || data.metadata?.utr || '';
+          if (rUtrVal && utr) {
+            rUtrVal.textContent = utr;
+            if (rUtrRow) rUtrRow.style.display = 'flex';
+          } else if (rUtrRow) {
+            rUtrRow.style.display = utr ? 'flex' : 'none';
+          }
+
+          const rPayerRow = document.getElementById('receiptPayerRow');
+          const rPayerVal = document.getElementById('receiptPayerVal');
+          const payer = data.payerVpa || data.metadata?.payerVpa || '';
+          if (rPayerVal && payer) {
+            rPayerVal.textContent = payer;
+            if (rPayerRow) rPayerRow.style.display = 'flex';
+          } else if (rPayerRow) {
+            rPayerRow.style.display = 'none';
+          }
 
           emitTriggerHook('PAYMENT_COMPLETED', { amount: data.amount, method: data.method, isCod: isCodOrder });
 

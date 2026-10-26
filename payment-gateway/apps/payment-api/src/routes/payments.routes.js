@@ -444,8 +444,32 @@ export function registerPaymentRoutes(server, ctx) {
       return;
     }
 
+    let utr = session.utr || session.bankReferenceNumber || session.bank_reference_number || '';
+    let payerVpa = session.payerVpa || session.payer_vpa || null;
+    if (session.attributedObservationId) {
+      try {
+        const obsRow = ctx.db.queryOne(
+          'SELECT bank_reference_number, payer_vpa FROM payment_observations WHERE id = ?',
+          [session.attributedObservationId]
+        );
+        if (!utr && obsRow?.bank_reference_number) utr = obsRow.bank_reference_number;
+        if (!payerVpa && obsRow?.payer_vpa) payerVpa = obsRow.payer_vpa;
+      } catch {}
+    }
+    const snapshot = session.metadata?.receivingAccountSnapshot;
+    let receivingAccount = session.receivingAccountId
+      ? ctx.accountRepo.findById(session.receivingAccountId)
+      : null;
+    if (!receivingAccount && snapshot?.id) {
+      receivingAccount = ctx.accountRepo.findById(snapshot.id);
+    }
+    const payeeVpa = snapshot?.upiId || receivingAccount?.upiId || session.metadata?.payeeVpa || session.metadata?.upiId || null;
+
     HttpServer.json(res, 200, {
       ...publicView,
+      utr: utr || null,
+      payeeVpa: payeeVpa || null,
+      payerVpa: payerVpa || null,
       internalStatus: session.status,
       verificationLevel: session.verificationLevel || 0,
       verificationSources: session.verificationSources || [],

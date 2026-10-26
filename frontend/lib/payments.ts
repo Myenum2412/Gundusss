@@ -22,6 +22,9 @@ export interface PaymentOrder {
   gatewayStatus: string
   method: string
   utr: string
+  upiId?: string
+  payerVpa?: string
+  institutionName?: string
   amount: string
   studentId: string
   studentName: string
@@ -29,6 +32,7 @@ export interface PaymentOrder {
   checkoutUrl: string
   paymentUrl?: string
   receiptId: string | null
+  completedAt?: string
   createdAt: string
   updatedAt: string
   events?: PaymentEvent[]

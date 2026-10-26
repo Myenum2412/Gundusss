@@ -407,7 +407,7 @@ export default function PublicPaymentPage() {
                 <div className="flex justify-between p-2.5">
                   <span className="text-muted-foreground">Student</span>
                   <span className="font-semibold text-foreground">
-                    {order.studentName} ({order.studentId})
+                    {order.studentName} {order.studentId ? `(${order.studentId})` : ''}
                   </span>
                 </div>
                 <div className="flex justify-between p-2.5">
@@ -417,8 +417,46 @@ export default function PublicPaymentPage() {
                   </span>
                 </div>
                 <div className="flex justify-between p-2.5">
-                  <span className="text-muted-foreground">Date</span>
-                  <span className="text-foreground">{formatDate(order.createdAt)}</span>
+                  <span className="text-muted-foreground">Order ID</span>
+                  <span className="font-mono text-foreground">
+                    #{order.orderId}
+                  </span>
+                </div>
+                <div className="flex justify-between p-2.5">
+                  <span className="text-muted-foreground">Payment Method</span>
+                  <span className="font-semibold text-foreground">
+                    {order.method === 'CASH_COUNTER' || order.method === 'CASH'
+                      ? 'Cash at Counter'
+                      : order.method === 'CARD_COUNTER' || order.method === 'CARD'
+                      ? 'Card at Counter'
+                      : 'UPI (Direct)'}
+                  </span>
+                </div>
+                {(order.upiId || upiId) && (
+                  <div className="flex justify-between p-2.5">
+                    <span className="text-muted-foreground">Receiver UPI ID</span>
+                    <span className="font-mono font-semibold text-primary">
+                      {order.upiId || upiId}
+                    </span>
+                  </div>
+                )}
+                {order.utr && (
+                  <div className="flex justify-between p-2.5">
+                    <span className="text-muted-foreground">Bank Ref / UTR</span>
+                    <span className="font-mono font-semibold text-foreground">
+                      {order.utr}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between p-2.5">
+                  <span className="text-muted-foreground">Institution</span>
+                  <span className="text-foreground">
+                    {order.institutionName || profile?.name || 'Institution Office'}
+                  </span>
+                </div>
+                <div className="flex justify-between p-2.5">
+                  <span className="text-muted-foreground">Date &amp; Time</span>
+                  <span className="text-foreground">{formatDate(order.completedAt || order.createdAt)}</span>
                 </div>
               </div>
 

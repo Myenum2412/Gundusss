@@ -126,14 +126,20 @@ interface LocalOrder {
   status: string;
   gatewayStatus: string;
   method: string;
+  upiId?: string;
   utr: string;
+  payerVpa?: string;
   amount: string;
   studentId: string;
   studentName: string;
+  institutionName?: string;
   feeId: number | null;
   checkoutUrl: string;
   paymentUrl?: string;
   receiptId: string | null;
+  completedAt?: string;
+  notes?: string;
+  metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
@@ -142,6 +148,10 @@ interface GatewayPaymentView {
   status?: string;
   internalStatus?: string;
   method?: string;
+  utr?: string;
+  payeeVpa?: string;
+  payerVpa?: string;
+  completedAt?: string;
 }
 
 interface PaymentEventRow {
@@ -159,10 +169,16 @@ interface PaymentEventRow {
 interface ReceiptRecord {
   profileId?: string;
   receiptId: string;
+  orderId?: string;
+  paymentId?: string;
   studentId: string;
   studentName: string;
   amount: string;
   method: string;
+  upiId?: string;
+  utr?: string;
+  payerVpa?: string;
+  institutionName?: string;
   paymentDate: string;
   status: string;
   notes: string;
@@ -516,8 +532,7 @@ export async function createGatewayCheckout(
   }
 
   // A save made while YOUPI PG was offline is retried here, so the new checkout
-  // uses the UPI ID shown in this workspace. A missing or placeholder VPA must
-  // fail before an unpayable session is created.
+  let effectiveUpiId = '';
   if (method === 'UPI') {
     const upi = await getEffectiveCheckoutUpi(input.profileId);
     if (!upi.ready) {
@@ -528,6 +543,7 @@ export async function createGatewayCheckout(
         'UPI_NOT_CONFIGURED'
       );
     }
+    if (upi.upiId) effectiveUpiId = upi.upiId;
   }
 
   const orderId =
@@ -561,6 +577,7 @@ export async function createGatewayCheckout(
       studentName,
       feeId: input.feeId ?? null,
       source: input.source,
+      upiId: effectiveUpiId || undefined,
     },
   };
 
@@ -631,6 +648,8 @@ export async function createGatewayCheckout(
         status: alreadyTerminal ? existing.status : initialStatus,
         gatewayStatus: alreadyTerminal ? existing.gatewayStatus : initialStatus,
         method,
+        upiId: effectiveUpiId || existing.upiId,
+        institutionName: merchantName || existing.institutionName,
         checkoutUrl: paymentUrl || existing.checkoutUrl,
         paymentUrl: paymentUrl || existing.paymentUrl,
         updatedAt: timestamp,
@@ -642,10 +661,12 @@ export async function createGatewayCheckout(
         status: initialStatus,
         gatewayStatus: initialStatus,
         method,
+        upiId: effectiveUpiId,
         utr: '',
         amount: amountStr,
         studentId: input.studentId ?? '',
         studentName,
+        institutionName: merchantName,
         feeId: input.feeId ?? null,
         checkoutUrl: paymentUrl,
         paymentUrl,
@@ -764,10 +785,16 @@ export async function paymentRoutes(app: FastifyInstance) {
           gatewayStatus === 'SUCCESS' && !order.receiptId
             ? 'PROCESSING'
             : gatewayStatus;
+        const gatewayUtr = gateway?.utr || '';
+        const gatewayPayeeVpa = gateway?.payeeVpa || '';
+        const gatewayPayerVpa = gateway?.payerVpa || '';
+
         const changed =
           displayStatus !== order.status ||
           gatewayStatus !== order.gatewayStatus ||
-          (method !== '' && method !== order.method);
+          (method !== '' && method !== order.method) ||
+          (Boolean(gatewayUtr) && gatewayUtr !== order.utr) ||
+          (Boolean(gatewayPayeeVpa) && gatewayPayeeVpa !== order.upiId);
 
         if (changed) {
           const terminal = TERMINAL_STATUSES.has(order.status);
@@ -781,6 +808,9 @@ export async function paymentRoutes(app: FastifyInstance) {
             status: nextStatus,
             gatewayStatus,
             method: method || order.method,
+            utr: gatewayUtr || order.utr,
+            upiId: gatewayPayeeVpa || order.upiId,
+            payerVpa: gatewayPayerVpa || order.payerVpa,
             updatedAt: nowIso(),
           };
           await saveLocalOrder(order);
@@ -998,12 +1028,15 @@ export async function paymentRoutes(app: FastifyInstance) {
     }
     const method = (payload.method ?? '').toUpperCase();
     const utr = payload.utr ?? '';
-    const meta = payload.metadata ?? {};
+    const meta = (payload.metadata ?? {}) as Record<string, unknown>;
     const metaFeeId = parseFeeId(meta.feeId);
     const metaStudentId = typeof meta.studentId === 'string' ? meta.studentId : '';
     const metaStudentName = typeof meta.studentName === 'string' ? meta.studentName : '';
     const metaProfileId =
       typeof meta.profileId === 'string' ? meta.profileId.trim() : '';
+    const metaUpiId = typeof meta.upiId === 'string' ? meta.upiId : (typeof meta.payeeVpa === 'string' ? meta.payeeVpa : '');
+    const metaPayerVpa = typeof meta.payerVpa === 'string' ? meta.payerVpa : '';
+    const metaMerchantName = typeof meta.merchantName === 'string' ? meta.merchantName : '';
 
     // Prefer the profile echoed in metadata, then any stored order. There is no
     // user session on a webhook, so this is the only way to route the payment.
@@ -1032,6 +1065,10 @@ export async function paymentRoutes(app: FastifyInstance) {
     // shows "paid" without its receipt being recorded.
     const statusForOrder = moneyReceived ? 'PROCESSING' : event;
 
+    const effectiveUpiId = metaUpiId || existing?.upiId || '';
+    const effectivePayerVpa = metaPayerVpa || existing?.payerVpa || '';
+    const effectiveMerchantName = metaMerchantName || existing?.institutionName || '';
+
     // Idempotent order upsert (deliveries may be retried).
     const timestamp = nowIso();
     const order: LocalOrder = existing
@@ -1051,10 +1088,15 @@ export async function paymentRoutes(app: FastifyInstance) {
               : event,
           method: method || existing.method,
           utr: utr || existing.utr,
+          upiId: effectiveUpiId,
+          payerVpa: effectivePayerVpa,
+          institutionName: effectiveMerchantName,
           feeId: metaFeeId ?? existing.feeId,
           studentId: existing.studentId || metaStudentId,
           studentName: existing.studentName || metaStudentName,
           amount: existing.amount || payload.amount || '',
+          completedAt: payload.completedAt || existing.completedAt || timestamp,
+          notes: `YOUPI PG · Method: ${method || existing.method || 'UPI'} · UTR: ${utr || existing.utr || 'N/A'}`,
           updatedAt: timestamp,
         }
       : {
@@ -1064,13 +1106,18 @@ export async function paymentRoutes(app: FastifyInstance) {
           status: statusForOrder,
           gatewayStatus: event,
           method,
+          upiId: effectiveUpiId,
           utr,
+          payerVpa: effectivePayerVpa,
+          institutionName: effectiveMerchantName,
           amount: payload.amount ?? '',
           studentId: metaStudentId,
           studentName: metaStudentName,
           feeId: metaFeeId,
           checkoutUrl: '',
           receiptId: null,
+          completedAt: payload.completedAt || timestamp,
+          notes: `YOUPI PG · Method: ${method || 'UPI'} · UTR: ${utr || 'N/A'}`,
           createdAt: timestamp,
           updatedAt: timestamp,
         };
@@ -1140,14 +1187,23 @@ export async function paymentRoutes(app: FastifyInstance) {
           }
 
           const receiptId = await nextReceiptId(profileId);
-          const notes = `YOUPI PG${utr ? ` · UTR ${utr}` : ''} · Order ${orderId}`;
+          const receiptMethodName = receiptMethod(method || latest.method);
+          const receiptUpi = latest.upiId || metaUpiId;
+          const receiptUtr = utr || latest.utr;
+          const notes = `YOUPI PG · Method: ${receiptMethodName}${receiptUpi ? ` · UPI: ${receiptUpi}` : ''}${receiptUtr ? ` · UTR: ${receiptUtr}` : ''} · Order: ${orderId}`;
           const receipt: ReceiptRecord = {
             profileId,
             receiptId,
+            orderId,
+            paymentId: latest.paymentId || undefined,
             studentId: latest.studentId || '',
             studentName: latest.studentName || metaStudentName,
             amount: payload.amount ?? latest.amount ?? '',
-            method: receiptMethod(method || latest.method),
+            method: receiptMethodName,
+            upiId: receiptUpi || undefined,
+            utr: receiptUtr || undefined,
+            payerVpa: latest.payerVpa || undefined,
+            institutionName: latest.institutionName || undefined,
             paymentDate: paymentDate(payload.completedAt),
             status: 'Paid',
             notes,
