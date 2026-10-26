@@ -186,6 +186,9 @@ function isPublicRoute(method: string, path: string): boolean {
   if (path.startsWith('/api/reminders/cron/')) return true;
   // Reminder queue worker (Python) authenticates with X-Worker-Key per call.
   if (path.startsWith('/api/queue/')) return true;
+  // Payment gateway -> fees WhatsApp bridge. The route itself validates the
+  // shared X-WhatsApp-Bridge-Token, so it cannot use the browser session guard.
+  if (path === '/api/whatsapp/internal/send' && method === 'POST') return true;
   return false;
 }
 
