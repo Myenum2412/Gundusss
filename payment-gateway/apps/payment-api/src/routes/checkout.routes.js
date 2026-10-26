@@ -374,7 +374,9 @@ async function checkUpiServerHealth(ctx, enabledMethods = [], sellingMode = 'OFF
     reason: 'Both Gmail OAuth and SMS Gateway are offline or unconfigured',
     smsHealthy: false,
     gmailHealthy: false,
-    warning: 'It is not recommended to pay by UPI right now as the server is facing downtime. We recommend paying by cash instead.',
+    warning: hasCash
+      ? 'It is not recommended to pay by UPI right now as the server is facing downtime. We recommend paying by cash instead.'
+      : 'It is not recommended to pay by UPI right now as the server is facing downtime.',
     recommendedAlternative: hasCash ? 'CASH' : null
   };
 }
@@ -455,10 +457,13 @@ export function registerCheckoutRoutes(server, ctx) {
         id: session.id,
         paymentId: session.id,
         orderId: session.orderId,
+        merchantName: session.metadata?.merchantName || merchant?.businessName || 'Merchant',
         amount: toRupeesString(session.amountPaise),
         amountPaise: session.amountPaise.toString(),
         currency: session.currency,
         status: session.status,
+        studentId: session.metadata?.studentId || null,
+        studentName: session.metadata?.studentName || null,
         timeRemainingSeconds: 0,
         isTerminal: true,
         replacedBySessionId,
@@ -658,11 +663,14 @@ export function registerCheckoutRoutes(server, ctx) {
     HttpServer.json(res, 200, {
       paymentId: session.id,
       orderId: session.orderId,
-      merchantName: merchant?.businessName || 'Merchant',
+      merchantName: session.metadata?.merchantName || merchant?.businessName || 'Merchant',
       amount: toRupeesString(session.amountPaise),
       amountPaise: session.amountPaise.toString(),
       currency: session.currency,
       status: session.status,
+      studentId: session.metadata?.studentId || null,
+      studentName: session.metadata?.studentName || customer?.name || null,
+      description: session.description || session.metadata?.description || null,
       reason: session.metadata?.cancelledReason || null,
       cancelledReason: session.metadata?.cancelledReason || null,
       metadata: publicMetadata,

@@ -34,6 +34,22 @@
         <div class="ypg-pc-price-card">
           <div class="ypg-pc-price-label">Price Summary</div>
           <div class="ypg-pc-price-val" id="pcPriceSummaryAmount">₹{{AMOUNT}}</div>
+
+          <!-- Student & Order Details Container -->
+          <div id="sidebarStudentDetails" style="margin-top:10px; padding-top:10px; border-top:1px dashed #e2e8f0; font-size:11.5px; display:{{STUDENT_DETAILS_DISPLAY}};">
+            <div id="sidebarStudentNameRow" style="display:flex; justify-content:space-between; margin-bottom:5px; color:#64748b;">
+              <span>Student</span>
+              <strong id="sidebarStudentName" style="color:#0f172a; text-align:right;">{{STUDENT_NAME}}</strong>
+            </div>
+            <div id="sidebarStudentIdRow" style="display:flex; justify-content:space-between; margin-bottom:5px; color:#64748b;">
+              <span>Student ID</span>
+              <strong id="sidebarStudentId" style="color:#0f172a; font-family:monospace;">{{STUDENT_ID}}</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; color:#64748b;">
+              <span>Reference</span>
+              <span id="sidebarOrderRef" style="color:#0f172a; font-family:monospace; font-size:11px;">#{{ORDER_ID}}</span>
+            </div>
+          </div>
         </div>
 
         <!-- User Identity Row -->

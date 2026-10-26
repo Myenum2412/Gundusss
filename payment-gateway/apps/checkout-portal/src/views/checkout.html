@@ -1712,6 +1712,41 @@
         el.textContent = data.merchantName || 'Merchant';
       });
 
+      // Student & Order Details in Sidebar & Drawer
+      const urlParams = new URLSearchParams(window.location.search || '');
+      const studentId = data.studentId || data.metadata?.studentId || urlParams.get('student') || '';
+      const studentName = data.studentName || data.metadata?.studentName || data.customer?.name || '';
+      const orderRef = data.orderId || data.id || '';
+
+      const sDetails = document.getElementById('sidebarStudentDetails');
+      const sNameEl = document.getElementById('sidebarStudentName');
+      const sNameRow = document.getElementById('sidebarStudentNameRow');
+      const sIdEl = document.getElementById('sidebarStudentId');
+      const sIdRow = document.getElementById('sidebarStudentIdRow');
+      const sOrderEl = document.getElementById('sidebarOrderRef');
+
+      if (sDetails) {
+        if (studentId || studentName || orderRef) {
+          sDetails.style.display = 'block';
+          if (sNameEl) sNameEl.textContent = studentName || '—';
+          if (sNameRow) sNameRow.style.display = studentName ? 'flex' : 'none';
+          if (sIdEl) sIdEl.textContent = studentId || '—';
+          if (sIdRow) sIdRow.style.display = studentId ? 'flex' : 'none';
+          if (sOrderEl) sOrderEl.textContent = orderRef ? (String(orderRef).startsWith('#') ? orderRef : `#${orderRef}`) : '—';
+        } else {
+          sDetails.style.display = 'none';
+        }
+      }
+
+      const dNameEl = document.getElementById('drawerStudentName');
+      const dNameRow = document.getElementById('drawerStudentNameRow');
+      const dIdEl = document.getElementById('drawerStudentId');
+      const dIdRow = document.getElementById('drawerStudentIdRow');
+      if (dNameEl && studentName) dNameEl.textContent = studentName;
+      if (dNameRow) dNameRow.style.display = studentName ? 'flex' : 'none';
+      if (dIdEl && studentId) dIdEl.textContent = studentId;
+      if (dIdRow) dIdRow.style.display = studentId ? 'flex' : 'none';
+
       // Update UPI Server Health Indicator (3-Tier Model: Green, Yellow, Red)
       const serverIndicator = data.upiServerIndicator || { status: 'WORKING', tier: 'GREEN', label: 'Server Is Working', isWorking: true };
       const healthPill = document.getElementById('upiServerHealthIndicator');

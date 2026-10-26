@@ -509,11 +509,20 @@ export async function createGatewayCheckout(
     input.orderId?.trim() || `FEE-${Date.now()}-${randomUUID().slice(0, 8)}`;
   const amountStr = amount.toFixed(2);
 
+  let merchantName = 'Institute Office';
+  try {
+    const profile = await getProfile(input.profileId);
+    if (profile?.name?.trim()) {
+      merchantName = profile.name.trim();
+    }
+  } catch {}
+
   const payload = {
     orderId,
     amount: amountStr,
     currency: 'INR',
     method,
+    merchantName,
     customer: {
       name: studentName,
       ...(input.email ? { email: input.email } : {}),
@@ -522,6 +531,7 @@ export async function createGatewayCheckout(
     description: input.description ?? `Fee payment for ${studentName}`,
     metadata: {
       profileId: input.profileId,
+      merchantName,
       studentId: input.studentId ?? '',
       studentName,
       feeId: input.feeId ?? null,

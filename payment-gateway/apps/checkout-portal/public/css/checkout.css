@@ -2253,7 +2253,9 @@
         display: none !important;
       }
 
-      .ypg-footer {
+      .ypg-footer,
+      .ypg-sticky-footer,
+      #ypgStickyFooter {
         display: none !important;
       }
 
@@ -2638,7 +2640,7 @@
         overflow-y: auto !important;
         display: flex !important;
         flex-direction: column !important;
-        min-width: 0 !important;
+        min-width: 320px !important;
         scrollbar-width: thin !important;
         scrollbar-color: #cbd5e1 transparent !important;
       }

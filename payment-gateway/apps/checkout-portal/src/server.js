@@ -220,16 +220,21 @@ export class CheckoutServer {
     }
   }
 
-  renderHtml(paymentId, state) {
+  renderHtml(paymentId, state, url = null) {
     let html = this.loadTemplateWithPartials();
 
     const appName = state?.branding?.appName || 'YouPI PG';
     const primaryColor = state?.branding?.primaryColor || '#0b63e5';
-    const merchantName = state?.merchantName || 'Merchant Checkout';
+    const merchantName = state?.metadata?.merchantName || state?.merchantName || 'Merchant Checkout';
     const orderId = state?.orderId || '';
     const logoUrl = state?.branding?.logoUrl || '';
     const sidebarNotice = state?.branding?.sidebarNotice || 'Fast & Secure 256-Bit Encrypted Payments';
     const counterInstructions = state?.branding?.counterInstructions || 'Please visit the billing counter and present this screen to the cashier.';
+
+    const queryStudentId = (url && typeof url.searchParams?.get === 'function') ? (url.searchParams.get('student') || '') : '';
+    const studentId = state?.studentId || state?.metadata?.studentId || queryStudentId || '';
+    const studentName = state?.studentName || state?.metadata?.studentName || state?.customer?.name || '';
+
     // Leave the VPA blank when the merchant has not configured one. The old
     // `merchant@upi` fallback looked real but could never receive a payment.
     const vpa = state?.payeeVpa || state?.vpa || '';
@@ -238,7 +243,7 @@ export class CheckoutServer {
     // This avoids cross-origin blocking, CORS errors, and tunnel DNS resolution issues.
     const clientApiBase = '';
 
-    const indicator = state?.upiServerIndicator || { status: 'ISSUES', tier: 'RED', label: 'Server Facing Issues' };
+    const indicator = state?.upiServerIndicator || { status: 'WORKING', tier: 'GREEN', label: 'Server Is Working' };
     const tier = indicator.tier || (indicator.status === 'WORKING' ? 'GREEN' : (indicator.status === 'BUSY' ? 'YELLOW' : 'RED'));
     const healthClass = tier === 'GREEN' ? 'is-working' : (tier === 'YELLOW' ? 'is-busy' : 'is-issues');
     const healthLabel = indicator.label || (tier === 'GREEN' ? 'Server Is Working' : (tier === 'YELLOW' ? 'UPI Server Busy' : 'Server Facing Issues'));
@@ -269,6 +274,11 @@ export class CheckoutServer {
       PRIMARY_COLOR: primaryColor,
       MERCHANT_NAME: merchantName,
       ORDER_ID: orderId,
+      STUDENT_NAME: studentName || '—',
+      STUDENT_ID: studentId || '—',
+      STUDENT_DETAILS_DISPLAY: (studentId || studentName || orderId) ? 'block' : 'none',
+      DRAWER_STUDENT_NAME_DISPLAY: studentName ? 'flex' : 'none',
+      DRAWER_STUDENT_ID_DISPLAY: studentId ? 'flex' : 'none',
       AMOUNT: state?.amount || '0.00',
       VPA: vpa,
       LOGO_URL: logoUrl,
@@ -463,7 +473,7 @@ export class CheckoutServer {
           return;
         }
 
-        const rendered = this.renderHtml(paymentId, state);
+        const rendered = this.renderHtml(paymentId, state, url);
         res.writeHead(200, {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',

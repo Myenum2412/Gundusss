@@ -361,6 +361,7 @@ export function registerPaymentRoutes(server, ctx) {
 
     const sessionMetadata = {
       ...(body.metadata || {}),
+      ...(body.merchantName ? { merchantName: body.merchantName } : {}),
       ...(receivingAccountSnapshot ? { receivingAccountSnapshot } : {})
     };
 
