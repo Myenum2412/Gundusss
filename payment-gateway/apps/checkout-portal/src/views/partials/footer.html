@@ -17,9 +17,15 @@
       </button>
     </div>
 
-    <!-- Continue CTA Button (Triggers Verification - only appears after 2 minutes elapsed) -->
+    <!-- Live Auto-Detection Status (replaces manual button) -->
+    <div class="ypg-auto-detect-pill" id="autoDetectPill" style="display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:#059669; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:9999px; padding:6px 14px;">
+      <span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#10b981;"></span>
+      <span>Auto-detecting payment...</span>
+    </div>
+
+    <!-- Manual CTA hidden per requirements (system auto-detects transfers) -->
     <button type="button" class="ypg-btn-continue" id="btnContinuePayment" onclick="submitPaymentDone()"
-      style="display:none;">
+      style="display:none !important;">
       Payment Done — Check My Payment
     </button>
   </div>
