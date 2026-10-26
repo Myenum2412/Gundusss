@@ -27,10 +27,35 @@ export function registerPaymentRoutes(server, ctx) {
     return ctx.checkoutBaseUrl || 'http://localhost:7000';
   }
 
+  // The gateway exposes a fixed payment-mode vocabulary. Normalise the common
+  // aliases and reject anything else instead of silently charging it as UPI.
+  const METHOD_ALIASES = { CASH: 'CASH_COUNTER', CARD: 'CARD_COUNTER' };
+  const ALLOWED_METHODS = new Set(['UPI', 'COD', 'CASH_COUNTER', 'CARD_COUNTER']);
+  const PLACEHOLDER_VPAS = new Set([
+    'merchant@upi',
+    'demo@upi',
+    'test@upi',
+    'sample@upi',
+    'example@upi',
+    'yourupi@bank',
+    'upi@upi'
+  ]);
+
   // POST /api/v1/payments
   server.post('/api/v1/payments', async (req, res) => {
     const body = await HttpServer.parseBody(req);
     const idempotencyKey = req.headers['idempotency-key'] || body.idempotencyKey;
+
+    const requestedMethod = String(body.method || 'UPI').trim().toUpperCase();
+    const method = METHOD_ALIASES[requestedMethod] || requestedMethod;
+    if (!ALLOWED_METHODS.has(method)) {
+      HttpServer.json(res, 400, {
+        error: `Payment mode '${body.method}' is not allowed. Use UPI, COD, CASH_COUNTER, or CARD_COUNTER.`,
+        code: 'PAYMENT_MODE_NOT_ALLOWED'
+      });
+      return;
+    }
+    body.method = method;
 
     // Resolve merchant (default to first/demo merchant if none passed in header)
     const merchantId = req.headers['x-merchant-id'] || body.merchantId;
@@ -248,7 +273,7 @@ export function registerPaymentRoutes(server, ctx) {
       body.orderId = body.orderId.replace(/-R\d+$/, '');
     }
 
-    const isCounterPayment = body.method === 'CASH_COUNTER' || body.method === 'CARD_COUNTER';
+    const isCounterPayment = method === 'CASH_COUNTER' || method === 'CARD_COUNTER';
 
     let receivingAccountId = null;
     let receivingAccountSnapshot = null;
@@ -256,7 +281,22 @@ export function registerPaymentRoutes(server, ctx) {
       // Resolve active receiving account for UPI
       const receivingAccount = ctx.accountRepo.findActiveForMerchant(merchant.id);
       if (!receivingAccount) {
-        HttpServer.json(res, 500, { error: 'No active UPI receiving account configured for merchant.' });
+        HttpServer.json(res, 500, {
+          error: 'No active UPI receiving account configured for merchant.',
+          code: 'UPI_NOT_CONFIGURED'
+        });
+        return;
+      }
+      // The migration seeds `merchant@upi` for local demos. It must never be
+      // offered to a real payer, because no bank owns that handle.
+      const rejectPlaceholder =
+        process.env.NODE_ENV === 'production' ||
+        process.env.YOUPI_REJECT_PLACEHOLDER_VPA === 'true';
+      if (rejectPlaceholder && PLACEHOLDER_VPAS.has(String(receivingAccount.upiId || '').trim().toLowerCase())) {
+        HttpServer.json(res, 500, {
+          error: 'The active UPI receiving account is a placeholder. Configure the merchant UPI ID before collecting payments.',
+          code: 'UPI_NOT_CONFIGURED'
+        });
         return;
       }
       receivingAccountId = receivingAccount.id;
@@ -336,7 +376,7 @@ export function registerPaymentRoutes(server, ctx) {
       orderId: body.orderId,
       amountPaise,
       currency: body.currency || 'INR',
-      method: body.method || 'UPI',
+      method,
       status: initialStatus,
       returnUrl: body.returnUrl || null,
       idempotencyKey: idempotencyKey || null,

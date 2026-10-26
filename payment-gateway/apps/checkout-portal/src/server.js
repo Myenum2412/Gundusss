@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generateQrSvg } from '@youpi/core';
-import { getInternalServiceToken } from '@youpi/common';
+import { getInternalServiceToken, isValidVpa } from '@youpi/common';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -227,7 +227,9 @@ export class CheckoutServer {
     const logoUrl = state?.branding?.logoUrl || '';
     const sidebarNotice = state?.branding?.sidebarNotice || 'Fast & Secure 256-Bit Encrypted Payments';
     const counterInstructions = state?.branding?.counterInstructions || 'Please visit the billing counter and present this screen to the cashier.';
-    const vpa = state?.payeeVpa || state?.vpa || 'merchant@upi';
+    // Leave the VPA blank when the merchant has not configured one. The old
+    // `merchant@upi` fallback looked real but could never receive a payment.
+    const vpa = state?.payeeVpa || state?.vpa || '';
 
     // In production and localhost, use relative '' so browser requests hit the checkout portal /api proxy
     // This avoids cross-origin blocking, CORS errors, and tunnel DNS resolution issues.
@@ -405,7 +407,27 @@ export class CheckoutServer {
       if (qrMatch) {
         const paymentId = qrMatch[1];
         const state = await this.fetchPaymentState(paymentId);
-        const upiUri = state?.upiUri || `upi://pay?pa=${encodeURIComponent(state?.payeeVpa || 'merchant@upi')}&pn=${encodeURIComponent(state?.merchantName || 'Store')}&am=${encodeURIComponent(state?.amount || '100.00')}&tn=${encodeURIComponent(paymentId)}`;
+        const payeeVpa = state?.payeeVpa || state?.vpa || '';
+        let upiUri = state?.upiUri || '';
+
+        if (!upiUri && isValidVpa(payeeVpa)) {
+          const params = new URLSearchParams();
+          params.set('pa', payeeVpa.trim());
+          params.set('pn', state?.merchantName || 'Store');
+          params.set('am', state?.amount || '0.00');
+          params.set('cu', 'INR');
+          params.set('tn', paymentId);
+          upiUri = `upi://pay?${params.toString()}`;
+        }
+
+        if (!state || !upiUri) {
+          res.writeHead(404, { 'Content-Type': 'application/json', ...BASE_SECURITY_HEADERS });
+          res.end(JSON.stringify({
+            error: 'UPI checkout is not configured for this merchant.',
+            code: 'UPI_NOT_CONFIGURED'
+          }));
+          return;
+        }
 
         const svg = generateQrSvg(upiUri, 220);
         res.writeHead(200, {
