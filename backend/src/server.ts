@@ -25,6 +25,7 @@ import { paymentRoutes } from './routes/payments.js';
 import { paymentSettingsRoutes } from './routes/payment-settings.js';
 import { businessProfileRoutes } from './routes/business-profile.js';
 import { reminderRoutes } from './routes/reminders.js';
+import { hydrateQueue } from './queue.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -196,6 +197,7 @@ try {
     );
   }
   await ensureAppwriteSeed();
+  await hydrateQueue();
   await app.listen({ port, host });
   console.log(`Backend listening on http://${host}:${port}`);
   console.log(

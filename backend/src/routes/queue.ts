@@ -46,7 +46,7 @@ export async function queueRoutes(app: FastifyInstance) {
   // POST /api/queue/claim - the Python worker asks for the next reminder job
   app.post('/api/queue/claim', async (req, reply) => {
     if (!requireWorker(req, reply)) return;
-    const job = claimJob();
+    const job = await claimJob();
     if (!job) {
       return { data: { job: null } };
     }
@@ -104,11 +104,11 @@ export async function queueRoutes(app: FastifyInstance) {
     if (release) {
       // WhatsApp was offline / send loop aborted: put the job back so it is
       // retried later instead of being lost.
-      finishJob(jobId, { release: true });
+      await finishJob(jobId, { release: true });
       return { data: { released: true } };
     }
 
-    const outcome = finishJob(jobId);
+    const outcome = await finishJob(jobId);
     if (!outcome.existed) {
       // Already finished by an earlier result post or cleaned up.
       return { data: { merged: false } };
@@ -122,7 +122,7 @@ export async function queueRoutes(app: FastifyInstance) {
 
   // GET /api/queue/depth - lightweight visibility (session-authenticated)
   app.get('/api/queue/depth', async () => {
-    return { data: queueDepth() };
+    return { data: await queueDepth() };
   });
 }
 

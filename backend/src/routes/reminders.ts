@@ -437,7 +437,7 @@ async function executeMonthlyReminders(
   };
 
   if (workerMode && isWaReady && jobItems.length > 0) {
-    enqueueReminderJob({
+    await enqueueReminderJob({
       jobId: runLog.id,
       profileId,
       source,

@@ -75,7 +75,7 @@ const waLabel: Record<WaState["status"], string> = {
 export default function SettingsPage() {
   const { can } = useAuth()
   const [activeTab, setActiveTab] = useState<"all" | "upi" | "whatsapp" | "dropdowns" | "cron" | "gateway">("upi")
-  // Session token (localStorage) — read after mount so SSR renders safely.
+  // Session token (first-party cookie) — read after mount so SSR renders safely.
   const [sessionToken, setSessionToken] = useState<string | null>(null)
   useEffect(() => {
     setSessionToken(getToken())

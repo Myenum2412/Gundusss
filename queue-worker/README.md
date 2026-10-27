@@ -6,9 +6,10 @@ WhatsApp run can never block or crash the API.
 
 ## How it connects
 
-- Backend (Baileys engine, no browser) keeps a durable job queue at
-  `backend/.queue/queue.json` (`POST /api/queue/claim|send|result`, protected
-  by the `X-Worker-Key` header).
+- Backend (Baileys engine, no browser) keeps the durable job queue in
+  **Appwrite** (`payment_settings` → `<profileId>:reminder_queue`). The worker
+  only talks to `POST /api/queue/claim|send|result`, protected by the
+  `X-Worker-Key` header. No local queue file is used.
 - The monthly cron / "Run Reminder Now" enqueue a job and return instantly
   with status `QUEUED`; the worker delivers and merges results back into the
   run log.

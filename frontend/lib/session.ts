@@ -187,24 +187,76 @@ export function canWriteStored(): boolean {
 }
 
 // Remove data written by older builds. Appwrite is now the only source of
-// truth, so any cached collections or account details must not linger in the
-// browser where a different account could read them.
+// truth, so cached collections and account details must not linger in the
+// browser where a different account could read them. This also runs on boot
+// and on every sign-in so leftover keys from any previous release are purged.
+const LEGACY_STORAGE_KEYS = [
+  "auth_token",
+  "auth_user",
+  "token",
+  "user",
+  "session",
+  "profile",
+  "profile_id",
+  "active_profile",
+  "students",
+  "student_groups",
+  "fee_structures",
+  "fees",
+  "receipts",
+  "announcements",
+  "dropdown_options",
+  "business_profile",
+  "payment_settings",
+  "reminder_settings",
+  "wa_state",
+]
+
+const LEGACY_STORAGE_PREFIXES = [
+  "fees_",
+  "myfees_",
+  "fee_",
+  "student",
+  "receipt",
+  "announcement",
+  "dropdown_",
+  "business_",
+  "auth_",
+  "profile_",
+  "payment_",
+  "youpi_",
+]
+
+function isLegacyAppKey(key: string): boolean {
+  const lower = key.toLowerCase()
+  return (
+    LEGACY_STORAGE_KEYS.includes(lower) ||
+    LEGACY_STORAGE_PREFIXES.some((prefix) => lower.startsWith(prefix))
+  )
+}
+
 export function clearLegacyLocalData(): void {
   if (!hasWindow()) return
-  const keys = [
-    "auth_token",
-    "auth_user",
-    "students",
-    "student_groups",
-    "fee_structures",
-    "receipts",
-    "announcements",
-    "dropdown_options",
-    "business_profile",
-  ]
+
   try {
-    for (const key of keys) window.localStorage.removeItem(key)
+    const storage = window.localStorage
+    const stale: string[] = []
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index)
+      if (key && isLegacyAppKey(key)) stale.push(key)
+    }
+    for (const key of stale) storage.removeItem(key)
+    // Remove fixed keys even when enumeration is unavailable.
+    for (const key of LEGACY_STORAGE_KEYS) storage.removeItem(key)
   } catch {
     // Storage may be blocked; there is nothing else to clean up.
+  }
+
+  // No current code path uses sessionStorage. Clearing it removes any data
+  // left by older builds without touching other origins' storage.
+  try {
+    window.sessionStorage.clear()
+  } catch {
+    // ignore
   }
 }

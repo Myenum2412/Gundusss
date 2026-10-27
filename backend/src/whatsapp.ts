@@ -10,7 +10,7 @@
  * working unchanged: getWaState / startWa / logoutWa / sendWaMessage /
  * normalizeWaNumber.
  */
-import { rmSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { rmSync, mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { randomBytes } from 'node:crypto';
@@ -44,6 +44,15 @@ if (!existsSync(AUTH_DIR)) {
   }
 }
 
+// Older builds persisted the E2EE message cache to disk. Purge that file so no
+// WhatsApp content is left on the server outside Appwrite.
+try {
+  const legacyMessages = path.join(AUTH_DIR, 'recent_messages.json');
+  if (existsSync(legacyMessages)) rmSync(legacyMessages, { force: true });
+} catch {
+  // ignore
+}
+
 export type WaStatus =
   | 'idle'
   | 'starting'
@@ -62,31 +71,16 @@ let restartAttempts = 0;
 let reconnectTimer: any = null;
 
 // ---------------------------------------------------------------------------
-// E2EE retry caches & persistent message store
+// E2EE retry caches
 // Prevents "Waiting for this message. This may take a while" by answering
 // Signal protocol retry requests when WhatsApp recipients need session keys.
+// These caches are process-local on purpose: the app's business data lives in
+// Appwrite, and no message content is written to the server filesystem.
 // ---------------------------------------------------------------------------
 const NodeCache = require('node-cache');
 const msgRetryCounterCache = new NodeCache({ stdTTL: 3600, checkperiod: 600 });
 const userDevicesCache = new NodeCache({ stdTTL: 86400, checkperiod: 3600 });
 const messageStore = new NodeCache({ stdTTL: 14 * 86400, checkperiod: 3600 });
-
-const MESSAGES_CACHE_FILE = path.join(AUTH_DIR, 'recent_messages.json');
-
-try {
-  if (existsSync(MESSAGES_CACHE_FILE)) {
-    const raw = readFileSync(MESSAGES_CACHE_FILE, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') {
-      for (const [k, v] of Object.entries(parsed)) {
-        messageStore.set(k, v);
-      }
-      console.log(`[wa] Loaded ${Object.keys(parsed).length} cached messages for retry`);
-    }
-  }
-} catch {
-  // ignore
-}
 
 function hasActualContent(msg: any): boolean {
   if (!msg || typeof msg !== 'object') return false;
@@ -100,29 +94,11 @@ function hasActualContent(msg: any): boolean {
   );
 }
 
-let saveMsgTimer: any = null;
 function persistMessage(keyId: string, remoteJid: string, messageProto: any) {
   if (!keyId || !messageProto || !hasActualContent(messageProto)) return;
   messageStore.set(keyId, messageProto);
   if (remoteJid) {
     messageStore.set(`${remoteJid}:${keyId}`, messageProto);
-  }
-  if (!saveMsgTimer) {
-    saveMsgTimer = setTimeout(() => {
-      saveMsgTimer = null;
-      try {
-        const keys = messageStore.keys();
-        const dump: Record<string, any> = {};
-        const recent = keys.slice(-1000);
-        for (const k of recent) {
-          dump[k] = messageStore.get(k);
-        }
-        writeFileSync(MESSAGES_CACHE_FILE, JSON.stringify(dump), 'utf-8');
-      } catch {
-        // ignore disk write errors
-      }
-    }, 1000);
-    saveMsgTimer.unref?.();
   }
 }
 

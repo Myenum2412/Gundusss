@@ -29,8 +29,6 @@ npm run gateway:install
 2. Create the Appwrite database and tables:
 ```bash
 npm run appwrite:setup --workspace=backend
-# Optional, once: import data from the previous Postgres/PGlite setup
-npm run appwrite:migrate --workspace=backend
 ```
 
 3. Put the **same** random token in both env files:
@@ -114,27 +112,17 @@ The database or tables have not been created for this project. Run
 `next dev` and `next build` both use `.next`. Don't run `npm run build` while the
 dev server is running; restart `npm run dev --workspace=frontend` afterwards.
 
-### Importing existing Postgres/PGlite data
+### Data storage
 
-The backend no longer reads Postgres. The one-time import script reads the old
-database and upserts every row into Appwrite. It never deletes Appwrite data, so
-it is safe to re-run.
+All application data — profiles, students, fees, receipts, payment orders,
+payment settings, reminder logs, and the WhatsApp reminder queue — is stored in
+**Appwrite**. The backend keeps no local database or JSON data store, and the
+frontend stores no business data in the browser. Deleting or redeploying the
+server does not lose application data; only the WhatsApp pairing session
+(`backend/.baileys_auth/`) is local, and it can be re-paired at any time.
 
-```bash
-# Terminal 1: start the embedded PGlite used by the previous dev setup
-npm run legacy:pglite --workspace=backend
-
-# Terminal 2: import it into Appwrite (auto-detects port 5433)
-npm run appwrite:migrate --workspace=backend
-
-# Or import a real Postgres connection:
-# PowerShell:
-$env:MIGRATE_DATABASE_URL="postgres://fees:fees@localhost:5432/fees"
-npm run appwrite:migrate --workspace=backend
-```
-
-Keep `backend/.pgdata/` until the import has been verified. After that it is no
-longer needed.
+`backend/.pgdata*` and `backend/.wwebjs_*` are leftovers from the retired
+Postgres/Puppeteer setup. They are ignored by git and safe to delete.
 
 ## Payments (YOUPI PG)
 
