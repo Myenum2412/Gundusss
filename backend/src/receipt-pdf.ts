@@ -221,9 +221,9 @@ function drawMonogram(
       .map((word) => word.charAt(0).toUpperCase())
       .join('') || 'MF';
 
-  doc.roundedRect(x, y, size, size, 7).fill(COLORS.primary);
+  doc.roundedRect(x, y, size, size, 7).fillAndStroke('#ffffff', '#93c5fd');
   doc
-    .fillColor('#ffffff')
+    .fillColor(COLORS.primary)
     .font('Helvetica-Bold')
     .fontSize(size * 0.36)
     .text(initials, x, y + size / 2 - size * 0.18, {
@@ -310,11 +310,11 @@ export async function generateReceiptPdf(data: ReceiptPdfData): Promise<Buffer> 
     const headerX = 24;
     const headerY = 24;
     const headerW = PAGE_WIDTH - headerX * 2;
-    const headerH = 104;
+    const headerH = 116;
 
     doc.roundedRect(headerX, headerY, headerW, headerH, 8).fill(COLORS.primary);
 
-    drawLogo(doc, logo, organizationName, 38, 48, 56);
+    drawLogo(doc, logo, organizationName, 38, 52, 56);
 
     const headerTextX = 108;
     const headerTextW = 252;
@@ -359,16 +359,24 @@ export async function generateReceiptPdf(data: ReceiptPdfData): Promise<Buffer> 
     let orgY = 73;
 
     if (addressLine) {
-      doc
-        .fillColor('#dbeafe')
-        .font('Helvetica')
-        .fontSize(7.5)
-        .text(addressLine, headerTextX, orgY, {
-          width: headerTextW,
-          height: 10,
-          ellipsis: true,
-        });
-      orgY += 12;
+      doc.fillColor('#dbeafe').font('Helvetica').fontSize(7.2);
+      const addressHeight = Math.min(
+        20,
+        Math.max(
+          10,
+          doc.heightOfString(addressLine, {
+            width: headerTextW,
+            lineGap: 1.5,
+          })
+        )
+      );
+      doc.text(addressLine, headerTextX, orgY, {
+        width: headerTextW,
+        height: addressHeight,
+        ellipsis: true,
+        lineGap: 1.5,
+      });
+      orgY += addressHeight + 4;
     }
 
     if (contactPhoneEmail.length > 0) {
@@ -485,7 +493,7 @@ export async function generateReceiptPdf(data: ReceiptPdfData): Promise<Buffer> 
     // ---------------------------------------------------------------------
     // Student + payment cards
     // ---------------------------------------------------------------------
-    let y = 144;
+    let y = 156;
     const cardW = (CONTENT_WIDTH - 14) / 2;
     const cardH = 124;
 
@@ -582,7 +590,7 @@ export async function generateReceiptPdf(data: ReceiptPdfData): Promise<Buffer> 
     // ---------------------------------------------------------------------
     // Fee particulars table
     // ---------------------------------------------------------------------
-    y = 284;
+    y = 296;
 
     doc
       .fillColor(COLORS.primary)
@@ -596,7 +604,7 @@ export async function generateReceiptPdf(data: ReceiptPdfData): Promise<Buffer> 
       .fontSize(7.5)
       .text('Breakdown of the amount received', MARGIN, y + 12);
 
-    const tableY = 306;
+    const tableY = 318;
     const tableHeaderH = 24;
     const rowH = 32;
 
