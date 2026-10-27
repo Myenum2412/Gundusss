@@ -181,6 +181,7 @@ export async function buildReceiptPdfData(
         city: bp.location?.city,
         state: bp.location?.state,
         pincode: bp.location?.postalCode || bp.location?.pincode,
+        logoUrl: bp.media?.logoUrl || '',
       };
     }
   } catch {
@@ -320,6 +321,7 @@ export async function buildReceiptPdfData(
       pincode: orgData.pincode || '',
       upiId: orgData.upiId || '',
       authorizedSignatory: orgData.authorizedSignatory || 'Accounts Officer',
+      logoUrl: orgData.logoUrl || '',
     },
   };
 }

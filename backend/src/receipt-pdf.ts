@@ -37,18 +37,237 @@ export interface ReceiptPdfData {
     upiId?: string;
     branchName?: string;
     authorizedSignatory?: string;
+    /** Public logo URL or a data: URL (PNG / JPEG / WebP). */
+    logoUrl?: string;
   };
 }
 
-export function generateReceiptPdf(data: ReceiptPdfData): Promise<Buffer> {
+const PAGE_WIDTH = 595.28;
+const PAGE_HEIGHT = 841.89;
+const MARGIN = 40;
+const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+
+const COLORS = {
+  primary: '#1e3a8a',
+  primaryDeep: '#172554',
+  accent: '#3b82f6',
+  accentSoft: '#bfdbfe',
+  ink: '#0f172a',
+  muted: '#475569',
+  faint: '#64748b',
+  border: '#cbd5e1',
+  hairline: '#e2e8f0',
+  card: '#f8fafc',
+  green: '#047857',
+  greenBg: '#ecfdf5',
+  greenBorder: '#a7f3d0',
+  red: '#b91c1c',
+  redBg: '#fef2f2',
+  redBorder: '#fecaca',
+};
+
+const ONES = [
+  '',
+  'One',
+  'Two',
+  'Three',
+  'Four',
+  'Five',
+  'Six',
+  'Seven',
+  'Eight',
+  'Nine',
+  'Ten',
+  'Eleven',
+  'Twelve',
+  'Thirteen',
+  'Fourteen',
+  'Fifteen',
+  'Sixteen',
+  'Seventeen',
+  'Eighteen',
+  'Nineteen',
+];
+
+const TENS = [
+  '',
+  '',
+  'Twenty',
+  'Thirty',
+  'Forty',
+  'Fifty',
+  'Sixty',
+  'Seventy',
+  'Eighty',
+  'Ninety',
+];
+
+function twoDigitWords(value: number): string {
+  if (value < 20) return ONES[value] ?? '';
+  const tens = TENS[Math.floor(value / 10)] ?? '';
+  const ones = ONES[value % 10] ?? '';
+  return ones ? `${tens} ${ones}` : tens;
+}
+
+/** Indian numbering system: crore / lakh / thousand / hundred. */
+function numberToWords(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return 'Zero';
+
+  const parts: string[] = [];
+  let rest = Math.floor(value);
+
+  const crore = Math.floor(rest / 10000000);
+  rest %= 10000000;
+  const lakh = Math.floor(rest / 100000);
+  rest %= 100000;
+  const thousand = Math.floor(rest / 1000);
+  rest %= 1000;
+  const hundred = Math.floor(rest / 100);
+  rest %= 100;
+
+  if (crore) parts.push(`${numberToWords(crore)} Crore`);
+  if (lakh) parts.push(`${twoDigitWords(lakh)} Lakh`);
+  if (thousand) parts.push(`${twoDigitWords(thousand)} Thousand`);
+  if (hundred) parts.push(`${ONES[hundred]} Hundred`);
+  if (rest) parts.push(twoDigitWords(rest));
+
+  return parts.join(' ').trim() || 'Zero';
+}
+
+function amountInWords(amount: number): string {
+  const safe = Number.isFinite(amount) ? Math.abs(amount) : 0;
+  const rupees = Math.floor(safe);
+  const paise = Math.round((safe - rupees) * 100);
+  const rupeeWords = `Rupees ${numberToWords(rupees)}`;
+  const paiseWords = paise > 0 ? ` and ${twoDigitWords(paise)} Paise` : '';
+  return `${rupeeWords}${paiseWords} Only`;
+}
+
+function formatAmount(amount: number): string {
+  return `INR ${amount.toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+/**
+ * Turns the configured logo into a square PNG that pdfkit can embed.
+ * The logo may be a data: URL (the settings page stores WebP) or a public URL.
+ * Returns null when there is no usable logo so the header can fall back to a
+ * monogram tile.
+ */
+async function loadLogoPng(logoUrl?: string): Promise<Buffer | null> {
+  const url = String(logoUrl || '').trim();
+  if (!url) return null;
+
+  let input: Buffer | null = null;
+
+  try {
+    if (url.startsWith('data:')) {
+      const comma = url.indexOf(',');
+      if (comma < 0) return null;
+      const metadata = url.slice(5, comma);
+      const payload = url.slice(comma + 1);
+      input = metadata.includes(';base64')
+        ? Buffer.from(payload, 'base64')
+        : Buffer.from(decodeURIComponent(payload), 'utf8');
+    } else if (/^https?:\/\//i.test(url)) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) return null;
+        const arrayBuffer = await response.arrayBuffer();
+        if (arrayBuffer.byteLength > 6_000_000) return null;
+        input = Buffer.from(arrayBuffer);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  if (!input || input.length === 0) return null;
+
+  try {
+    const { default: sharp } = await import('sharp');
+    return await sharp(input)
+      .rotate()
+      .resize(256, 256, {
+        fit: 'contain',
+        background: { r: 255, g: 255, b: 255, alpha: 0 },
+      })
+      .png()
+      .toBuffer();
+  } catch {
+    // sharp is optional at runtime; fall back to the monogram tile.
+    return null;
+  }
+}
+
+function drawMonogram(
+  doc: PDFKit.PDFDocument,
+  organizationName: string,
+  x: number,
+  y: number,
+  size: number
+) {
+  const initials =
+    organizationName
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((word) => word.charAt(0).toUpperCase())
+      .join('') || 'MF';
+
+  doc.roundedRect(x, y, size, size, 7).fill(COLORS.primary);
+  doc
+    .fillColor('#ffffff')
+    .font('Helvetica-Bold')
+    .fontSize(size * 0.36)
+    .text(initials, x, y + size / 2 - size * 0.18, {
+      width: size,
+      align: 'center',
+      lineBreak: false,
+    });
+}
+
+function drawLogo(
+  doc: PDFKit.PDFDocument,
+  logo: Buffer | null,
+  organizationName: string,
+  x: number,
+  y: number,
+  size: number
+) {
+  if (logo) {
+    doc.roundedRect(x, y, size, size, 7).fillAndStroke('#ffffff', '#93c5fd');
+    try {
+      doc.image(logo, x + 4, y + 4, { width: size - 8, height: size - 8 });
+      return;
+    } catch {
+      // fall through to the monogram tile
+    }
+  }
+  drawMonogram(doc, organizationName, x, y, size);
+}
+
+export async function generateReceiptPdf(data: ReceiptPdfData): Promise<Buffer> {
+  const logo = await loadLogoPng(data.organization.logoUrl);
+
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: 'A4',
-      margin: 36,
+      margin: 0,
+      bufferPages: true,
       info: {
         Title: `Receipt-${data.receiptId}`,
         Author: data.organization.name || 'MyFees',
         Subject: `Official Fee Payment Receipt #${data.receiptId}`,
+        Keywords: 'fee receipt, payment, accounts, myfees',
+        Creator: 'MyFees',
+        Producer: 'MyFees',
       },
     });
 
@@ -57,55 +276,20 @@ export function generateReceiptPdf(data: ReceiptPdfData): Promise<Buffer> {
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    const primaryColor = '#1e3a8a'; // Deep Navy / Indigo
-    const primaryAccent = '#3b82f6';
-    const slateDark = '#0f172a';
-    const slateMuted = '#475569';
-    const borderGray = '#cbd5e1';
-    const cardBg = '#f8fafc';
-    const paidGreen = '#047857';
-    const paidBg = '#ecfdf5';
-    const paidBorder = '#a7f3d0';
+    const organizationName = data.organization.name || 'Educational Institution';
+    const studentName = data.student.studentName || 'Student';
+    const isPaid =
+      ['PAID', 'SUCCESS'].includes(String(data.status || '').toUpperCase());
+    const paymentDate =
+      data.paymentDate || new Date().toISOString().slice(0, 10);
+    const rawAmount = parseFloat(String(data.amount)) || 0;
+    const formattedAmount = formatAmount(rawAmount);
 
-    const pageWidth = 595.28;
-    const margin = 36;
-    const contentWidth = pageWidth - margin * 2; // 523.28
+    const cleanMethod = (data.method || 'UPI')
+      .replace(/_/g, ' ')
+      .replace('CASH COUNTER', 'Cash at Counter')
+      .replace('CARD COUNTER', 'Card POS Machine');
 
-    // 1. Top Decorative Brand Bar
-    doc.rect(0, 0, pageWidth, 7).fill(primaryColor);
-
-    // 2. Header Area
-    let y = 28;
-
-    // Left Column: Organization Profile Details
-    const leftWidth = 330;
-    doc
-      .fillColor(primaryColor)
-      .fontSize(17)
-      .font('Helvetica-Bold')
-      .text(data.organization.name || 'Educational Institution', margin, y, {
-        width: leftWidth,
-        ellipsis: true,
-      });
-
-    y += 22;
-
-    // Tagline / Category / Branch
-    const subtitleParts = [
-      data.organization.branchName ? `Campus: ${data.organization.branchName}` : '',
-      data.organization.tagline || '',
-    ].filter(Boolean);
-
-    if (subtitleParts.length > 0) {
-      doc
-        .fillColor('#4338ca')
-        .fontSize(9)
-        .font('Helvetica-Bold')
-        .text(subtitleParts.join('  ·  '), margin, y, { width: leftWidth, ellipsis: true });
-      y += 13;
-    }
-
-    // Address
     const addressLine = [
       data.organization.address,
       data.organization.city,
@@ -115,352 +299,618 @@ export function generateReceiptPdf(data: ReceiptPdfData): Promise<Buffer> {
       .filter(Boolean)
       .join(', ');
 
-    if (addressLine) {
-      doc
-        .fillColor(slateMuted)
-        .fontSize(8.5)
-        .font('Helvetica')
-        .text(addressLine, margin, y, { width: leftWidth, ellipsis: true });
-      y += 12;
-    }
-
-    // Contact details: Phone, Email, Web
-    const contactParts = [
+    const contactPhoneEmail = [
       data.organization.phone ? `Phone: ${data.organization.phone}` : '',
       data.organization.email ? `Email: ${data.organization.email}` : '',
-      data.organization.website ? `Web: ${data.organization.website}` : '',
     ].filter(Boolean);
 
-    if (contactParts.length > 0) {
-      doc
-        .fillColor(slateMuted)
-        .fontSize(8)
-        .font('Helvetica')
-        .text(contactParts.join('  |  '), margin, y, { width: leftWidth, ellipsis: true });
-      y += 12;
+    // ---------------------------------------------------------------------
+    // Header band (dark navy panel with logo + organization identity)
+    // ---------------------------------------------------------------------
+    const headerX = 24;
+    const headerY = 24;
+    const headerW = PAGE_WIDTH - headerX * 2;
+    const headerH = 104;
+
+    doc.roundedRect(headerX, headerY, headerW, headerH, 8).fill(COLORS.primary);
+
+    drawLogo(doc, logo, organizationName, 38, 48, 56);
+
+    const headerTextX = 108;
+    const headerTextW = 252;
+
+    // Shrink long institution names instead of truncating them.
+    let nameSize = 15;
+    doc.font('Helvetica-Bold').fontSize(nameSize);
+    while (nameSize > 10.5 && doc.widthOfString(organizationName) > headerTextW) {
+      nameSize -= 0.5;
+      doc.fontSize(nameSize);
     }
 
-    // Merchant UPI ID
+    doc
+      .fillColor('#ffffff')
+      .font('Helvetica-Bold')
+      .fontSize(nameSize)
+      .text(organizationName, headerTextX, 38, {
+        width: headerTextW,
+        height: 20,
+        ellipsis: true,
+      });
+
+    const subtitleParts = [
+      data.organization.branchName
+        ? `Campus: ${data.organization.branchName}`
+        : '',
+      data.organization.tagline || '',
+    ].filter(Boolean);
+
+    if (subtitleParts.length > 0) {
+      doc
+        .fillColor(COLORS.accentSoft)
+        .font('Helvetica-Bold')
+        .fontSize(8)
+        .text(subtitleParts.join('  ·  '), headerTextX, 59, {
+          width: headerTextW,
+          height: 11,
+          ellipsis: true,
+        });
+    }
+
+    let orgY = 73;
+
+    if (addressLine) {
+      doc
+        .fillColor('#dbeafe')
+        .font('Helvetica')
+        .fontSize(7.5)
+        .text(addressLine, headerTextX, orgY, {
+          width: headerTextW,
+          height: 10,
+          ellipsis: true,
+        });
+      orgY += 12;
+    }
+
+    if (contactPhoneEmail.length > 0) {
+      doc
+        .fillColor('#dbeafe')
+        .font('Helvetica')
+        .fontSize(7.2)
+        .text(contactPhoneEmail.join('  |  '), headerTextX, orgY, {
+          width: headerTextW,
+          height: 10,
+          ellipsis: true,
+        });
+      orgY += 12;
+    }
+
+    if (data.organization.website) {
+      doc
+        .fillColor('#dbeafe')
+        .font('Helvetica')
+        .fontSize(7.2)
+        .text(`Web: ${data.organization.website}`, headerTextX, orgY, {
+          width: headerTextW,
+          height: 10,
+          ellipsis: true,
+        });
+      orgY += 12;
+    }
+
     if (data.organization.upiId) {
       doc
-        .fillColor('#1d4ed8')
-        .fontSize(8)
+        .fillColor(COLORS.accentSoft)
         .font('Helvetica-Bold')
-        .text(`Merchant UPI: ${data.organization.upiId}`, margin, y, { width: leftWidth });
-      y += 12;
+        .fontSize(7.2)
+        .text(`Merchant UPI: ${data.organization.upiId}`, headerTextX, orgY, {
+          width: headerTextW,
+          height: 10,
+          ellipsis: true,
+        });
     }
 
-    // Right Column: Receipt Title, Number, Date, Status
-    const rightX = 370;
-    const rightWidth = pageWidth - margin - rightX;
-    let rightY = 28;
+    // Right side of the header: document title + identifiers + status
+    const rightX = 368;
+    const rightW = PAGE_WIDTH - 40 - rightX;
 
     doc
-      .fillColor(primaryColor)
-      .fontSize(18)
+      .fillColor('#ffffff')
       .font('Helvetica-Bold')
-      .text('FEE RECEIPT', rightX, rightY, { width: rightWidth, align: 'right' });
-
-    rightY += 22;
+      .fontSize(15)
+      .text('FEE RECEIPT', rightX, 38, {
+        width: rightW,
+        align: 'right',
+        characterSpacing: 0.8,
+      });
 
     doc
-      .fillColor(slateDark)
-      .fontSize(10)
+      .fillColor('#ffffff')
       .font('Helvetica-Bold')
-      .text(`Receipt #: ${data.receiptId}`, rightX, rightY, { width: rightWidth, align: 'right' });
-
-    rightY += 14;
-
-    doc
-      .fillColor(slateMuted)
       .fontSize(8.5)
+      .text(`Receipt No: ${data.receiptId}`, rightX, 60, {
+        width: rightW,
+        align: 'right',
+        ellipsis: true,
+      });
+
+    doc
+      .fillColor('#dbeafe')
       .font('Helvetica')
-      .text(`Date: ${data.paymentDate || new Date().toISOString().slice(0, 10)}`, rightX, rightY, {
-        width: rightWidth,
+      .fontSize(8)
+      .text(`Date: ${paymentDate}`, rightX, 74, {
+        width: rightW,
         align: 'right',
       });
 
-    rightY += 15;
-
-    // Status Badge
-    const isPaid = (data.status || '').toUpperCase() === 'PAID' || (data.status || '').toUpperCase() === 'SUCCESS';
-    const badgeW = 95;
+    const badgeW = 104;
     const badgeH = 20;
-    const badgeX = pageWidth - margin - badgeW;
+    const badgeX = PAGE_WIDTH - 40 - badgeW;
+    const badgeY = 92;
 
     doc
-      .roundedRect(badgeX, rightY, badgeW, badgeH, 4)
-      .fillAndStroke(isPaid ? paidBg : '#fef2f2', isPaid ? paidBorder : '#fecaca');
+      .roundedRect(badgeX, badgeY, badgeW, badgeH, 10)
+      .fillAndStroke(
+        isPaid ? COLORS.greenBg : COLORS.redBg,
+        isPaid ? COLORS.greenBorder : COLORS.redBorder
+      );
 
     doc
-      .fillColor(isPaid ? paidGreen : '#b91c1c')
-      .fontSize(9.5)
+      .fillColor(isPaid ? COLORS.green : COLORS.red)
       .font('Helvetica-Bold')
-      .text(isPaid ? 'STATUS: PAID' : `STATUS: ${(data.status || 'UNPAID').toUpperCase()}`, badgeX, rightY + 5, {
-        width: badgeW,
+      .fontSize(8.5)
+      .text(
+        isPaid ? 'PAID' : String(data.status || 'UNPAID').toUpperCase(),
+        badgeX,
+        badgeY + 6,
+        { width: badgeW, align: 'center' }
+      );
+
+    // ---------------------------------------------------------------------
+    // Optional watermark
+    // ---------------------------------------------------------------------
+    doc.save();
+    doc.translate(PAGE_WIDTH / 2, 470);
+    doc.rotate(-28);
+    doc
+      .fillColor(isPaid ? COLORS.green : COLORS.red)
+      .fillOpacity(0.03)
+      .font('Helvetica-Bold')
+      .fontSize(92)
+      .text(isPaid ? 'PAID' : 'UNPAID', -150, -46, {
+        width: 300,
         align: 'center',
       });
+    doc.restore();
 
-    // Horizontal Separator Line
-    y = Math.max(y + 8, rightY + badgeH + 12);
-    doc
-      .strokeColor(borderGray)
-      .lineWidth(1)
-      .moveTo(margin, y)
-      .lineTo(pageWidth - margin, y)
-      .stroke();
+    // ---------------------------------------------------------------------
+    // Student + payment cards
+    // ---------------------------------------------------------------------
+    let y = 144;
+    const cardW = (CONTENT_WIDTH - 14) / 2;
+    const cardH = 124;
 
-    y += 14;
-
-    // 3. Two Column Profile Cards
-    const cardWidth = (contentWidth - 14) / 2; // ~254 pt
-    const cardHeight = 126;
-
-    // Left Card: Student Profile Details
-    doc.roundedRect(margin, y, cardWidth, cardHeight, 6).fillAndStroke(cardBg, borderGray);
-
-    doc
-      .fillColor(primaryColor)
-      .fontSize(9.5)
-      .font('Helvetica-Bold')
-      .text('STUDENT PROFILE & DETAILS', margin + 12, y + 10);
-
-    let sY = y + 26;
-    const sRows: [string, string][] = [
-      ['Student Name:', data.student.studentName || '—'],
-      ['Student ID:', data.student.studentId || '—'],
-      ['Course & Batch:', [data.student.course, data.student.group].filter(Boolean).join(' · ') || '—'],
-      ['Guardian:', data.student.guardian || '—'],
-      ['Contact Phone:', data.student.phone || '—'],
-      ['Campus / Branch:', data.student.branch || data.organization.branchName || 'Main Campus'],
-    ];
-
-    for (const [label, val] of sRows) {
-      doc.fillColor(slateMuted).font('Helvetica').fontSize(8).text(label, margin + 12, sY);
+    const drawCard = (x: number, title: string) => {
+      doc.roundedRect(x, y, cardW, cardH, 6).fillAndStroke(COLORS.card, COLORS.border);
+      doc.rect(x + 1, y + 1, cardW - 2, 3).fill(COLORS.accent);
       doc
-        .fillColor(slateDark)
+        .fillColor(COLORS.primary)
         .font('Helvetica-Bold')
-        .fontSize(8)
-        .text(val, margin + 86, sY, { width: cardWidth - 94, ellipsis: true });
-      sY += 15.5;
-    }
+        .fontSize(8.5)
+        .text(title, x + 12, y + 12);
+      doc
+        .strokeColor(COLORS.hairline)
+        .lineWidth(0.5)
+        .moveTo(x + 12, y + 27)
+        .lineTo(x + cardW - 12, y + 27)
+        .stroke();
+    };
 
-    // Right Card: Payment & Transaction Profile
-    const rightCardX = margin + cardWidth + 14;
-    doc.roundedRect(rightCardX, y, cardWidth, cardHeight, 6).fillAndStroke(cardBg, borderGray);
+    drawCard(MARGIN, 'STUDENT PROFILE');
 
-    doc
-      .fillColor(primaryColor)
-      .fontSize(9.5)
-      .font('Helvetica-Bold')
-      .text('PAYMENT & TRANSACTION PROFILE', rightCardX + 12, y + 10);
+    let sY = y + 36;
+    const sLabelX = MARGIN + 12;
+    const sValueX = MARGIN + 82;
 
-    let pY = y + 26;
-    const numAmount = parseFloat(String(data.amount)) || 0;
-    const formattedAmount = `INR ${numAmount.toLocaleString('en-IN', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })}`;
-
-    const cleanMethod = (data.method || 'UPI')
-      .replace(/_/g, ' ')
-      .replace('CASH COUNTER', 'Cash at Counter')
-      .replace('CARD COUNTER', 'Card POS Machine');
-
-    const pRows: [string, string][] = [
-      ['Receipt Number:', data.receiptId],
-      ['Payment Method:', cleanMethod],
-      ['Payment Date:', data.paymentDate || new Date().toISOString().slice(0, 10)],
-      ['Order / Ref ID:', data.orderId || 'Counter Pass'],
-      ['Bank Ref / UTR:', data.utr || 'Recorded & Confirmed'],
-      ['Total Paid:', formattedAmount],
+    const studentRows: Array<[string, string]> = [
+      ['Student Name', studentName],
+      ['Student ID', data.student.studentId || '—'],
+      [
+        'Course & Batch',
+        [data.student.course, data.student.group].filter(Boolean).join(' · ') ||
+          '—',
+      ],
+      ['Guardian', data.student.guardian || '—'],
+      ['Contact', data.student.phone || data.student.email || '—'],
+      [
+        'Campus',
+        data.student.branch || data.organization.branchName || 'Main Campus',
+      ],
     ];
 
-    for (const [label, val] of pRows) {
-      const isTotal = label === 'Total Paid:';
-      doc.fillColor(slateMuted).font('Helvetica').fontSize(8).text(label, rightCardX + 12, pY);
+    for (const [label, value] of studentRows) {
       doc
-        .fillColor(isTotal ? paidGreen : slateDark)
-        .font(isTotal ? 'Helvetica-Bold' : 'Helvetica-Bold')
-        .fontSize(isTotal ? 9 : 8)
-        .text(val, rightCardX + 88, pY, { width: cardWidth - 96, ellipsis: true });
-      pY += 15.5;
+        .fillColor(COLORS.faint)
+        .font('Helvetica')
+        .fontSize(7.4)
+        .text(label, sLabelX, sY);
+      doc
+        .fillColor(COLORS.ink)
+        .font('Helvetica-Bold')
+        .fontSize(7.6)
+        .text(value, sValueX, sY, {
+          width: cardW - 94,
+          height: 11,
+          ellipsis: true,
+        });
+      sY += 14.5;
     }
 
-    y += cardHeight + 16;
+    const rightCardX = MARGIN + cardW + 14;
+    drawCard(rightCardX, 'PAYMENT & TRANSACTION');
 
-    // 4. Breakdown Table
+    let pY = y + 36;
+    const pLabelX = rightCardX + 12;
+    const pValueX = rightCardX + 86;
+
+    const paymentRows: Array<[string, string, boolean]> = [
+      ['Receipt No', data.receiptId, false],
+      ['Method', cleanMethod, false],
+      ['Payment Date', paymentDate, false],
+      ['Order / Ref ID', data.orderId || 'Counter Pass', false],
+      ['Bank Ref / UTR', data.utr || data.payerVpa || 'Recorded & Confirmed', false],
+      ['Amount Paid', formattedAmount, true],
+    ];
+
+    for (const [label, value, isAmount] of paymentRows) {
+      doc
+        .fillColor(COLORS.faint)
+        .font('Helvetica')
+        .fontSize(7.4)
+        .text(label, pLabelX, pY);
+      doc
+        .fillColor(isAmount ? COLORS.green : COLORS.ink)
+        .font('Helvetica-Bold')
+        .fontSize(isAmount ? 8.6 : 7.6)
+        .text(value, pValueX, pY, {
+          width: cardW - 98,
+          height: 11,
+          ellipsis: true,
+        });
+      pY += 14.5;
+    }
+
+    // ---------------------------------------------------------------------
+    // Fee particulars table
+    // ---------------------------------------------------------------------
+    y = 284;
+
     doc
-      .fillColor(primaryColor)
-      .fontSize(10.5)
+      .fillColor(COLORS.primary)
       .font('Helvetica-Bold')
-      .text('FEE PARTICULARS & RECEIPT BREAKDOWN', margin, y);
+      .fontSize(10)
+      .text('FEE PARTICULARS', MARGIN, y);
 
-    y += 15;
+    doc
+      .fillColor(COLORS.faint)
+      .font('Helvetica')
+      .fontSize(7.5)
+      .text('Breakdown of the amount received', MARGIN, y + 12);
 
-    // Table Header
-    const colX = {
-      sl: margin,
-      desc: margin + 30,
-      ref: margin + 280,
-      amt: margin + 410,
-    };
-    const colW = {
-      sl: 30,
-      desc: 250,
-      ref: 130,
-      amt: contentWidth - 410,
-    };
+    const tableY = 306;
+    const tableHeaderH = 24;
+    const rowH = 32;
 
-    doc.rect(margin, y, contentWidth, 22).fill('#f1f5f9');
-    doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8.5);
+    doc.rect(MARGIN, tableY, CONTENT_WIDTH, tableHeaderH).fill(COLORS.primary);
 
-    doc.text('#', colX.sl + 6, y + 6);
-    doc.text('DESCRIPTION / PARTICULARS', colX.desc, y + 6);
-    doc.text('COURSE & CLASS GROUP', colX.ref, y + 6);
-    doc.text('AMOUNT (INR)', colX.amt, y + 6, { width: colW.amt - 10, align: 'right' });
+    const colSl = MARGIN;
+    const colDesc = MARGIN + 34;
+    const colRef = MARGIN + 300;
+    const colAmtEnd = MARGIN + CONTENT_WIDTH - 12;
 
-    y += 22;
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7.6);
+    doc.text('#', colSl + 10, tableY + 8);
+    doc.text('DESCRIPTION', colDesc, tableY + 8);
+    doc.text('COURSE / GROUP', colRef, tableY + 8);
+    doc.text('AMOUNT', colAmtEnd - 100, tableY + 8, {
+      width: 100,
+      align: 'right',
+    });
 
-    // Row 1
-    doc.rect(margin, y, contentWidth, 28).fillAndStroke('#ffffff', borderGray);
-    doc.fillColor(slateDark).font('Helvetica').fontSize(8.5);
-    doc.text('1', colX.sl + 6, y + 9);
+    y = tableY + tableHeaderH;
+
+    doc.rect(MARGIN, y, CONTENT_WIDTH, rowH).fillAndStroke('#ffffff', COLORS.border);
 
     const descText =
-      data.notes && data.notes.trim() && !data.notes.includes('YOUPI PG ·')
+      data.notes && data.notes.trim()
         ? data.notes.trim()
         : `Fee payment for ${data.student.course || 'Academic Course'} (${data.student.group || 'Regular Batch'})`;
 
-    doc.text(descText, colX.desc, y + 9, { width: colW.desc - 10, ellipsis: true });
-
     const batchText =
-      [data.student.course, data.student.group].filter(Boolean).join(' · ') || 'General';
-    doc.text(batchText, colX.ref, y + 9, { width: colW.ref - 10, ellipsis: true });
+      [data.student.course, data.student.group].filter(Boolean).join(' · ') ||
+      'General';
 
     doc
-      .font('Helvetica-Bold')
-      .text(formattedAmount, colX.amt, y + 9, { width: colW.amt - 10, align: 'right' });
-
-    y += 28;
-
-    // Total Summary Box
-    const totalBoxW = 210;
-    const totalBoxX = pageWidth - margin - totalBoxW;
-    const totalBoxH = 48;
-
-    doc.rect(totalBoxX, y + 10, totalBoxW, totalBoxH).fillAndStroke(cardBg, borderGray);
-
-    doc
-      .fillColor(slateMuted)
+      .fillColor(COLORS.ink)
       .font('Helvetica')
-      .fontSize(8.5)
-      .text('Total Amount Received:', totalBoxX + 12, y + 17);
-
+      .fontSize(8.2)
+      .text('1', colSl + 12, y + 11);
     doc
-      .fillColor(paidGreen)
+      .text(descText, colDesc, y + 11, { width: colRef - colDesc - 10, height: 12, ellipsis: true })
+      .font('Helvetica')
+      .fillColor(COLORS.muted)
+      .text(batchText, colRef, y + 11, {
+        width: colAmtEnd - colRef - 112,
+        height: 12,
+        ellipsis: true,
+      });
+    doc
+      .fillColor(COLORS.ink)
       .font('Helvetica-Bold')
-      .fontSize(11)
-      .text(formattedAmount, totalBoxX + 12, y + 16, { width: totalBoxW - 24, align: 'right' });
+      .fontSize(8.6)
+      .text(formattedAmount, colAmtEnd - 110, y + 11, {
+        width: 110,
+        align: 'right',
+      });
+
+    y += rowH;
+
+    // ---------------------------------------------------------------------
+    // Amount in words + totals
+    // ---------------------------------------------------------------------
+    const summaryY = y + 16;
 
     doc
-      .fillColor(slateMuted)
+      .fillColor(COLORS.faint)
+      .font('Helvetica-Bold')
+      .fontSize(7)
+      .text('AMOUNT IN WORDS', MARGIN, summaryY);
+
+    doc
+      .fillColor(COLORS.ink)
+      .font('Helvetica-Bold')
+      .fontSize(8.2)
+      .text(amountInWords(rawAmount), MARGIN, summaryY + 12, {
+        width: 270,
+        height: 34,
+      });
+
+    const totalBoxW = 220;
+    const totalBoxX = PAGE_WIDTH - MARGIN - totalBoxW;
+    const totalBoxH = 56;
+
+    doc
+      .roundedRect(totalBoxX, summaryY - 4, totalBoxW, totalBoxH, 5)
+      .fillAndStroke(COLORS.card, COLORS.border);
+
+    doc
+      .fillColor(COLORS.muted)
       .font('Helvetica')
       .fontSize(8)
-      .text('Outstanding Balance Due:', totalBoxX + 12, y + 33);
+      .text('Total Paid', totalBoxX + 12, summaryY + 6);
 
     doc
-      .fillColor(slateDark)
+      .fillColor(COLORS.green)
       .font('Helvetica-Bold')
-      .fontSize(8.5)
-      .text('INR 0.00', totalBoxX + 12, y + 33, { width: totalBoxW - 24, align: 'right' });
-
-    y += totalBoxH + 26;
-
-    // 5. Notes & Verification Banner
-    const notesBoxH = 50;
-    doc.roundedRect(margin, y, contentWidth, notesBoxH, 6).fillAndStroke('#f0fdf4', '#bbf7d0');
+      .fontSize(12.5)
+      .text(formattedAmount, totalBoxX + 90, summaryY + 4, {
+        width: totalBoxW - 102,
+        align: 'right',
+      });
 
     doc
-      .fillColor(paidGreen)
-      .font('Helvetica-Bold')
-      .fontSize(9)
-      .text('OFFICIAL PAYMENT VERIFICATION & ACKNOWLEDGMENT', margin + 14, y + 9);
+      .strokeColor(COLORS.hairline)
+      .lineWidth(0.5)
+      .moveTo(totalBoxX + 12, summaryY + 28)
+      .lineTo(totalBoxX + totalBoxW - 12, summaryY + 28)
+      .stroke();
 
-    const institutionTitle = data.organization.name || 'the Institute Office';
-    const confirmationNote = `This official receipt acknowledges full payment of ${formattedAmount} received via ${cleanMethod} for student ${data.student.studentName} (${data.student.studentId || 'N/A'}). The payment is officially credited and recorded in the database of ${institutionTitle}.`;
+    doc
+      .fillColor(COLORS.muted)
+      .font('Helvetica')
+      .fontSize(7.5)
+      .text('Balance Due', totalBoxX + 12, summaryY + 38);
+
+    doc
+      .fillColor(COLORS.ink)
+      .font('Helvetica-Bold')
+      .fontSize(8.2)
+      .text('INR 0.00', totalBoxX + 90, summaryY + 37, {
+        width: totalBoxW - 102,
+        align: 'right',
+      });
+
+    // ---------------------------------------------------------------------
+    // Verification banner
+    // ---------------------------------------------------------------------
+    y = summaryY + totalBoxH + 22;
+
+    const notesH = 56;
+    doc
+      .roundedRect(MARGIN, y, CONTENT_WIDTH, notesH, 6)
+      .fillAndStroke(COLORS.greenBg, COLORS.greenBorder);
+
+    doc
+      .fillColor(COLORS.green)
+      .font('Helvetica-Bold')
+      .fontSize(8.6)
+      .text('PAYMENT VERIFICATION & ACKNOWLEDGMENT', MARGIN + 14, y + 9);
+
+    const confirmationNote = `This official receipt acknowledges ${formattedAmount} received via ${cleanMethod} from ${studentName} (${data.student.studentId || 'N/A'}) on ${paymentDate}. The payment has been verified and credited to the records of ${organizationName}.`;
 
     doc
       .fillColor('#166534')
       .font('Helvetica')
-      .fontSize(7.5)
-      .text(confirmationNote, margin + 14, y + 23, { width: contentWidth - 28, lineGap: 1.5 });
+      .fontSize(7.2)
+      .text(confirmationNote, MARGIN + 14, y + 24, {
+        width: CONTENT_WIDTH - 28,
+        height: 28,
+        lineGap: 1.6,
+      });
 
-    y += notesBoxH + 26;
-
-    // 6. Signatures Area
-    const sigLineW = 150;
-    const sigY = y + 22;
-
-    // Left Signature: Student / Depositor
-    doc
-      .strokeColor(borderGray)
-      .lineWidth(1)
-      .moveTo(margin, sigY)
-      .lineTo(margin + sigLineW, sigY)
-      .stroke();
+    // ---------------------------------------------------------------------
+    // Terms & declaration
+    // ---------------------------------------------------------------------
+    let termsY = y + notesH + 22;
 
     doc
-      .fillColor(slateMuted)
-      .font('Helvetica')
-      .fontSize(7.5)
-      .text('Student / Depositor Signature', margin, sigY + 5, { width: sigLineW, align: 'center' });
-
-    // Right Signature: Authorized Signatory
-    const rightSigX = pageWidth - margin - sigLineW;
-    doc
-      .strokeColor(borderGray)
-      .lineWidth(1)
-      .moveTo(rightSigX, sigY)
-      .lineTo(rightSigX + sigLineW, sigY)
-      .stroke();
-
-    const signatoryName =
-      data.organization.authorizedSignatory ||
-      data.organization.name ||
-      'Accounts Department';
-
-    doc
-      .fillColor(slateDark)
+      .fillColor(COLORS.primary)
       .font('Helvetica-Bold')
       .fontSize(8)
-      .text(signatoryName, rightSigX, sigY + 4, { width: sigLineW, align: 'center' });
+      .text('TERMS & DECLARATION', MARGIN, termsY);
+
+    termsY += 14;
+
+    const terms = [
+      'This is a computer-generated receipt and is valid without a physical seal.',
+      "Fees once paid are non-refundable unless the institution's refund policy states otherwise.",
+      'Please quote the receipt number above for any future correspondence or reconciliation.',
+    ];
+
+    for (const term of terms) {
+      doc.circle(MARGIN + 3, termsY + 3, 1.4).fill(COLORS.accent);
+      doc
+        .fillColor(COLORS.muted)
+        .font('Helvetica')
+        .fontSize(7)
+        .text(term, MARGIN + 12, termsY, {
+          width: CONTENT_WIDTH - 12,
+          height: 10,
+          ellipsis: true,
+        });
+      termsY += 12;
+    }
+
+    // ---------------------------------------------------------------------
+    // Signatures
+    // ---------------------------------------------------------------------
+    const signatureLineY = 636;
+    const signatureW = 160;
 
     doc
-      .fillColor(slateMuted)
+      .strokeColor(COLORS.border)
+      .lineWidth(0.8)
+      .moveTo(MARGIN, signatureLineY)
+      .lineTo(MARGIN + signatureW, signatureLineY)
+      .stroke();
+
+    doc
+      .fillColor(COLORS.muted)
       .font('Helvetica')
-      .fontSize(7)
-      .text('Authorized Signatory (Finance & Accounts)', rightSigX, sigY + 14, {
-        width: sigLineW,
+      .fontSize(7.2)
+      .text('Student / Depositor Signature', MARGIN, signatureLineY + 6, {
+        width: signatureW,
         align: 'center',
       });
 
-    // 7. Footer Notice
-    const footerY = 800;
+    const signX = PAGE_WIDTH - MARGIN - signatureW;
+    const signatoryName =
+      data.organization.authorizedSignatory || organizationName;
+
     doc
-      .strokeColor(borderGray)
-      .lineWidth(0.5)
-      .moveTo(margin, footerY)
-      .lineTo(pageWidth - margin, footerY)
+      .fillColor(COLORS.ink)
+      .font('Helvetica-Bold')
+      .fontSize(8)
+      .text(signatoryName, signX, signatureLineY - 16, {
+        width: signatureW,
+        align: 'center',
+        height: 11,
+        ellipsis: true,
+      });
+
+    doc
+      .strokeColor(COLORS.border)
+      .lineWidth(0.8)
+      .moveTo(signX, signatureLineY)
+      .lineTo(signX + signatureW, signatureLineY)
       .stroke();
 
-    const footerNotice = `Computer-generated official fee receipt issued by ${data.organization.name || 'Institution'}${data.organization.branchName ? ` (${data.organization.branchName})` : ''}. Valid without physical seal. For questions or reconciliation, contact: ${data.organization.email || data.organization.phone || 'accounts desk'}.`;
-
     doc
-      .fillColor(slateMuted)
+      .fillColor(COLORS.muted)
       .font('Helvetica')
       .fontSize(7)
-      .text(footerNotice, margin, footerY + 6, { width: contentWidth, align: 'center' });
+      .text('Authorized Signatory', signX, signatureLineY + 6, {
+        width: signatureW,
+        align: 'center',
+      });
+
+    doc
+      .fillColor(COLORS.faint)
+      .font('Helvetica-Oblique')
+      .fontSize(8)
+      .text(`Thank you for your payment, ${studentName}.`, MARGIN, 704, {
+        width: CONTENT_WIDTH,
+        align: 'center',
+      });
+
+    doc
+      .fillColor(COLORS.faint)
+      .font('Helvetica')
+      .fontSize(7)
+      .text('Please keep this receipt for your records.', MARGIN, 717, {
+        width: CONTENT_WIDTH,
+        align: 'center',
+      });
+
+    // ---------------------------------------------------------------------
+    // Footer
+    // ---------------------------------------------------------------------
+    const footerLineY = 756;
+
+    doc
+      .strokeColor(COLORS.hairline)
+      .lineWidth(0.5)
+      .moveTo(MARGIN, footerLineY)
+      .lineTo(PAGE_WIDTH - MARGIN, footerLineY)
+      .stroke();
+
+    doc
+      .fillColor(COLORS.muted)
+      .font('Helvetica-Bold')
+      .fontSize(6.8)
+      .text(organizationName, MARGIN, footerLineY + 8, {
+        width: 150,
+        height: 9,
+        ellipsis: true,
+      });
+
+    doc
+      .fillColor(COLORS.faint)
+      .font('Helvetica')
+      .fontSize(6.6)
+      .text(
+        `Computer-generated receipt · Valid without physical seal${
+          data.organization.email || data.organization.phone
+            ? ` · ${data.organization.email || data.organization.phone}`
+            : ''
+        }`,
+        MARGIN + 150,
+        footerLineY + 8,
+        { width: CONTENT_WIDTH - 220, align: 'center', height: 9, ellipsis: true }
+      );
+
+    doc
+      .fillColor(COLORS.faint)
+      .font('Helvetica')
+      .fontSize(6.8)
+      .text('Page 1 of 1', PAGE_WIDTH - MARGIN - 60, footerLineY + 8, {
+        width: 60,
+        align: 'right',
+      });
+
+    // ---------------------------------------------------------------------
+    // A4 sheet border (outer keyline + inner hairline)
+    // ---------------------------------------------------------------------
+    doc
+      .roundedRect(18, 18, PAGE_WIDTH - 36, PAGE_HEIGHT - 36, 10)
+      .lineWidth(1.2)
+      .strokeColor(COLORS.primary)
+      .stroke();
+
+    doc
+      .roundedRect(23, 23, PAGE_WIDTH - 46, PAGE_HEIGHT - 46, 8)
+      .lineWidth(0.5)
+      .strokeColor('#93c5fd')
+      .stroke();
 
     doc.end();
   });
