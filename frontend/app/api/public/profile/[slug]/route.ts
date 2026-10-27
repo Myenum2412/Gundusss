@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { fetchPublicProfileFromAppwrite } from "@/lib/server-appwrite"
+import { backendBaseUrl } from "@/lib/backend-base"
 
 export const dynamic = "force-dynamic"
 
@@ -12,17 +12,13 @@ export async function GET(
     return NextResponse.json({ error: "Missing slug" }, { status: 400 })
   }
 
-  // 1. Try local Fastify backend first if reachable (e.g. localhost)
-  const backendBase =
-    process.env.BACKEND_INTERNAL_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    "http://127.0.0.1:4000"
+  const backendBase = backendBaseUrl()
 
   try {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 1200)
+    const timer = setTimeout(() => controller.abort(), 6_000)
     const backendRes = await fetch(
-      `${backendBase.replace(/\/+$/, "")}/api/public/profile/${encodeURIComponent(slug)}`,
+      `${backendBase}/api/public/profile/${encodeURIComponent(slug)}`,
       {
         signal: controller.signal,
         headers: { Accept: "application/json" },
@@ -40,27 +36,19 @@ export async function GET(
         },
       })
     }
-  } catch {
-    // Backend unreachable (e.g., deployed on Vercel without local Fastify process)
-    // Fall through to direct Appwrite Cloud resolution
-  }
 
-  // 2. Direct Appwrite Cloud resolution (Vercel Serverless runtime)
-  const profile = await fetchPublicProfileFromAppwrite(slug)
-  if (!profile) {
-    return NextResponse.json(
-      { error: `Organization matching '${slug}' not found` },
-      { status: 404 }
-    )
+    if (backendRes.status === 404) {
+      return NextResponse.json(
+        { error: `Organization matching '${slug}' not found` },
+        { status: 404, headers: { "Access-Control-Allow-Origin": "*" } }
+      )
+    }
+  } catch {
+    // Network error / timeout — fall through to the 502 response below.
   }
 
   return NextResponse.json(
-    { data: profile },
-    {
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
-      },
-    }
+    { error: "The profile service is unreachable right now. Please retry." },
+    { status: 502, headers: { "Access-Control-Allow-Origin": "*" } }
   )
 }

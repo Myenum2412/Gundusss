@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { backendBaseUrl } from "@/lib/backend-base"
 
 export const dynamic = "force-dynamic"
 
@@ -15,10 +16,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const backendBase =
-      process.env.BACKEND_INTERNAL_URL ||
-      process.env.NEXT_PUBLIC_API_URL ||
-      "http://127.0.0.1:4000"
+    const backendBase = backendBaseUrl()
 
     let backendRes: Response
     try {
@@ -26,7 +24,7 @@ export async function POST(req: NextRequest) {
       const timer = setTimeout(() => controller.abort(), 10_000)
       try {
         backendRes = await fetch(
-          `${backendBase.replace(/\/+$/, "")}/api/public/payments/create`,
+          `${backendBase}/api/public/payments/create`,
           {
             method: "POST",
             headers: {
