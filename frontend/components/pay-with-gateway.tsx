@@ -27,6 +27,7 @@ import {
   type PaymentMethod,
   type PaymentOrder,
 } from "@/lib/payments"
+import { downloadReceiptPdf } from "@/lib/receipts-store"
 import {
   BanknoteIcon,
   CheckIcon,
@@ -34,6 +35,7 @@ import {
   CopyIcon,
   CreditCardIcon,
   ExternalLinkIcon,
+  FileDownIcon,
   Loader2Icon,
   QrCodeIcon,
   RefreshCwIcon,
@@ -742,13 +744,49 @@ export function PayWithGateway({
                       {formatInr(order.amount)} received via {methodLabel}.
                     </p>
                     {order.receiptId ? (
-                      <p className="rounded-full border bg-card px-3 py-1 text-xs font-medium">
-                        Receipt {order.receiptId}
-                      </p>
+                      <div className="flex flex-col items-center gap-2">
+                        <p className="rounded-full border bg-card px-3 py-1 text-xs font-medium">
+                          Receipt {order.receiptId}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              await downloadReceiptPdf(order.receiptId || order.orderId)
+                            } catch (err: any) {
+                              alert(err?.message || "Failed to download PDF receipt")
+                            }
+                          }}
+                          className="gap-1.5 text-xs font-semibold text-primary border-primary/30 hover:bg-primary/10"
+                        >
+                          <FileDownIcon className="size-3.5" />
+                          <span>Download PDF Receipt</span>
+                        </Button>
+                      </div>
                     ) : (
-                      <p className="text-xs text-muted-foreground">
-                        Receipt is being recorded…
-                      </p>
+                      <div className="flex flex-col items-center gap-2">
+                        <p className="text-xs text-muted-foreground">
+                          Receipt is being recorded…
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              await downloadReceiptPdf(order.orderId)
+                            } catch (err: any) {
+                              alert(err?.message || "Failed to download PDF receipt")
+                            }
+                          }}
+                          className="gap-1.5 text-xs font-semibold text-primary border-primary/30 hover:bg-primary/10"
+                        >
+                          <FileDownIcon className="size-3.5" />
+                          <span>Download PDF Receipt</span>
+                        </Button>
+                      </div>
                     )}
                     {order.utr && (
                       <p className="text-xs text-muted-foreground">
@@ -776,7 +814,24 @@ export function PayWithGateway({
 
               <DialogFooter>
                 {successful ? (
-                  <Button onClick={() => setOpen(false)}>Done</Button>
+                  <div className="flex items-center justify-end gap-2 w-full">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={async () => {
+                        try {
+                          await downloadReceiptPdf(order?.receiptId || order?.orderId || "")
+                        } catch (err: any) {
+                          alert(err?.message || "Failed to download PDF receipt")
+                        }
+                      }}
+                      className="gap-1.5"
+                    >
+                      <FileDownIcon className="size-3.5" />
+                      <span>Download PDF</span>
+                    </Button>
+                    <Button onClick={() => setOpen(false)}>Done</Button>
+                  </div>
                 ) : failed ? (
                   <>
                     <Button variant="outline" onClick={() => setOpen(false)}>

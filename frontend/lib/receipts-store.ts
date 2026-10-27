@@ -28,7 +28,13 @@ export async function saveReceipts(receipts: StoredReceipt[]): Promise<void> {
 }
 
 export async function downloadReceiptPdf(receiptId: string): Promise<void> {
-  const res = await apiFetch(`/api/receipts/${encodeURIComponent(receiptId)}/pdf`);
+  let res = await apiFetch(`/api/receipts/${encodeURIComponent(receiptId)}/pdf`);
+  if (!res.ok) {
+    res = await apiFetch(`/api/public/receipts/${encodeURIComponent(receiptId)}/pdf`);
+  }
+  if (!res.ok) {
+    res = await apiFetch(`/api/public/payments/${encodeURIComponent(receiptId)}/receipt/pdf`);
+  }
   if (!res.ok) {
     throw new Error(`Failed to download PDF (${res.status})`);
   }
@@ -41,6 +47,22 @@ export async function downloadReceiptPdf(receiptId: string): Promise<void> {
   a.click();
   document.body.removeChild(a);
   window.URL.revokeObjectURL(url);
+}
+
+export async function viewReceiptPdf(receiptId: string): Promise<void> {
+  let res = await apiFetch(`/api/receipts/${encodeURIComponent(receiptId)}/pdf`);
+  if (!res.ok) {
+    res = await apiFetch(`/api/public/receipts/${encodeURIComponent(receiptId)}/pdf`);
+  }
+  if (!res.ok) {
+    res = await apiFetch(`/api/public/payments/${encodeURIComponent(receiptId)}/receipt/pdf`);
+  }
+  if (!res.ok) {
+    throw new Error(`Failed to load PDF (${res.status})`);
+  }
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  window.open(url, "_blank");
 }
 
 export async function sendReceiptPdfWhatsApp(

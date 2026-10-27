@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   APPWRITE_COLLECTIONS,
   getRecord,
+  listRecords,
   listScopedRecords,
   replaceScopedRecords,
 } from '../appwrite.js';
@@ -123,6 +124,206 @@ async function listData<T>(
     .sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
 }
 
+export async function buildReceiptPdfData(
+  profileId: string,
+  receipt: any
+): Promise<ReceiptPdfData> {
+  // 1. Student details lookup
+  let studentData: any = {};
+  if (receipt.studentId) {
+    const stuRec = await getRecord<any>(
+      APPWRITE_COLLECTIONS.students,
+      scopedEntityId(profileId, receipt.studentId)
+    );
+    if (stuRec?.data) {
+      studentData = stuRec.data;
+    }
+  }
+
+  // Fallback: If student details missing, try searching by studentName
+  if (!studentData.studentName && receipt.studentName) {
+    try {
+      const allStudents = await listScopedRecords<any>(
+        APPWRITE_COLLECTIONS.students,
+        profileId
+      );
+      const matched = allStudents.find(
+        (s) =>
+          s.data?.studentName?.trim().toLowerCase() ===
+          receipt.studentName?.trim().toLowerCase()
+      );
+      if (matched?.data) {
+        studentData = matched.data;
+      }
+    } catch {
+      // Non-blocking
+    }
+  }
+
+  // 2. Organization / Institution Profile Details lookup
+  let orgData: any = {};
+
+  // 2a. Business Profile (primary information: name, category, contact, address)
+  try {
+    const bizRec = await getRecord<any>(
+      APPWRITE_COLLECTIONS.businessProfiles,
+      scopedEntityId(profileId, '1')
+    );
+    if (bizRec?.data?.profile) {
+      const bp = bizRec.data.profile;
+      orgData = {
+        name: bp.name,
+        tagline: bp.primaryCategory || bp.description,
+        email: bp.email,
+        phone: bp.phone,
+        website: bp.website,
+        address: bp.location?.addressLine1,
+        city: bp.location?.city,
+        state: bp.location?.state,
+        pincode: bp.location?.postalCode || bp.location?.pincode,
+      };
+    }
+  } catch {
+    // Non-blocking
+  }
+
+  // 2b. Branches lookup (campus / branch specific details)
+  try {
+    const branches = await listScopedRecords<any>(
+      APPWRITE_COLLECTIONS.branches,
+      profileId
+    );
+    if (branches.length > 0) {
+      const stuBranch = (studentData.branch || '').trim().toLowerCase();
+      const branchMatch =
+        branches.find(
+          (b) => stuBranch && b.data?.branchName?.toLowerCase() === stuBranch
+        ) ||
+        branches.find((b) => b.data?.isHeadBranch) ||
+        branches[0];
+
+      if (branchMatch?.data) {
+        const bd = branchMatch.data;
+        orgData.branchName = orgData.branchName || bd.branchName;
+        orgData.address = orgData.address || bd.address;
+        orgData.city = orgData.city || bd.city;
+        orgData.state = orgData.state || bd.state;
+        orgData.pincode = orgData.pincode || bd.pincode;
+        orgData.phone = orgData.phone || bd.phone;
+        orgData.email = orgData.email || bd.email;
+        if (bd.managerName) {
+          orgData.authorizedSignatory = bd.managerName;
+        }
+      }
+    }
+  } catch {
+    // Non-blocking
+  }
+
+  // 2c. Base Profile info (ownerName, paymentUrl, ownerEmail)
+  try {
+    const prof = await getProfile(profileId);
+    if (prof) {
+      orgData.name = orgData.name || prof.name || 'MyFees Learning Center';
+      orgData.email = orgData.email || prof.ownerEmail;
+      orgData.website = orgData.website || prof.paymentUrl;
+      orgData.authorizedSignatory =
+        orgData.authorizedSignatory || prof.ownerName || 'Accounts Officer';
+    }
+  } catch {
+    // Non-blocking
+  }
+
+  // 2d. Payment Settings (Merchant UPI ID)
+  try {
+    const paySetRec = await getRecord<any>(
+      APPWRITE_COLLECTIONS.paymentSettings,
+      scopedEntityId(profileId, '1')
+    );
+    if (paySetRec?.data?.upi_id) {
+      orgData.upiId = paySetRec.data.upi_id;
+    }
+  } catch {
+    // Non-blocking
+  }
+
+  // 3. Extract transaction details (orderId, utr, payerVpa) from receipt fields or notes
+  let orderId = receipt.orderId || '';
+  let utr = receipt.utr || '';
+  let payerVpa = receipt.payerVpa || receipt.upiId || '';
+
+  const notesStr = String(receipt.notes || '');
+  if (!orderId) {
+    const match = notesStr.match(/Order:\s*([A-Za-z0-9_-]+)/i);
+    if (match) orderId = match[1];
+  }
+  if (!utr) {
+    const match = notesStr.match(/UTR:\s*([A-Za-z0-9_-]+)/i);
+    if (match) utr = match[1];
+  }
+  if (!payerVpa) {
+    const match = notesStr.match(/UPI:\s*([^\s·,]+)/i);
+    if (match) payerVpa = match[1];
+  }
+
+  // If orderId found, see if we can look up order for more info
+  if (orderId && (!utr || !payerVpa || !studentData.studentName)) {
+    try {
+      const orderRec = await getRecord<any>(
+        APPWRITE_COLLECTIONS.paymentOrders,
+        scopedEntityId(profileId, orderId)
+      );
+      if (orderRec?.data) {
+        utr = utr || orderRec.data.utr;
+        payerVpa = payerVpa || orderRec.data.payerVpa || orderRec.data.upiId;
+        if (!studentData.studentName && orderRec.data.studentName) {
+          studentData.studentName = orderRec.data.studentName;
+        }
+      }
+    } catch {
+      // Non-blocking
+    }
+  }
+
+  return {
+    receiptId: receipt.receiptId,
+    paymentDate: receipt.paymentDate,
+    amount: receipt.amount,
+    method: receipt.method || 'Cash',
+    status: receipt.status || 'Paid',
+    notes: receipt.notes,
+    orderId: orderId || undefined,
+    utr: utr || undefined,
+    payerVpa: payerVpa || undefined,
+    student: {
+      studentId: receipt.studentId || studentData.studentId || '—',
+      studentName: receipt.studentName || studentData.studentName || 'Student',
+      phone: studentData.phone || '',
+      email: studentData.email || '',
+      course: studentData.course || '',
+      group: studentData.group || '',
+      branch: studentData.branch || '',
+      guardian: studentData.guardian || '',
+      address: studentData.address || '',
+      gender: studentData.gender || '',
+    },
+    organization: {
+      name: orgData.name || 'Educational Institution',
+      tagline: orgData.tagline || '',
+      branchName: orgData.branchName || '',
+      email: orgData.email || '',
+      phone: orgData.phone || '',
+      website: orgData.website || '',
+      address: orgData.address || '',
+      city: orgData.city || '',
+      state: orgData.state || '',
+      pincode: orgData.pincode || '',
+      upiId: orgData.upiId || '',
+      authorizedSignatory: orgData.authorizedSignatory || 'Accounts Officer',
+    },
+  };
+}
+
 export async function collectionsRoutes(app: FastifyInstance) {
   // ---- Students ----
   app.get('/api/students', async (req) => {
@@ -232,79 +433,70 @@ export async function collectionsRoutes(app: FastifyInstance) {
     return { data: { count: parsed.data.items.length } };
   });
 
-  async function buildReceiptPdfData(
-    profileId: string,
-    receipt: Receipt
-  ): Promise<ReceiptPdfData> {
-    let studentData: any = {};
-    if (receipt.studentId) {
-      const stuRec = await getRecord<any>(
-        APPWRITE_COLLECTIONS.students,
-        scopedEntityId(profileId, receipt.studentId)
-      );
-      if (stuRec?.data) {
-        studentData = stuRec.data;
-      }
-    }
-
-    let orgData: any = {};
-    const bizRec = await getRecord<any>(
-      APPWRITE_COLLECTIONS.businessProfiles,
-      scopedEntityId(profileId, '1')
-    );
-    if (bizRec?.data?.profile) {
-      const bp = bizRec.data.profile;
-      orgData = {
-        name: bp.name,
-        email: bp.email,
-        phone: bp.phone,
-        website: bp.website,
-        address: bp.location?.addressLine1,
-        city: bp.location?.city,
-        state: bp.location?.state,
-      };
-    }
-
-    if (!orgData.name) {
-      const prof = await getProfile(profileId);
-      orgData.name = prof?.name || 'MyFees Learning Center';
-    }
-
-    return {
-      receiptId: receipt.receiptId,
-      paymentDate: receipt.paymentDate,
-      amount: receipt.amount,
-      method: receipt.method || 'Cash',
-      status: receipt.status || 'Paid',
-      notes: receipt.notes,
-      student: {
-        studentId: receipt.studentId,
-        studentName: receipt.studentName || studentData.studentName || 'Student',
-        phone: studentData.phone || '',
-        email: studentData.email || '',
-        course: studentData.course || '',
-        group: studentData.group || '',
-        branch: studentData.branch || '',
-        guardian: studentData.guardian || '',
-      },
-      organization: orgData,
-    };
-  }
-
-  // GET /api/receipts/:receiptId/pdf — download or view receipt as PDF
+  // GET /api/receipts/:receiptId/pdf — download or view receipt as PDF (authenticated)
   app.get('/api/receipts/:receiptId/pdf', async (req, reply) => {
     const { receiptId } = req.params as { receiptId: string };
     const profileId = await resolveProfileId(req);
 
+    let receipt: any = null;
     const record = await getRecord<Receipt>(
       APPWRITE_COLLECTIONS.receipts,
       scopedEntityId(profileId, receiptId)
     );
-    if (!record?.data) {
+    if (record?.data) {
+      receipt = record.data;
+    } else {
+      // Fallback: search receipts in profile by receiptId or entityId
+      const allReceipts = await listScopedRecords<Receipt>(
+        APPWRITE_COLLECTIONS.receipts,
+        profileId
+      );
+      const match = allReceipts.find(
+        (r) =>
+          r.data.receiptId.toLowerCase() === receiptId.toLowerCase() ||
+          r.entityId.endsWith(`__${receiptId}`)
+      );
+      if (match?.data) {
+        receipt = match.data;
+      }
+    }
+
+    if (!receipt) {
       return reply.code(404).send({ error: 'Receipt not found' });
     }
 
-    const pdfData = await buildReceiptPdfData(profileId, record.data);
+    const pdfData = await buildReceiptPdfData(profileId, receipt);
+    const pdfBuffer = await generateReceiptPdf(pdfData);
+
+    return reply
+      .header('Content-Type', 'application/pdf')
+      .header(
+        'Content-Disposition',
+        `inline; filename="Receipt-${receiptId}.pdf"`
+      )
+      .send(pdfBuffer);
+  });
+
+  // GET /api/public/receipts/:receiptId/pdf — public receipt download without login
+  app.get('/api/public/receipts/:receiptId/pdf', async (req, reply) => {
+    const { receiptId } = req.params as { receiptId: string };
+    const allReceipts = await listRecords<Receipt>(APPWRITE_COLLECTIONS.receipts);
+    const match = allReceipts.find(
+      (r) =>
+        r.data.receiptId.toLowerCase() === receiptId.toLowerCase() ||
+        r.entityId.endsWith(`__${receiptId}`) ||
+        String(r.data.notes || '').includes(receiptId)
+    );
+
+    if (!match?.data) {
+      return reply.code(404).send({ error: 'Receipt not found' });
+    }
+
+    const profileId = match.entityId.includes('__')
+      ? match.entityId.split('__')[0]
+      : 'ORG-KRG73BEG';
+
+    const pdfData = await buildReceiptPdfData(profileId, match.data);
     const pdfBuffer = await generateReceiptPdf(pdfData);
 
     return reply

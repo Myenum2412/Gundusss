@@ -25,6 +25,7 @@ import {
 } from './payment-settings.js';
 import { getWaState, sendWaMessage, type WaAttachment } from '../whatsapp.js';
 import { generateReceiptPdf } from '../receipt-pdf.js';
+import { buildReceiptPdfData } from './collections.js';
 
 const YOUPI_API = (process.env.YOUPI_PAYMENT_API_URL ?? 'http://localhost:6100').replace(/\/+$/, '');
 const YOUPI_WEBHOOK_SECRET = process.env.YOUPI_WEBHOOK_SECRET ?? '';
@@ -1355,20 +1356,7 @@ export async function paymentRoutes(app: FastifyInstance) {
 
               const attachments: WaAttachment[] = [];
               try {
-                let studentData: any = {};
-                if (finalOrder.studentId) {
-                  const stuRec = await getRecord<any>(
-                    APPWRITE_COLLECTIONS.students,
-                    scopedEntityId(profileId, finalOrder.studentId)
-                  );
-                  if (stuRec?.data) studentData = stuRec.data;
-                }
-
-                let orgName = 'MyFees Learning Center';
-                const prof = await getProfile(profileId);
-                if (prof?.name) orgName = prof.name;
-
-                const pdfBuffer = await generateReceiptPdf({
+                const receiptPayload: any = {
                   receiptId: finalOrder.receiptId || orderId,
                   paymentDate: paymentDate(payload.completedAt),
                   amount: finalOrder.amount || payload.amount || '0',
@@ -1376,20 +1364,14 @@ export async function paymentRoutes(app: FastifyInstance) {
                   status: 'Paid',
                   orderId,
                   utr,
-                  notes: `Fee payment confirmation for ${finalOrder.studentName || 'Student'}`,
-                  student: {
-                    studentId: finalOrder.studentId || '—',
-                    studentName: finalOrder.studentName || studentData.studentName || 'Student',
-                    phone: recipientPhone,
-                    course: studentData.course || '',
-                    group: studentData.group || '',
-                    branch: studentData.branch || '',
-                    guardian: studentData.guardian || '',
-                  },
-                  organization: {
-                    name: orgName,
-                  },
-                });
+                  payerVpa: finalOrder.payerVpa,
+                  studentId: finalOrder.studentId || '',
+                  studentName: finalOrder.studentName,
+                  notes: `Fee payment confirmation for ${finalOrder.studentName || 'Student'} · Order: ${orderId}${utr ? ` · UTR: ${utr}` : ''}`,
+                };
+
+                const pdfData = await buildReceiptPdfData(profileId, receiptPayload);
+                const pdfBuffer = await generateReceiptPdf(pdfData);
 
                 attachments.push({
                   name: `Receipt_${finalOrder.receiptId || orderId}.pdf`,
@@ -1681,5 +1663,110 @@ export async function paymentRoutes(app: FastifyInstance) {
         createdAt: order.createdAt,
       },
     };
+  });
+
+  // GET /api/payments/:id/receipt/pdf — download receipt PDF for a payment order (authenticated)
+  app.get('/api/payments/:id/receipt/pdf', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const profileId = await resolveProfileId(req);
+    const order = await findLocalOrder(profileId, id);
+    if (!order) {
+      return reply.code(404).send({ error: 'Payment order not found' });
+    }
+
+    let receipt: any = null;
+    if (order.receiptId) {
+      const rec = await getRecord<any>(
+        APPWRITE_COLLECTIONS.receipts,
+        scopedEntityId(profileId, order.receiptId)
+      );
+      if (rec?.data) receipt = rec.data;
+    }
+
+    if (!receipt) {
+      const allReceipts = await listScopedRecords<any>(
+        APPWRITE_COLLECTIONS.receipts,
+        profileId
+      );
+      const match = allReceipts.find(
+        (r) =>
+          (order.receiptId && r.data.receiptId === order.receiptId) ||
+          String(r.data.notes || '').includes(order.orderId)
+      );
+      if (match?.data) receipt = match.data;
+    }
+
+    if (!receipt) {
+      receipt = {
+        receiptId: order.receiptId || `RCP-${order.orderId}`,
+        studentId: order.studentId || '',
+        studentName: order.studentName,
+        amount: order.amount,
+        method: receiptMethod(order.method),
+        paymentDate: paymentDate(order.updatedAt),
+        status: 'Paid',
+        orderId: order.orderId,
+        utr: order.utr,
+        payerVpa: order.payerVpa,
+        notes: `Order: ${order.orderId}${order.utr ? ` · UTR: ${order.utr}` : ''}`,
+      };
+    }
+
+    const pdfData = await buildReceiptPdfData(profileId, receipt);
+    const pdfBuffer = await generateReceiptPdf(pdfData);
+
+    return reply
+      .header('Content-Type', 'application/pdf')
+      .header(
+        'Content-Disposition',
+        `inline; filename="Receipt-${receipt.receiptId}.pdf"`
+      )
+      .send(pdfBuffer);
+  });
+
+  // GET /api/public/payments/:id/receipt/pdf — public receipt download for an order
+  app.get('/api/public/payments/:id/receipt/pdf', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const order = await findOrderAcrossProfiles(id);
+    if (!order) {
+      return reply.code(404).send({ error: 'Payment order not found' });
+    }
+
+    const profileId = order.profileId || 'ORG-KRG73BEG';
+    let receipt: any = null;
+    if (order.receiptId) {
+      const rec = await getRecord<any>(
+        APPWRITE_COLLECTIONS.receipts,
+        scopedEntityId(profileId, order.receiptId)
+      );
+      if (rec?.data) receipt = rec.data;
+    }
+
+    if (!receipt) {
+      receipt = {
+        receiptId: order.receiptId || `RCP-${order.orderId}`,
+        studentId: order.studentId || '',
+        studentName: order.studentName,
+        amount: order.amount,
+        method: receiptMethod(order.method),
+        paymentDate: paymentDate(order.updatedAt),
+        status: 'Paid',
+        orderId: order.orderId,
+        utr: order.utr,
+        payerVpa: order.payerVpa,
+        notes: `Order: ${order.orderId}${order.utr ? ` · UTR: ${order.utr}` : ''}`,
+      };
+    }
+
+    const pdfData = await buildReceiptPdfData(profileId, receipt);
+    const pdfBuffer = await generateReceiptPdf(pdfData);
+
+    return reply
+      .header('Content-Type', 'application/pdf')
+      .header(
+        'Content-Disposition',
+        `inline; filename="Receipt-${receipt.receiptId}.pdf"`
+      )
+      .send(pdfBuffer);
   });
 }

@@ -53,7 +53,7 @@ import {
   getStudentSpecificPaymentUrl,
 } from "@/lib/reminder-message"
 import { loadStudents, type StoredStudent } from "@/lib/students-store"
-import { loadReceipts, type StoredReceipt } from "@/lib/receipts-store"
+import { loadReceipts, downloadReceiptPdf, type StoredReceipt } from "@/lib/receipts-store"
 import { loadFeeStructures, type StoredFeeStructure } from "@/lib/fee-structures-store"
 import { getWaStatus, sendWaMessage, type WaState } from "@/lib/api"
 import { CtaUrlBubble } from "@/components/ui/whatsapp/cta-url-bubble"
@@ -70,6 +70,7 @@ import {
   CreditCardIcon,
   EllipsisIcon,
   ExternalLinkIcon,
+  FileDownIcon,
   Loader2Icon,
   PhoneIcon,
   QrCodeIcon,
@@ -1767,13 +1768,31 @@ export default function PaymentsPage() {
                       </TableCell>
                       <TableCell className="min-w-[120px] whitespace-nowrap">
                         {record.receiptId ? (
-                          <Link
-                            href="/dashboard/receipts"
-                            className="inline-flex items-center gap-1 rounded bg-muted/60 px-2 py-0.5 font-mono text-xs text-foreground hover:bg-muted"
-                          >
-                            <ReceiptIcon className="size-3 text-muted-foreground" />
-                            <span>{record.receiptId}</span>
-                          </Link>
+                          <div className="flex items-center gap-1.5">
+                            <Link
+                              href="/dashboard/receipts"
+                              className="inline-flex items-center gap-1 rounded bg-muted/60 px-2 py-0.5 font-mono text-xs text-foreground hover:bg-muted"
+                            >
+                              <ReceiptIcon className="size-3 text-muted-foreground" />
+                              <span>{record.receiptId}</span>
+                            </Link>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={async () => {
+                                try {
+                                  await downloadReceiptPdf(record.receiptId!)
+                                } catch (err: any) {
+                                  alert(err?.message || "Failed to download receipt PDF")
+                                }
+                              }}
+                              title="Download PDF Receipt"
+                              className="size-6 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                            >
+                              <FileDownIcon className="size-3.5" />
+                            </Button>
+                          </div>
                         ) : (
                           <span className="font-mono text-xs text-muted-foreground">—</span>
                         )}
@@ -1843,12 +1862,27 @@ export default function PaymentsPage() {
                                 </>
                               )}
 
-                              {/* 5. View Receipt */}
+                              {/* 5. View & Download PDF Receipt */}
                               {record.receiptId && (
-                                <DropdownMenuItem render={<Link href="/dashboard/receipts" />}>
-                                  <ReceiptIcon className="size-4 text-muted-foreground" />
-                                  <span>View Receipt</span>
-                                </DropdownMenuItem>
+                                <>
+                                  <DropdownMenuItem
+                                    onClick={async () => {
+                                      try {
+                                        await downloadReceiptPdf(record.receiptId!)
+                                      } catch (err: any) {
+                                        alert(err?.message || "Failed to download receipt PDF")
+                                      }
+                                    }}
+                                    className="text-primary font-medium"
+                                  >
+                                    <FileDownIcon className="size-4 text-primary" />
+                                    <span>Download PDF Receipt</span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem render={<Link href="/dashboard/receipts" />}>
+                                    <ReceiptIcon className="size-4 text-muted-foreground" />
+                                    <span>View Receipts Roster</span>
+                                  </DropdownMenuItem>
+                                </>
                               )}
 
                               {/* 6. Copy Reference ID */}
