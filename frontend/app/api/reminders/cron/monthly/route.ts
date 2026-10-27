@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { backendBaseUrl } from "@/lib/backend-base"
 
 export const dynamic = "force-dynamic"
 
@@ -12,24 +13,7 @@ export const dynamic = "force-dynamic"
  * a month of fee reminders.
  */
 async function handleMonthlyCron(req: NextRequest) {
-  const backendBase =
-    process.env.BACKEND_INTERNAL_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    "http://127.0.0.1:4000"
-
-  if (!process.env.BACKEND_INTERNAL_URL && !process.env.NEXT_PUBLIC_API_URL) {
-    console.error(
-      "[reminders/cron/monthly] BACKEND_INTERNAL_URL or NEXT_PUBLIC_API_URL must be set in the deployment environment (127.0.0.1 does not resolve to the backend in production)"
-    )
-    return NextResponse.json(
-      {
-        error: "Backend URL not configured",
-        message:
-          "Set BACKEND_LOCAL_URL or CRON_PROXY_URL in the deployment environment",
-      },
-      { status: 500 }
-    )
-  }
+  const backendBase = backendBaseUrl()
 
   const url = new URL(
     "/api/reminders/cron/monthly",
