@@ -102,7 +102,7 @@ export function hydrateQueue(): Promise<void> {
 }
 
 /** Replace one workspace's queue row (or delete it when nothing is left). */
-async function persistProfileQueue(profileId: string): Promise<void> {
+async function writeProfileSnapshot(profileId: string): Promise<void> {
   const entityId = scopedEntityId(profileId, QUEUE_ENTITY);
   const profileJobs = jobs.filter((job) => job.profileId === profileId);
   try {
@@ -117,6 +117,19 @@ async function persistProfileQueue(profileId: string): Promise<void> {
       `[queue] failed to persist queue for ${profileId}: ${err?.message ?? err}`
     );
   }
+}
+
+// Appwrite writes for one workspace are serialised so an older snapshot can
+// never overwrite a newer claim/finish result.
+const writeChains = new Map<string, Promise<void>>();
+
+function persistProfileQueue(profileId: string): Promise<void> {
+  const previous = writeChains.get(profileId) ?? Promise.resolve();
+  const run = previous.catch(() => {}).then(() => writeProfileSnapshot(profileId));
+  writeChains.set(profileId, run);
+  return run.finally(() => {
+    if (writeChains.get(profileId) === run) writeChains.delete(profileId);
+  });
 }
 
 export async function enqueueReminderJob(job: ReminderQueueJob): Promise<void> {
