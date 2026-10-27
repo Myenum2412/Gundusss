@@ -2832,28 +2832,78 @@
       .mob-only-btn {
         display: inline !important;
       }
+
+      /* Mobile UPI App Grid & Responsive QR Card */
+      .ypg-mobile-upi-box {
+        display: block !important;
+      }
+
+      .ypg-qr-card-container {
+        flex-direction: column !important;
+        text-align: center !important;
+        align-items: center !important;
+        gap: 12px !important;
+        padding: 16px 12px !important;
+      }
+
+      .ypg-qr-details-col {
+        align-items: center !important;
+        text-align: center !important;
+      }
+
+      .ypg-upi-logos-row {
+        justify-content: center !important;
+        gap: 8px !important;
+      }
+
+      button.ypg-app-icon,
+      .ypg-app-icon {
+        width: 34px !important;
+        height: 34px !important;
+        border-radius: 8px !important;
+      }
     }
 
-    /* --- OFFICIAL GOOGLE PLAY STORE APP ICONS --- */
+    /* --- OFFICIAL GOOGLE PLAY STORE APP ICONS & WORKABLE BUTTONS --- */
     .ypg-upi-logos-row {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 7px;
       flex-wrap: wrap;
     }
 
+    button.ypg-app-icon,
     .ypg-app-icon {
-      width: 26px;
-      height: 26px;
-      border-radius: 6px;
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
       overflow: hidden;
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
-      display: flex;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
       background: #ffffff;
-      border: 1px solid #e2e8f0;
+      border: 1px solid #cbd5e1;
       flex-shrink: 0;
+      cursor: pointer;
+      padding: 2px;
+      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+      outline: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    button.ypg-app-icon:hover,
+    .ypg-app-icon:hover {
+      transform: translateY(-2px) scale(1.12);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18);
+      border-color: #3b82f6;
+    }
+
+    button.ypg-app-icon:active,
+    .ypg-app-icon:active {
+      transform: scale(0.92);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
     }
 
     .ypg-app-icon img {
@@ -2862,6 +2912,101 @@
       object-fit: cover;
       border-radius: 5px;
       display: block;
+      pointer-events: none;
+    }
+
+    /* Mobile Quick UPI Box (Shown seamlessly on mobile / small screens) */
+    .ypg-mobile-upi-box {
+      display: none;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin: 12px 0 16px 0;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+
+    .ypg-mobile-upi-heading {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #334155;
+      margin-bottom: 10px;
+    }
+
+    .ypg-mobile-upi-heading svg {
+      color: #2563eb;
+    }
+
+    .ypg-mobile-upi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .ypg-mobile-upi-chip {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 10px 4px;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      outline: none;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    .ypg-mobile-upi-chip:hover,
+    .ypg-mobile-upi-chip:active {
+      background: #eff6ff;
+      border-color: #93c5fd;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.12);
+    }
+
+    .ypg-mobile-chip-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .ypg-mobile-chip-icon img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .ypg-mobile-chip-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: #1e293b;
+      white-space: nowrap;
+    }
+
+    /* Auto Redirect Spinner */
+    .ypg-redirect-spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid #a7f3d0;
+      border-top-color: #059669;
+      border-radius: 50%;
+      animation: ypgSpin 0.75s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes ypgSpin {
+      to { transform: rotate(360deg); }
     }
 
     /* --- UPI SERVER HEALTH INDICATOR & DOWNTIME ALERT --- */

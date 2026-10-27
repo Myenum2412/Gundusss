@@ -2070,13 +2070,74 @@
             });
           } catch (e) { }
 
+          if (!data.returnUrl) {
+            try {
+              const urlParams = new URLSearchParams(window.location.search);
+              data.returnUrl = urlParams.get('returnUrl') || urlParams.get('redirectUrl') || null;
+            } catch (e) {}
+            if (!data.returnUrl && document.referrer) {
+              try {
+                const ref = new URL(document.referrer);
+                if (ref.protocol === 'http:' || ref.protocol === 'https:') {
+                  data.returnUrl = ref.href;
+                }
+              } catch (e) {}
+            }
+            if (!data.returnUrl) {
+              data.returnUrl = 'https://myfees.myenum.in';
+            }
+          }
+          if (data.returnUrl) {
+            try {
+              const parsed = new URL(data.returnUrl, window.location.origin);
+              if (!parsed.searchParams.has('orderId')) {
+                parsed.searchParams.set('orderId', data.orderId || data.id || PAYMENT_ID);
+              }
+              if (!parsed.searchParams.has('status')) {
+                parsed.searchParams.set('status', 'SUCCESS');
+              }
+              data.returnUrl = parsed.href;
+            } catch (e) {}
+          }
+
           const btnReturn = document.getElementById('btnReturnStore') || document.getElementById('btnReturnToStore');
           const safeReturnUrl = sanitizeRedirectUrl(data.returnUrl);
           if (btnReturn && safeReturnUrl) {
             btnReturn.hidden = false;
             btnReturn.href = safeReturnUrl;
-            if (window.parent === window) {
-              setTimeout(() => { window.location.href = safeReturnUrl; }, 6000);
+
+            // Auto-redirect notice & countdown
+            const redirectBanner = document.getElementById('successRedirectBanner');
+            const countdownEl = document.getElementById('redirectSecondsCount');
+            const btnImm = document.getElementById('btnImmediateRedirect');
+
+            if (redirectBanner) {
+              redirectBanner.style.display = 'block';
+              if (btnImm) {
+                btnImm.href = safeReturnUrl;
+                btnImm.onclick = (e) => {
+                  e.preventDefault();
+                  if (window.parent && window.parent !== window) {
+                    try { window.top.location.href = safeReturnUrl; return; } catch (e) {}
+                  }
+                  window.location.href = safeReturnUrl;
+                };
+              }
+              let seconds = 3;
+              if (countdownEl) countdownEl.textContent = seconds;
+              const timer = setInterval(() => {
+                seconds--;
+                if (countdownEl) countdownEl.textContent = seconds;
+                if (seconds <= 0) {
+                  clearInterval(timer);
+                  if (window.parent && window.parent !== window) {
+                    try { window.top.location.href = safeReturnUrl; return; } catch (e) {}
+                  }
+                  window.location.href = safeReturnUrl;
+                }
+              }, 1000);
+            } else if (window.parent === window) {
+              setTimeout(() => { window.location.href = safeReturnUrl; }, 3000);
             }
           } else if (btnReturn) {
             btnReturn.hidden = false;
@@ -2374,6 +2435,146 @@
           }
         } catch (e) {}
       }, 400);
+    }
+
+    // --- WORKABLE UPI INTENTS FOR GPAY, PAYTM, PHONEPE, ETC. ---
+    function getCanonicalUpiUri() {
+      if (state && state.upiUri && typeof state.upiUri === 'string' && state.upiUri.startsWith('upi://')) {
+        return state.upiUri;
+      }
+      const vpa = (state?.payeeVpa || state?.vpa || document.getElementById('displayVpaVal')?.textContent || '').trim();
+      if (!vpa) return null;
+      const amount = (state?.amount || '0.00').trim();
+      const merchantName = (state?.merchantName || state?.branding?.brandName || 'Store').trim();
+      const oId = (state?.orderId || state?.id || PAYMENT_ID).trim();
+
+      const params = new URLSearchParams();
+      params.set('pa', vpa);
+      params.set('pn', merchantName);
+      if (amount && amount !== '0.00') {
+        params.set('am', amount);
+      }
+      params.set('cu', 'INR');
+      params.set('tn', oId);
+      params.set('tr', oId);
+      return `upi://pay?${params.toString().replace(/\+/g, '%20')}`;
+    }
+
+    function openUpiApp(app = 'generic') {
+      const upiUri = getCanonicalUpiUri();
+      if (!upiUri) {
+        showToast('Payment details are loading. Please try again in a moment.');
+        return;
+      }
+
+      const qIdx = upiUri.indexOf('?');
+      const query = qIdx >= 0 ? upiUri.slice(qIdx + 1) : '';
+
+      const isAndroid = /Android/i.test(navigator.userAgent);
+      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const isMobile = isAndroid || isIOS || /Mobile|Silk|Kindle/i.test(navigator.userAgent);
+
+      let targetUrl = upiUri;
+
+      if (isAndroid) {
+        const fallbackEncoded = encodeURIComponent(upiUri);
+        switch (app) {
+          case 'gpay':
+            targetUrl = `intent://pay?${query}#Intent;scheme=upi;package=com.google.android.apps.nbu.paisa.user;S.browser_fallback_url=${fallbackEncoded};end`;
+            break;
+          case 'phonepe':
+            targetUrl = `intent://pay?${query}#Intent;scheme=upi;package=com.phonepe.app;S.browser_fallback_url=${fallbackEncoded};end`;
+            break;
+          case 'paytm':
+            targetUrl = `intent://pay?${query}#Intent;scheme=upi;package=net.one97.paytm;S.browser_fallback_url=${fallbackEncoded};end`;
+            break;
+          case 'cred':
+            targetUrl = `intent://pay?${query}#Intent;scheme=upi;package=com.dreamplug.androidapp;S.browser_fallback_url=${fallbackEncoded};end`;
+            break;
+          case 'bhim':
+            targetUrl = `intent://pay?${query}#Intent;scheme=upi;package=in.org.npci.upiapp;S.browser_fallback_url=${fallbackEncoded};end`;
+            break;
+          case 'amazonpay':
+            targetUrl = `intent://pay?${query}#Intent;scheme=upi;package=in.amazon.mShop.android.shopping;S.browser_fallback_url=${fallbackEncoded};end`;
+            break;
+          default:
+            targetUrl = upiUri;
+            break;
+        }
+      } else if (isIOS) {
+        switch (app) {
+          case 'gpay':
+            targetUrl = `tez://upi/pay?${query}`;
+            break;
+          case 'phonepe':
+            targetUrl = `phonepe://pay?${query}`;
+            break;
+          case 'paytm':
+            targetUrl = `paytmmp://pay?${query}`;
+            break;
+          case 'cred':
+            targetUrl = `cred://upi/pay?${query}`;
+            break;
+          default:
+            targetUrl = upiUri;
+            break;
+        }
+      } else {
+        // Desktop / Laptop: try protocol handler or app scheme
+        switch (app) {
+          case 'gpay':
+            targetUrl = `tez://upi/pay?${query}`;
+            break;
+          case 'phonepe':
+            targetUrl = `phonepe://pay?${query}`;
+            break;
+          case 'paytm':
+            targetUrl = `paytmmp://pay?${query}`;
+            break;
+          default:
+            targetUrl = upiUri;
+            break;
+        }
+      }
+
+      // Trigger app opening
+      try {
+        window.location.href = targetUrl;
+      } catch (e) {
+        window.location.href = upiUri;
+      }
+
+      const appLabels = {
+        gpay: 'Google Pay',
+        phonepe: 'PhonePe',
+        paytm: 'Paytm',
+        cred: 'CRED',
+        bhim: 'BHIM UPI',
+        amazonpay: 'Amazon Pay',
+        generic: 'UPI App'
+      };
+      const label = appLabels[app] || 'UPI App';
+      if (!isMobile) {
+        showToast(`Opening ${label}... You can also scan the QR code above on your phone.`);
+      }
+    }
+
+    function showToast(message) {
+      let toast = document.getElementById('ypgGlobalToast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'ypgGlobalToast';
+        toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0f172a;color:#ffffff;padding:10px 18px;border-radius:10px;font-size:12px;font-weight:600;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,0.25);transition:opacity 0.25s ease, transform 0.25s ease;opacity:0;pointer-events:none;max-width:90vw;text-align:center;';
+        document.body.appendChild(toast);
+      }
+      toast.textContent = message;
+      toast.style.opacity = '1';
+      toast.style.transform = 'translateX(-50%) translateY(0)';
+      clearTimeout(window._ypgToastTimer);
+      window._ypgToastTimer = setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(-50%) translateY(10px)';
+      }, 3500);
     }
 
     function copyVpaId() {

@@ -17,6 +17,8 @@ import {
   SUPER_PROFILE_ID,
   isValidProfileId,
   scopedEntityId,
+  PAYMENT_BASE_URL,
+  paymentUrlFor,
 } from '../tenant.js';
 import {
   fetchGatewaySettings,
@@ -195,6 +197,7 @@ interface CreatePaymentBody {
   description?: string;
   feeId?: number;
   method?: string;
+  returnUrl?: string;
 }
 
 interface UpstreamPayment {
@@ -496,6 +499,7 @@ export interface CreateGatewayCheckoutInput {
   orderId?: string;
   source: string;
   eventMessage?: string;
+  returnUrl?: string;
 }
 
 export interface GatewayCheckoutResult {
@@ -552,12 +556,20 @@ export async function createGatewayCheckout(
   const amountStr = amount.toFixed(2);
 
   let merchantName = 'Institute Office';
+  let profilePaymentUrl = '';
   try {
     const profile = await getProfile(input.profileId);
     if (profile?.name?.trim()) {
       merchantName = profile.name.trim();
     }
+    if (profile?.paymentUrl?.trim()) {
+      profilePaymentUrl = profile.paymentUrl.trim();
+    } else if (profile?.profileId) {
+      profilePaymentUrl = paymentUrlFor(profile.profileId, profile.name);
+    }
   } catch {}
+
+  const returnUrl = (input.returnUrl?.trim() || profilePaymentUrl || `${PAYMENT_BASE_URL}`).trim();
 
   const payload = {
     orderId,
@@ -565,6 +577,7 @@ export async function createGatewayCheckout(
     currency: 'INR',
     method,
     merchantName,
+    returnUrl,
     customer: {
       name: studentName,
       ...(input.email ? { email: input.email } : {}),
@@ -1579,6 +1592,7 @@ export async function paymentRoutes(app: FastifyInstance) {
           body.description ??
           `Fee payment for ${(body.studentName ?? '').trim()} - ${profile.name}`,
         method: body.method,
+        returnUrl: body.returnUrl,
         source: 'fees-public-portal',
         eventMessage: `Online UPI checkout initiated by ${(body.studentName ?? '').trim()}.`,
       });
