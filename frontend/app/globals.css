@@ -112,10 +112,32 @@
   html {
     @apply font-sans antialiased;
     text-rendering: optimizeLegibility;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "cv11", "ss01";
+  }
+  /* Keep the page inside the phone viewport — no horizontal panning. */
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+  img,
+  video,
+  canvas {
+    max-width: 100%;
+    height: auto;
+  }
+  a,
+  button,
+  input,
+  select,
+  textarea,
+  label {
+    touch-action: manipulation;
   }
   ::selection {
     background: oklch(0.21 0.006 285.89);
@@ -198,6 +220,15 @@
 @media (prefers-reduced-motion: reduce) {
   .app-transition {
     transition: none;
+  }
+}
+
+/* Mobile: keep form controls at 16px so iOS/Android do not auto-zoom on focus. */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1em);
   }
 }
 
