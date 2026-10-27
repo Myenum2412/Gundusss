@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/table"
 import {
   confirmCounterPayment,
+  confirmPayment,
   createStudentCheckoutUrl,
   declineCounterPayment,
   isGatewayCheckoutUrl,
@@ -60,6 +61,7 @@ import "@/components/ui/whatsapp/styles/whatsapp.css"
 import {
   BanknoteIcon,
   BellRingIcon,
+  CheckCircle2Icon,
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -729,6 +731,177 @@ function BulkReminderDialog({
   )
 }
 
+// Confirm Payment / Mark as Paid Dialog for any student or order
+function ConfirmPaymentDialog({
+  record,
+  open,
+  onOpenChange,
+  onSuccess,
+}: {
+  record: UnifiedPaymentRecord | null
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onSuccess: () => void
+}) {
+  const [method, setMethod] = useState("UPI")
+  const [utr, setUtr] = useState("")
+  const [amount, setAmount] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!record || !open) return
+    setMethod(record.method || "UPI")
+    setUtr(
+      record.utr && record.utr !== "—" && !record.utr.includes("Awaiting")
+        ? record.utr
+        : ""
+    )
+    setAmount(String(record.amount || ""))
+    setError(null)
+    setLoading(false)
+  }, [record, open])
+
+  if (!record) return null
+
+  async function handleConfirm(e: React.FormEvent) {
+    e.preventDefault()
+    if (!record) return
+    setLoading(true)
+    setError(null)
+    try {
+      await confirmPayment(record.orderId, {
+        method,
+        utr: utr.trim(),
+        amount: Number(amount) || Number(record.amount) || undefined,
+        operatorId: "admin",
+      })
+      onSuccess()
+      onOpenChange(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to confirm payment")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md p-0 overflow-hidden sm:max-w-md">
+        <div className="flex items-start justify-between border-b bg-muted/40 p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
+              <CheckCircle2Icon className="size-5" />
+            </div>
+            <div>
+              <DialogTitle className="text-base font-semibold">
+                Confirm Payment &amp; Issue Receipt
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground">
+                Mark as PAID. Creates an official receipt and marks fee paid in Appwrite.
+              </DialogDescription>
+            </div>
+          </div>
+        </div>
+
+        <form onSubmit={handleConfirm} className="space-y-4 p-5 text-xs">
+          {error && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400">
+              {error}
+            </div>
+          )}
+
+          <div className="rounded-xl border bg-card p-3 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-foreground text-sm">
+                {record.studentName}
+              </span>
+              <span className="font-mono text-[10px] text-muted-foreground">
+                {record.studentId}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-muted-foreground text-[11px]">
+              <span>Ref: {record.orderId}</span>
+              <span>
+                {record.course} · {record.group}
+              </span>
+            </div>
+          </div>
+
+          <Field>
+            <FieldLabel className="text-xs font-semibold">Amount Received (₹)</FieldLabel>
+            <Input
+              type="number"
+              step="0.01"
+              required
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="mt-1"
+            />
+          </Field>
+
+          <Field>
+            <FieldLabel className="text-xs font-semibold">Payment Method</FieldLabel>
+            <select
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+              className="mt-1 h-8 w-full rounded-lg border border-input bg-card px-2.5 text-xs shadow-xs outline-none focus-visible:border-ring font-medium"
+            >
+              <option value="UPI">UPI (QR / Direct Transfer)</option>
+              <option value="CASH_COUNTER">Cash at counter</option>
+              <option value="CARD_COUNTER">Card POS Machine</option>
+              <option value="Bank Transfer">Bank Transfer / IMPS / NEFT</option>
+            </select>
+          </Field>
+
+          <Field>
+            <FieldLabel className="text-xs font-semibold">
+              Bank Reference / UTR (Optional)
+            </FieldLabel>
+            <Input
+              type="text"
+              placeholder="e.g. 12-digit UPI UTR or bank reference"
+              value={utr}
+              onChange={(e) => setUtr(e.target.value)}
+              className="mt-1"
+            />
+          </Field>
+
+          <div className="flex items-center justify-end gap-2 pt-2 border-t">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={loading}
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={loading}
+              className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-xs"
+            >
+              {loading ? (
+                <>
+                  <Loader2Icon className="size-3.5 animate-spin" />
+                  <span>Confirming...</span>
+                </>
+              ) : (
+                <>
+                  <CheckIcon className="size-3.5" />
+                  <span>Confirm &amp; Generate Receipt</span>
+                </>
+              )}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export default function PaymentsPage() {
   const { can, activeProfile, profile } = useAuth()
   const companyName = activeProfile?.name || profile?.name || ""
@@ -747,6 +920,7 @@ export default function PaymentsPage() {
   const [timelineOrder, setTimelineOrder] = useState<PaymentOrder | null>(null)
   const [reminderRecord, setReminderRecord] = useState<UnifiedPaymentRecord | null>(null)
   const [collectRecord, setCollectRecord] = useState<UnifiedPaymentRecord | null>(null)
+  const [confirmModalRecord, setConfirmModalRecord] = useState<UnifiedPaymentRecord | null>(null)
   const [bulkReminderOpen, setBulkReminderOpen] = useState(false)
 
   const [actionId, setActionId] = useState<string | null>(null)
@@ -832,6 +1006,30 @@ export default function PaymentsPage() {
       if (s.studentName) studentByName.set(s.studentName.trim().toLowerCase(), s)
     }
 
+    // 1b. Build receipt lookup maps for cross-referencing orders and students
+    const receiptByOrderId = new Map<string, StoredReceipt>()
+    const receiptsByStudentId = new Map<string, StoredReceipt[]>()
+    const receiptsByStudentName = new Map<string, StoredReceipt[]>()
+
+    for (const r of receipts) {
+      if (r.receiptId) {
+        const orderMatch = String(r.notes || "").match(/(FEE-[\w-]+|ORD-[\w-]+|DEPLOY-[\w-]+|INV-[\w-]+)/i)
+        if (orderMatch) {
+          receiptByOrderId.set(orderMatch[1].toLowerCase(), r)
+        }
+      }
+      if (r.studentId) {
+        const key = r.studentId.trim().toLowerCase()
+        if (!receiptsByStudentId.has(key)) receiptsByStudentId.set(key, [])
+        receiptsByStudentId.get(key)!.push(r)
+      }
+      if (r.studentName) {
+        const key = r.studentName.trim().toLowerCase()
+        if (!receiptsByStudentName.has(key)) receiptsByStudentName.set(key, [])
+        receiptsByStudentName.get(key)!.push(r)
+      }
+    }
+
     // Default fee lookup helper
     const getStudentFee = (student: StoredStudent) => {
       for (const f of feeStructures) {
@@ -863,8 +1061,32 @@ export default function PaymentsPage() {
         studentById.get(order.studentId?.trim().toLowerCase()) ||
         studentByName.get(order.studentName?.trim().toLowerCase())
 
-      if (order.receiptId) {
-        coveredReceiptIds.add(order.receiptId.trim().toLowerCase())
+      const orderIdLower = order.orderId.trim().toLowerCase()
+
+      // Cross-reference any receipt matching this order
+      let matchedReceipt = receiptByOrderId.get(orderIdLower) || null
+      if (!matchedReceipt && order.receiptId) {
+        matchedReceipt =
+          receipts.find(
+            (r) => r.receiptId.toLowerCase() === order.receiptId?.toLowerCase()
+          ) || null
+      }
+      if (!matchedReceipt) {
+        const studentReceipts =
+          (order.studentId ? receiptsByStudentId.get(order.studentId.trim().toLowerCase()) : null) ||
+          (order.studentName ? receiptsByStudentName.get(order.studentName.trim().toLowerCase()) : null) ||
+          []
+        const candidate = studentReceipts.find(
+          (r) => !coveredReceiptIds.has(r.receiptId.trim().toLowerCase())
+        )
+        if (candidate) {
+          matchedReceipt = candidate
+        }
+      }
+
+      const effectiveReceiptId = order.receiptId || matchedReceipt?.receiptId || null
+      if (effectiveReceiptId) {
+        coveredReceiptIds.add(effectiveReceiptId.trim().toLowerCase())
       }
       if (stu?.studentId) {
         studentsWithPayments.add(stu.studentId.trim().toLowerCase())
@@ -874,6 +1096,13 @@ export default function PaymentsPage() {
 
       const effectiveStudentId = order.studentId || stu?.studentId || ""
       const payUrl = buildStudentPaymentUrl(effectiveStudentId, order.paymentUrl || order.checkoutUrl)
+
+      const isOrderPaid =
+        order.status === "SUCCESS" ||
+        order.status === "PAID" ||
+        order.status === "COMPLETED" ||
+        order.gatewayStatus === "SUCCESS" ||
+        Boolean(effectiveReceiptId)
 
       records.push({
         id: `ord-${order.orderId}`,
@@ -887,11 +1116,11 @@ export default function PaymentsPage() {
         email: stu?.email || "—",
         amount: order.amount,
         method: order.method || "UPI",
-        status: normalizeStatus(order.status) || "INITIATED",
-        gatewayStatus: order.gatewayStatus,
+        status: isOrderPaid ? "SUCCESS" : (normalizeStatus(order.status) || "INITIATED"),
+        gatewayStatus: isOrderPaid ? "SUCCESS" : order.gatewayStatus,
         paymentUrl: payUrl,
-        utr: order.utr || "—",
-        receiptId: order.receiptId,
+        utr: order.utr || matchedReceipt?.notes || "—",
+        receiptId: effectiveReceiptId,
         createdAt: order.createdAt || new Date().toISOString(),
         source: "gateway",
         rawOrder: order,
@@ -972,11 +1201,28 @@ export default function PaymentsPage() {
         continue
       }
 
+      const studentReceipts =
+        (sId ? receiptsByStudentId.get(sId) : null) ||
+        (sName ? receiptsByStudentName.get(sName) : null) ||
+        []
+      const matchedReceipt = studentReceipts.find(
+        (r) => !coveredReceiptIds.has(r.receiptId.trim().toLowerCase())
+      )
+
       const feeAmount = getStudentFee(student)
+      const hasPaidReceipt = Boolean(
+        matchedReceipt &&
+          (matchedReceipt.status?.toLowerCase() === "paid" ||
+            matchedReceipt.status?.toLowerCase() === "success")
+      )
+
+      if (matchedReceipt) {
+        coveredReceiptIds.add(matchedReceipt.receiptId.trim().toLowerCase())
+      }
 
       records.push({
         id: `stu-${student.studentId}`,
-        orderId: `INV-${student.studentId}`,
+        orderId: matchedReceipt ? matchedReceipt.receiptId : `INV-${student.studentId}`,
         paymentId: null,
         studentId: student.studentId,
         studentName: student.studentName,
@@ -984,18 +1230,19 @@ export default function PaymentsPage() {
         group: student.group || "—",
         phone: student.phone || "—",
         email: student.email || "—",
-        amount: feeAmount,
-        method: "UPI",
-        status: "INITIATED",
-        gatewayStatus: undefined,
+        amount: matchedReceipt ? matchedReceipt.amount : feeAmount,
+        method: matchedReceipt ? matchedReceipt.method : "UPI",
+        status: hasPaidReceipt ? "SUCCESS" : "INITIATED",
+        gatewayStatus: hasPaidReceipt ? "SUCCESS" : undefined,
         paymentUrl: buildStudentPaymentUrl(student.studentId),
-        utr: "Awaiting fee payment",
-        receiptId: null,
+        utr: matchedReceipt ? (matchedReceipt.notes || "—") : "Awaiting fee payment",
+        receiptId: matchedReceipt ? matchedReceipt.receiptId : null,
         createdAt: student.joiningDate
           ? `${student.joiningDate}T00:00:00.000Z`
           : new Date().toISOString(),
         source: "student",
         rawStudent: student,
+        rawReceipt: matchedReceipt,
       })
     }
 
@@ -1495,7 +1742,22 @@ export default function PaymentsPage() {
                       </TableCell>
                       <TableCell className="min-w-[140px] whitespace-nowrap">
                         <div className="flex flex-col items-start gap-1">
-                          <StatusBadge value={getSimplifiedStatus(record.status, record.receiptId)} />
+                          <div className="flex items-center gap-1.5">
+                            <StatusBadge value={getSimplifiedStatus(record.status, record.receiptId)} />
+                            {can("data:write") && getSimplifiedStatus(record.status, record.receiptId) === "UNPAID" && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="xs"
+                                onClick={() => setConfirmModalRecord(record)}
+                                className="h-5 px-1.5 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 border-emerald-600/30 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+                                title="Mark this fee payment as paid and generate receipt"
+                              >
+                                <CheckCircle2Icon className="size-3 mr-0.5 text-emerald-600 dark:text-emerald-400" />
+                                Mark Paid
+                              </Button>
+                            )}
+                          </div>
                           {isCounter && getSimplifiedStatus(record.status, record.receiptId) === "UNPAID" ? (
                             <span className="text-[10px] leading-tight text-amber-600 dark:text-amber-400">
                               Awaiting counter payment
@@ -1539,6 +1801,17 @@ export default function PaymentsPage() {
                                 <BellRingIcon className="size-4 text-emerald-600 dark:text-emerald-400" />
                                 <span>Send Reminder</span>
                               </DropdownMenuItem>
+
+                              {/* 1b. Mark as Paid / Confirm Payment */}
+                              {can("data:write") && getSimplifiedStatus(record.status, record.receiptId) === "UNPAID" && (
+                                <DropdownMenuItem
+                                  onClick={() => setConfirmModalRecord(record)}
+                                  className="text-emerald-700 dark:text-emerald-400 font-medium"
+                                >
+                                  <CheckCircle2Icon className="size-4 text-emerald-600 dark:text-emerald-400" />
+                                  <span>Confirm Payment / Mark Paid</span>
+                                </DropdownMenuItem>
+                              )}
 
                               {/* 2. Direct Collect button */}
                               {can("data:write") && (
@@ -1676,6 +1949,18 @@ export default function PaymentsPage() {
           }}
         />
       )}
+
+      {/* Confirm Payment / Mark as Paid Dialog */}
+      <ConfirmPaymentDialog
+        record={confirmModalRecord}
+        open={Boolean(confirmModalRecord)}
+        onOpenChange={(open) => {
+          if (!open) setConfirmModalRecord(null)
+        }}
+        onSuccess={() => {
+          reload()
+        }}
+      />
     </DashboardShell>
   )
 }

@@ -837,84 +837,170 @@ export async function paymentRoutes(app: FastifyInstance) {
   });
 
   // POST /api/payments/:id/counter-confirm — the cashier confirms a cash or
-  // card payment at the counter. YOUPI PG still owns the transition and emits
-  // the authoritative webhook that creates the fee receipt.
-  app.post('/api/payments/:id/counter-confirm', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const body = (req.body ?? {}) as { operatorId?: string };
-    const profileId = await resolveProfileId(req);
-    const order = await findLocalOrder(profileId, id);
+  async function confirmOrderPayment(
+    profileId: string,
+    id: string,
+    body: { operatorId?: string; utr?: string; method?: string; amount?: number | string; notes?: string }
+  ): Promise<LocalOrder> {
+    let order = await findLocalOrder(profileId, id);
 
-    if (!order) return reply.code(404).send({ error: 'Payment not found' });
-    if (!COUNTER_METHODS.has(order.method)) {
-      return reply
-        .code(400)
-        .send({ error: 'Only cash or card counter payments can be confirmed here.' });
-    }
-    if (TERMINAL_STATUSES.has(order.status)) {
-      return reply.code(409).send({ error: `Payment is already ${order.status}.` });
-    }
-    if (!order.paymentId) {
-      return reply.code(400).send({ error: 'Payment session has no gateway id.' });
-    }
-    if (!YOUPI_ADMIN_TOKEN) {
-      return reply
-        .code(500)
-        .send({ error: 'YOUPI_ADMIN_TOKEN is not configured in backend/.env.' });
-    }
-
-    let upstream: Response;
-    try {
-      upstream = await fetchYoupiWithRetry(`${YOUPI_API}/api/v1/admin/counter-confirm`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${YOUPI_ADMIN_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          paymentId: order.paymentId,
-          operatorId: body.operatorId?.trim() || 'fees-app',
-          method: order.method,
-        }),
-        signal: AbortSignal.timeout(10000),
-      });
-    } catch (err) {
-      app.log.error({ err }, 'YOUPI PG counter confirmation unreachable');
-      return reply.code(502).send({
-        error: `Payment gateway unreachable. Is YOUPI PG running at ${YOUPI_API}?`,
-      });
+    // If order not found by id, could it be a student ID (e.g. stu-STU-001 or STU-001)?
+    if (!order) {
+      const studentIdClean = id.replace(/^stu-/, '');
+      const studentRecords = await listScopedRecords<{ studentId: string; studentName: string }>(
+        APPWRITE_COLLECTIONS.students,
+        profileId
+      );
+      const studentMatch = studentRecords.find(
+        (s) =>
+          s.data.studentId.toLowerCase() === studentIdClean.toLowerCase() ||
+          s.data.studentName.toLowerCase() === studentIdClean.toLowerCase()
+      );
+      if (studentMatch) {
+        const createRes = await createGatewayCheckout({
+          profileId,
+          studentId: studentMatch.data.studentId,
+          studentName: studentMatch.data.studentName,
+          amount: Number(body.amount) || 4500,
+          method: body.method || 'UPI',
+          source: 'dashboard-confirm',
+        });
+        order = createRes.order;
+      }
     }
 
-    const json = (await upstream.json().catch(() => null)) as { error?: string } | null;
-    if (!upstream.ok) {
-      return reply.code(upstream.status).send({
-        error: json?.error ?? 'The gateway rejected the counter confirmation.',
-        details: json,
-      });
+    if (!order) {
+      throw new GatewayCheckoutError('Payment or student order not found', 404);
     }
 
+    const confirmedMethod = body.method ? receiptMethod(body.method) : receiptMethod(order.method);
+    const confirmedUtr = (body.utr ?? '').trim() || order.utr || '';
+
+    // Notify gateway if session has paymentId
+    if (order.paymentId && YOUPI_ADMIN_TOKEN) {
+      try {
+        await fetchYoupiWithRetry(`${YOUPI_API}/api/v1/admin/counter-confirm`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${YOUPI_ADMIN_TOKEN}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            paymentId: order.paymentId,
+            operatorId: body.operatorId?.trim() || 'fees-admin',
+            method: order.method,
+            utr: confirmedUtr,
+          }),
+          signal: AbortSignal.timeout(5000),
+        });
+      } catch (err) {
+        app.log.warn({ err }, 'Gateway admin confirm notification non-critical error');
+      }
+    }
+
+    // Create or retrieve receipt
+    let receiptId = order.receiptId;
+    if (!receiptId) {
+      const receipts = await listReceipts(profileId);
+      const existingReceipt = receipts.find((receipt) =>
+        String(receipt.data.notes ?? '').includes(order.orderId)
+      );
+      if (existingReceipt) {
+        receiptId = existingReceipt.data.receiptId || existingReceipt.entityId;
+      } else {
+        receiptId = await nextReceiptId(profileId);
+        const receiptUpi = order.upiId || '';
+        const notes = `YOUPI PG · Method: ${confirmedMethod}${receiptUpi ? ` · UPI: ${receiptUpi}` : ''}${confirmedUtr ? ` · UTR: ${confirmedUtr}` : ''} · Order: ${order.orderId}`;
+        const receipt: ReceiptRecord = {
+          profileId,
+          receiptId,
+          orderId: order.orderId,
+          paymentId: order.paymentId || undefined,
+          studentId: order.studentId || '',
+          studentName: order.studentName,
+          amount: order.amount,
+          method: confirmedMethod,
+          upiId: receiptUpi || undefined,
+          utr: confirmedUtr || undefined,
+          institutionName: order.institutionName || undefined,
+          paymentDate: paymentDate(),
+          status: 'Paid',
+          notes,
+        };
+        await putRecord<ReceiptRecord>(RECEIPTS, scopedEntityId(profileId, receiptId), receipt);
+      }
+    }
+
+    // Mark fee paid
+    let feeId = order.feeId;
+    if (feeId === null && Number.isFinite(Number(order.amount))) {
+      const match = await findFeeByStudentAndAmount(profileId, order.studentName, Number(order.amount));
+      feeId = match ? match.id : null;
+    }
+    if (feeId !== null) {
+      const feeEntityId = scopedEntityId(profileId, String(feeId));
+      const feeRecord = await getRecord<Fee>(FEES, feeEntityId);
+      if (feeRecord && feeRecord.data.status !== 'paid') {
+        await putRecord<Fee>(FEES, feeEntityId, {
+          ...feeRecord.data,
+          status: 'paid',
+        });
+      }
+    }
+
+    // Update order to SUCCESS
     const refreshed: LocalOrder = {
       ...order,
-      status: order.receiptId ? 'SUCCESS' : 'PROCESSING',
+      status: 'SUCCESS',
       gatewayStatus: 'SUCCESS',
+      receiptId,
+      utr: confirmedUtr || order.utr,
+      method: body.method ? (normalizePaymentMethod(body.method) || order.method) : order.method,
+      completedAt: nowIso(),
       updatedAt: nowIso(),
     };
     await saveLocalOrder(refreshed);
 
     await recordPaymentEvent(profileId, {
       orderId: order.orderId,
-      status: refreshed.status,
+      status: 'SUCCESS',
       gatewayStatus: 'SUCCESS',
-      method: order.method,
-      source: 'counter-confirm',
-      message: refreshed.receiptId
-        ? 'Counter payment confirmed and the receipt is recorded.'
-        : 'Counter payment confirmed; waiting for the signed webhook to create the receipt.',
+      method: refreshed.method,
+      source: 'admin-confirm',
+      message: `Payment confirmed by admin/cashier. Receipt ${receiptId} issued.`,
     });
 
-    return {
-      data: { ...refreshed, events: await readPaymentEvents(profileId, order.orderId) },
-    };
+    return refreshed;
+  }
+
+  // POST /api/payments/:id/confirm — marks payment as paid, creates receipt, updates fee in Appwrite
+  app.post('/api/payments/:id/confirm', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as { operatorId?: string; utr?: string; method?: string; amount?: number | string; notes?: string };
+    const profileId = await resolveProfileId(req);
+    try {
+      const order = await confirmOrderPayment(profileId, id, body);
+      return {
+        data: { ...order, events: await readPaymentEvents(profileId, order.orderId) },
+      };
+    } catch (err) {
+      return checkoutErrorReply(reply, err);
+    }
+  });
+
+  // POST /api/payments/:id/counter-confirm — cashier confirmation alias for any payment method
+  app.post('/api/payments/:id/counter-confirm', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as { operatorId?: string; utr?: string; method?: string; amount?: number | string };
+    const profileId = await resolveProfileId(req);
+    try {
+      const order = await confirmOrderPayment(profileId, id, body);
+      return {
+        data: { ...order, events: await readPaymentEvents(profileId, order.orderId) },
+      };
+    } catch (err) {
+      return checkoutErrorReply(reply, err);
+    }
   });
 
   // POST /api/payments/:id/counter-decline — the cashier rejects a counter

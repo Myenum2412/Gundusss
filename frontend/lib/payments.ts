@@ -201,6 +201,23 @@ export function confirmCounterPayment(
   })
 }
 
+export function confirmPayment(
+  id: string,
+  options?: {
+    operatorId?: string
+    utr?: string
+    method?: string
+    amount?: number | string
+    notes?: string
+  }
+): Promise<PaymentOrder> {
+  return request<PaymentOrder>(`/api/payments/${encodeURIComponent(id)}/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options ?? {}),
+  })
+}
+
 export function declineCounterPayment(
   id: string,
   reason?: string,

@@ -19,6 +19,7 @@ import { loadFeeStructures, type StoredFeeStructure } from "@/lib/fee-structures
 import { loadGroups, type StoredGroup } from "@/lib/groups-store"
 import { resolveStudentFee } from "@/lib/fee-lookup"
 import {
+  confirmPayment,
   createPayment,
   getPayment,
   paymentMethodLabel,
@@ -163,6 +164,7 @@ export function PayWithGateway({
   const [order, setOrder] = useState<PaymentOrder | null>(null)
   const [method, setMethod] = useState<PaymentMethod>("UPI")
   const [loading, setLoading] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copiedUrl, setCopiedUrl] = useState(false)
   const notified = useRef(false)
@@ -673,6 +675,39 @@ export function PayWithGateway({
                           {order.paymentId ? ` · ${order.paymentId}` : ""}
                         </p>
                         <StatusBadge value={order.status} />
+                      </div>
+
+                      <div className="flex items-center justify-between rounded-xl border border-emerald-600/20 bg-emerald-500/5 p-2.5">
+                        <span className="text-xs text-muted-foreground">
+                          Payment completed by student?
+                        </span>
+                        <Button
+                          type="button"
+                          size="xs"
+                          disabled={confirming}
+                          onClick={async () => {
+                            setConfirming(true)
+                            try {
+                              const updated = await confirmPayment(order.orderId, {
+                                method: order.method,
+                              })
+                              setOrder(updated)
+                              onCompleted?.(updated)
+                            } catch (err: any) {
+                              setError(err.message || "Failed to confirm payment")
+                            } finally {
+                              setConfirming(false)
+                            }
+                          }}
+                          className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-xs"
+                        >
+                          {confirming ? (
+                            <Loader2Icon className="size-3 animate-spin" />
+                          ) : (
+                            <CheckIcon className="size-3" />
+                          )}
+                          <span>Payment Received (Mark Paid)</span>
+                        </Button>
                       </div>
                     </div>
                   )}
