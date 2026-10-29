@@ -1,4 +1,5 @@
 import http from 'node:http';
+import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,6 +54,41 @@ if (!process.env.BASE_PAYMENT_API_URL && typeof process.loadEnvFile === 'functio
   } catch {}
 }
 
+/**
+ * Validates a fees dashboard session token against the fees backend's public
+ * gate endpoint (the same endpoint the nginx auth_request uses). Resolves the
+ * gate verdict ({ ok, super }), or null when the fees backend is unreachable.
+ */
+function verifyFeesSession(feesGateUrl, token) {
+  return new Promise((resolve) => {
+    let gate;
+    try {
+      gate = new URL(feesGateUrl);
+    } catch {
+      resolve(null);
+      return;
+    }
+    const transport = gate.protocol === 'https:' ? https : http;
+    const req = transport.request({
+      hostname: gate.hostname,
+      port: gate.port || (gate.protocol === 'https:' ? 443 : 80),
+      path: `${gate.pathname}${gate.search}`,
+      method: 'GET',
+      timeout: 5000,
+      headers: { 'x-fees-arg': token }
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); } catch { resolve(null); }
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('fees gate timeout')));
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+}
+
 export class AdminServer {
   /**
    * @param {{
@@ -63,6 +99,9 @@ export class AdminServer {
   constructor(options = {}) {
     this.db = options.db || getDatabase();
     this.apiBaseUrl = options.apiBaseUrl || process.env.BASE_PAYMENT_API_URL || 'http://localhost:6100';
+    // Fees backend gate used by POST /api/admin/session to validate a fees
+    // dashboard session token (same endpoint nginx auth_request uses).
+    this.feesGateUrl = options.feesGateUrl || process.env.FEES_GATE_URL || 'http://127.0.0.1:4000/api/auth/gate';
     this.merchantRepo = new MerchantRepository(this.db);
     this.ticketRepo = new SupportTicketRepository(this.db);
     this.htmlTemplatePath = path.join(__dirname, 'views', 'admin.html');
@@ -121,6 +160,49 @@ export class AdminServer {
           ...BASE_SECURITY_HEADERS
         });
         res.end(JSON.stringify(tickets));
+        return;
+      }
+
+      // POST /api/admin/session — one-shot credential exchange for the embedded
+      // fees-dashboard console. The dashboard opens this panel as
+      // .../youpi-admin/?fees_token=<session JWT>; nginx auth_request already
+      // gated the page load, but the fees JWT itself cannot authorize
+      // /api/v1/admin/* (those need the gateway admin token). Instead of
+      // prompting the operator, the panel calls this once with its fees_token;
+      // we re-validate with the fees backend's gate and hand out the admin
+      // token ONLY when the session belongs to an active SUPER admin. Never
+      // cached, and the panel strips the JWT from its URL immediately.
+      if (pathname === '/api/admin/session') {
+        let raw = '';
+        req.on('data', (chunk) => { raw += chunk; if (raw.length > 16384) req.destroy(); });
+        req.on('end', async () => {
+          if (req.method !== 'POST') {
+            res.writeHead(405, { 'Content-Type': 'application/json', Allow: 'POST', 'Cache-Control': 'no-store', ...BASE_SECURITY_HEADERS });
+            res.end(JSON.stringify({ error: 'Method not allowed' }));
+            return;
+          }
+          let body = null;
+          try { body = JSON.parse(raw || '{}'); } catch {}
+          const feesToken = String((body && body.fees_token) || '').trim();
+          if (!feesToken) {
+            res.writeHead(400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...BASE_SECURITY_HEADERS });
+            res.end(JSON.stringify({ error: 'fees_token required' }));
+            return;
+          }
+          const verdict = await verifyFeesSession(this.feesGateUrl, feesToken);
+          if (!verdict) {
+            res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...BASE_SECURITY_HEADERS });
+            res.end(JSON.stringify({ error: 'Could not verify the session. Try again.' }));
+            return;
+          }
+          if (!verdict.ok || verdict.super !== true) {
+            res.writeHead(401, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...BASE_SECURITY_HEADERS });
+            res.end(JSON.stringify({ error: 'Open the Gateway Admin from the dashboard to continue.' }));
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...BASE_SECURITY_HEADERS });
+          res.end(JSON.stringify({ adminToken: getAdminToken() }));
+        });
         return;
       }
 

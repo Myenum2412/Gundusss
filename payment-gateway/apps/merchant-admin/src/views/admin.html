@@ -3726,6 +3726,7 @@
       async function authedFetch(input, init) {
         const url = typeof input === 'string' ? input : (input && input.url) || '';
         if (!isProtected(url)) return nativeFetch(input, init);
+        await seedFromFeesToken();
         if (!read()) {
           await prompt();
           if (typeof connectAdminEventsSse === 'function') connectAdminEventsSse();
@@ -3747,8 +3748,50 @@
         return res;
       }
 
+      // Seeded sign-in: the orgmenu dashboard opens this panel as
+      // .../youpi-admin/?fees_token=<fees session JWT>. That JWT cannot
+      // authorize /api/v1/admin/* directly, so it is exchanged once through
+      // POST /api/admin/session for the real admin token; the merchant-admin
+      // server only honors the swap when the fees backend confirms the session
+      // belongs to an active super admin. The credential is stripped from the
+      // URL immediately, so it never lands in browser history, server logs or
+      // referrer headers.
+      let seedPromise = null;
+      function seedFromFeesToken() {
+        if (seedPromise) return seedPromise;
+        seedPromise = (async () => {
+          const params = new URLSearchParams(window.location.search);
+          const feesToken = (params.get('fees_token') || '').trim();
+          if (!feesToken) return;
+          params.delete('fees_token');
+          const rest = params.toString();
+          try {
+            history.replaceState(null, '', window.location.pathname + (rest ? '?' + rest : '') + window.location.hash);
+          } catch (e) { }
+          if (read()) return;
+          try {
+            const res = await nativeFetch('/api/admin/session', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fees_token: feesToken })
+            });
+            if (!res.ok) return;
+            const data = await res.json().catch(() => null);
+            const adminToken = data && typeof data.adminToken === 'string' ? data.adminToken : '';
+            if (adminToken) write(adminToken);
+          } catch (e) { }
+        })();
+        return seedPromise;
+      }
+
       window.fetch = authedFetch;
-      return { token: read, ensure: () => (read() ? Promise.resolve() : prompt()) };
+      return {
+        token: read,
+        ensure: async () => {
+          await seedFromFeesToken();
+          return read() ? Promise.resolve() : prompt();
+        }
+      };
     })();
 
     const API_BASE = "{{API_BASE_URL}}";

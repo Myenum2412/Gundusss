@@ -24,11 +24,12 @@
 | `PAYMENT_PROCESSING_WINDOW_MS` | `30000` | Duration of verification slot (30 seconds = 30,000ms) |
 | `LATE_OBSERVATION_WINDOW_MS` | `1800000` | Safety window for matching late observations (30 minutes) |
 | `ANDROID_ENROLLMENT_SECRET` | auto-generated | Secret used to authorize device QR pairing. If unset, a random value is created in `data/.secrets/android_enrollment_secret` |
-| `ADMIN_API_TOKEN` | auto-generated | Bearer token required by `/api/v1/admin/*` (the Merchant Admin page asks for it once per tab). If unset, a random value is created in `data/.secrets/admin_api_token` |
+| `ADMIN_API_TOKEN` | auto-generated | Bearer token required by `/api/v1/admin/*`. Super-admin sessions can now auto-sign in (see `FEES_GATE_URL`), so the per-tab prompt is only a fallback. If unset, a random value is created in `data/.secrets/admin_api_token` |
 | `OBSERVER_API_TOKEN` | auto-generated | Bearer token the local Gmail/SMS observers use to submit observations (`data/.secrets/observer_api_token`) |
 | `COIN_STORE_WEBHOOK_SECRET` | auto-generated | Webhook secret seeded for the default merchant and used by the demo coin store (`data/.secrets/coin_store_webhook_secret`) |
 | `FEES_WHATSAPP_BRIDGE_URL` | `http://127.0.0.1:4000` | Fees backend base URL used to deliver WhatsApp OTPs when this gateway's own WhatsApp session is not linked |
 | `FEES_WHATSAPP_BRIDGE_TOKEN` | falls back to `COIN_STORE_WEBHOOK_SECRET` | Shared secret sent as `X-WhatsApp-Bridge-Token`. Must match `WHATSAPP_BRIDGE_TOKEN` (or `YOUPI_WEBHOOK_SECRET`) on the fees backend |
+| `FEES_GATE_URL` | `http://127.0.0.1:4000/api/auth/gate` | Fees backend session-gate endpoint used by `POST /api/admin/session` to validate a `?fees_token=` exchange. Only sessions the gate confirms as active SUPER admins receive `ADMIN_API_TOKEN` |
 | `YOUPI_EXPOSE_DEV_OTP` | unset | Set to `true` for local development to get the OTP in the `send-otp` response. Ignored when `NODE_ENV=production` |
 | `YOUPI_ALLOW_DEV_TOOLS` | unset | Developer test-mode / simulator endpoints (`/admin/dev/*`, `simulate-observation`) are refused when `NODE_ENV=production` unless this is `true` |
 | `GMAIL_REDIRECT_URI` | derived | Gmail OAuth redirect URI. Defaults to `<gmail host from your configured domain>/oauth/callback` |
