@@ -33,11 +33,13 @@ const chartConfig = {
   },
   paid: {
     label: "Paid",
-    color: "var(--chart-2)",
+    // Green — Tailwind emerald-600 (works on light and dark backgrounds)
+    color: "oklch(0.596 0.145 163.225)",
   },
   unpaid: {
     label: "Unpaid",
-    color: "var(--chart-1)",
+    // Red — Tailwind red-600
+    color: "oklch(0.577 0.245 27.325)",
   },
 } satisfies ChartConfig
 
