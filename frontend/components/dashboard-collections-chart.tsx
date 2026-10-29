@@ -73,7 +73,7 @@ export function DashboardCollectionsChart({
   const [activeChart, setActiveChart] =
     React.useState<keyof typeof chartConfig>("paid")
 
-  const hasData = data.length > 0
+  const hasData = data.some((d) => d.paid !== 0 || d.unpaid !== 0)
 
   return (
     <Card
@@ -86,7 +86,7 @@ export function DashboardCollectionsChart({
           </CardTitle>
           <CardDescription className="text-xs">
             {hasData
-              ? "Toggle between collected and unpaid dues · bars show the last 6 months"
+              ? "Toggle between collected and unpaid dues · Jan – Dec"
               : "Summed from the Receipts and Payments pages"}
           </CardDescription>
         </div>

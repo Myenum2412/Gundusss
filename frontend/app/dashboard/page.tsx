@@ -147,26 +147,30 @@ export default function Page() {
 
   const unpaidTotal = unpaidDues.reduce((sum, d) => sum + d.amount, 0)
 
-  // Monthly series (last 6 months) for the interactive Paid/Unpaid chart.
+  // Monthly series (Jan–Dec of the current year, always all 12 months) for
+  // the interactive Paid/Unpaid chart. Payments are bucketed by calendar
+  // month across years so nothing is dropped.
   const collectionsData = (() => {
-    const map = new Map<string, { paid: number; unpaid: number }>()
+    const year = new Date().getFullYear()
+    const months = Array.from({ length: 12 }, (_, i) => ({
+      month: `${year}-${String(i + 1).padStart(2, "0")}`,
+      paid: 0,
+      unpaid: 0,
+    }))
     for (const r of paidReceipts) {
       const key = (r.paymentDate || "").slice(0, 7)
       if (!/^\d{4}-\d{2}$/.test(key)) continue
-      const e = map.get(key) ?? { paid: 0, unpaid: 0 }
-      e.paid += parseFloat(String(r.amount)) || 0
-      map.set(key, e)
+      const idx = Number(key.slice(5, 7)) - 1
+      if (idx < 0 || idx > 11) continue
+      months[idx].paid += parseFloat(String(r.amount)) || 0
     }
     for (const d of unpaidDues) {
       if (!/^\d{4}-\d{2}$/.test(d.month)) continue
-      const e = map.get(d.month) ?? { paid: 0, unpaid: 0 }
-      e.unpaid += d.amount
-      map.set(d.month, e)
+      const idx = Number(d.month.slice(5, 7)) - 1
+      if (idx < 0 || idx > 11) continue
+      months[idx].unpaid += d.amount
     }
-    return [...map.entries()]
-      .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
-      .slice(-6)
-      .map(([month, v]) => ({ month, paid: v.paid, unpaid: v.unpaid }))
+    return months
   })()
 
   // Collections by payment method (from receipts page data)
