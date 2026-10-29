@@ -28,6 +28,7 @@ import {
 import { getWaState, sendWaMessage, type WaAttachment } from '../whatsapp.js';
 import { generateReceiptPdf } from '../receipt-pdf.js';
 import { buildReceiptPdfData } from './collections.js';
+import { generateNextMonthBill } from '../billing.js';
 
 const YOUPI_API = (process.env.YOUPI_PAYMENT_API_URL ?? 'http://localhost:6100').replace(/\/+$/, '');
 const YOUPI_WEBHOOK_SECRET = process.env.YOUPI_WEBHOOK_SECRET ?? '';
@@ -103,7 +104,7 @@ function normalizePaymentMethod(value?: string): PaymentMethodValue | null {
     : null;
 }
 
-const TERMINAL_STATUSES = new Set([
+export const TERMINAL_STATUSES = new Set<string>([
   'SUCCESS',
   'FAILED',
   'EXPIRED',
@@ -467,6 +468,226 @@ async function findFeeByStudentAndAmount(
   return matches[0] ?? null;
 }
 
+interface SettlementDetail {
+  orderId: string;
+  event: string;
+  method: string;
+  utr: string;
+  amount?: string;
+  completedAt?: string;
+  explicitFeeId?: number | null;
+  metaStudentName?: string;
+  metaPhone?: string;
+}
+
+/**
+ * Settle a successful payment: mark the fee paid (flagging an OVERPAID
+ * receipt when another order already settled the same fee), create exactly
+ * one receipt (idempotent across retries), auto-generate the next month's
+ * bill, and send the WhatsApp receipt notification. Shared by the signed
+ * webhook and the reconciliation sweep so a lost webhook can be recovered
+ * losslessly.
+ * Returns null when the receipt could not be recorded — callers must ask
+ * the sender to retry.
+ */
+async function settleSuccessPayment(
+  app: FastifyInstance,
+  profileId: string,
+  order: LocalOrder,
+  detail: SettlementDetail,
+  source: string
+): Promise<{ order: LocalOrder; overpaid: boolean } | null> {
+  const orderId = detail.orderId;
+  let current = (await getLocalOrder(profileId, orderId)) ?? order;
+
+  // Resolve the fee to mark paid: explicit id, then order linkage, else a
+  // matching pending fee for the same student and amount.
+  let feeId: number | null = detail.explicitFeeId ?? current.feeId ?? null;
+  const paidAmount = Number(detail.amount ?? current.amount ?? '');
+  if (feeId === null && Number.isFinite(paidAmount)) {
+    const match = await findFeeByStudentAndAmount(
+      profileId,
+      current.studentName,
+      paidAmount
+    );
+    feeId = match ? match.id : null;
+  }
+
+  // Overpayment detection: this payment succeeded but the same fee was
+  // already settled by a different successful order. The money is real, so
+  // it is still receipted — but flagged OVERPAID instead of silently
+  // double-collecting.
+  let overpaid = false;
+  if (feeId !== null) {
+    const feeEntityId = scopedEntityId(profileId, String(feeId));
+    const feeRecord = await getRecord<Fee>(FEES, feeEntityId);
+    if (feeRecord) {
+      const orders = await listOrders(profileId);
+      overpaid = orders.some(
+        (other) =>
+          other.feeId === feeId &&
+          other.orderId !== orderId &&
+          other.status === 'SUCCESS'
+      );
+      if (feeRecord.data.status !== 'paid') {
+        const settledFee: Fee = { ...feeRecord.data, status: 'paid' };
+        await putRecord<Fee>(FEES, feeEntityId, settledFee);
+        // The next month's bill is generated automatically the moment this
+        // one settles.
+        await generateNextMonthBill(profileId, settledFee, 'settlement');
+      }
+    }
+    // Remember a fuzzy-matched fee so a webhook retry cannot mark a second
+    // fee for the same student/amount.
+    if (current.feeId !== feeId) {
+      current = { ...current, feeId, updatedAt: nowIso() };
+      await saveLocalOrder(current);
+    }
+  }
+
+  // Create exactly one receipt per order, even across webhook retries.
+  try {
+    await withReceiptLock(async () => {
+      const latest = (await getLocalOrder(profileId, orderId)) ?? current;
+      if (latest.receiptId) return;
+
+      const receipts = await listReceipts(profileId);
+      const existingReceipt = receipts.find((receipt) =>
+        String(receipt.data.notes ?? '').includes(orderId)
+      );
+      if (existingReceipt) {
+        existingReceipt.data.receiptId = existingReceipt.data.receiptId || existingReceipt.entityId;
+        await saveLocalOrder({
+          ...latest,
+          receiptId: existingReceipt.data.receiptId,
+          updatedAt: nowIso(),
+        });
+        return;
+      }
+
+      const receiptId = await nextReceiptId(profileId);
+      const receiptMethodName = receiptMethod(detail.method || latest.method);
+      const receiptUpi = latest.upiId || '';
+      const receiptUtr = detail.utr || latest.utr;
+      const notes = `YOUPI PG · Method: ${receiptMethodName}${receiptUpi ? ` · UPI: ${receiptUpi}` : ''}${receiptUtr ? ` · UTR: ${receiptUtr}` : ''} · Order: ${orderId}${overpaid ? ' · OVERPAID: fee already settled by another payment' : ''}`;
+      const receipt: ReceiptRecord = {
+        profileId,
+        receiptId,
+        orderId,
+        paymentId: latest.paymentId || undefined,
+        studentId: latest.studentId || '',
+        studentName: latest.studentName || detail.metaStudentName || '',
+        amount: detail.amount ?? latest.amount ?? '',
+        method: receiptMethodName,
+        upiId: receiptUpi || undefined,
+        utr: receiptUtr || undefined,
+        payerVpa: latest.payerVpa || undefined,
+        institutionName: latest.institutionName || undefined,
+        paymentDate: paymentDate(detail.completedAt),
+        status: overpaid ? 'Overpaid' : 'Paid',
+        notes,
+      };
+      await putRecord<ReceiptRecord>(
+        RECEIPTS,
+        scopedEntityId(profileId, receiptId),
+        receipt
+      );
+      await saveLocalOrder({
+        ...latest,
+        receiptId,
+        updatedAt: nowIso(),
+      });
+    });
+  } catch (err) {
+    app.log.error({ err, profileId }, 'Failed to create receipt for YOUPI payment');
+    // Tell the caller to retry: the receipt has not been recorded yet.
+    return null;
+  }
+
+  // Receipt and fee are durable now: publish the authoritative SUCCESS.
+  const settled = (await getLocalOrder(profileId, orderId)) ?? current;
+  const finalOrder: LocalOrder = {
+    ...settled,
+    profileId,
+    status: detail.event,
+    gatewayStatus: detail.event,
+    updatedAt: nowIso(),
+  };
+  await saveLocalOrder(finalOrder);
+
+  await recordPaymentEvent(profileId, {
+    orderId,
+    status: detail.event,
+    gatewayStatus: detail.event,
+    method: detail.method,
+    source,
+    message: finalOrder.receiptId
+      ? `Receipt ${finalOrder.receiptId} created${overpaid ? ' (OVERPAID — fee was already settled)' : ''} and the fee is marked paid.`
+      : 'Payment settled by the gateway.',
+  });
+
+  // Automatically send payment receipt confirmation to student WhatsApp if
+  // a phone number is available.
+  try {
+    const wa = getWaState();
+    if (wa.status === 'ready') {
+      let recipientPhone = '';
+      if (finalOrder.studentId) {
+        const stuRec = await getRecord<{ phone?: string }>(
+          APPWRITE_COLLECTIONS.students,
+          scopedEntityId(profileId, finalOrder.studentId)
+        );
+        recipientPhone = stuRec?.data?.phone || '';
+      }
+      if (!recipientPhone && detail.metaPhone) {
+        recipientPhone = detail.metaPhone;
+      }
+      if (recipientPhone) {
+        const cleanPhone = recipientPhone.replace(/\D/g, '');
+        if (cleanPhone.length >= 10) {
+          const receiptText = `🎉 *Payment Confirmation - Receipt #${finalOrder.receiptId || 'Paid'}*\n\nDear ${finalOrder.studentName || 'Student / Parent'},\n\nWe have successfully received your fee payment of *₹${finalOrder.amount || detail.amount || '0'}*.\n\n• *Order ID:* ${orderId}\n• *Method:* ${detail.method || 'UPI'}${detail.utr ? `\n• *UTR / Ref:* ${detail.utr}` : ''}\n• *Date:* ${paymentDate(detail.completedAt)}\n• *Status:* Confirmed (Paid)\n\nPlease find your official fee payment receipt attached in PDF format.\n\nThank you for your payment!\n— Accounts Desk`;
+
+          const attachments: WaAttachment[] = [];
+          try {
+            const receiptPayload: any = {
+              receiptId: finalOrder.receiptId || orderId,
+              paymentDate: paymentDate(detail.completedAt),
+              amount: finalOrder.amount || detail.amount || '0',
+              method: detail.method || 'UPI',
+              status: 'Paid',
+              orderId,
+              utr: detail.utr,
+              payerVpa: finalOrder.payerVpa,
+              studentId: finalOrder.studentId || '',
+              studentName: finalOrder.studentName,
+              notes: `Fee payment confirmation for ${finalOrder.studentName || 'Student'} · Order: ${orderId}${detail.utr ? ` · UTR: ${detail.utr}` : ''}`,
+            };
+
+            const pdfData = await buildReceiptPdfData(profileId, receiptPayload);
+            const pdfBuffer = await generateReceiptPdf(pdfData);
+
+            attachments.push({
+              name: `Receipt_${finalOrder.receiptId || orderId}.pdf`,
+              mime: 'application/pdf',
+              data: pdfBuffer.toString('base64'),
+            });
+          } catch (pdfErr) {
+            app.log.warn({ pdfErr }, 'Could not generate receipt PDF for WhatsApp send');
+          }
+
+          void sendWaMessage(cleanPhone, receiptText, attachments).catch((err: any) => {
+            app.log.warn({ err }, 'Could not send WhatsApp payment confirmation');
+          });
+        }
+      }
+    }
+  } catch (err) {
+    // Non-blocking
+  }
+
+  return { order: finalOrder, overpaid };
+}
+
 export class GatewayCheckoutError extends Error {
   statusCode: number;
   code?: string;
@@ -525,6 +746,23 @@ export async function createGatewayCheckout(
   const studentName = (input.studentName ?? '').trim();
   if (!studentName) {
     throw new GatewayCheckoutError('studentName is required', 400);
+  }
+
+  // Duplicate-payment guard: never open a checkout for a fee that a previous
+  // payment already settled. This is how one fee was collected twice (UPI +
+  // cash) with two receipts for the same ₹10 bill.
+  if (input.feeId !== null && input.feeId !== undefined) {
+    const feeRecord = await getRecord<Fee>(
+      FEES,
+      scopedEntityId(input.profileId, String(input.feeId))
+    );
+    if (feeRecord && feeRecord.data.status === 'paid') {
+      throw new GatewayCheckoutError(
+        `Fee #${input.feeId} for ${feeRecord.data.student_name} is already paid. Duplicate payment blocked.`,
+        409,
+        'FEE_ALREADY_PAID'
+      );
+    }
   }
 
   const method = normalizePaymentMethod(input.method);
@@ -915,6 +1153,26 @@ export async function paymentRoutes(app: FastifyInstance) {
     // Create or retrieve receipt
     let receiptId = order.receiptId;
     if (!receiptId) {
+      // Overpayment detection: if a different successful order already
+      // settled this fee, issue the receipt but flag it — money is real,
+      // but the fee has been covered once already.
+      let overpaid = false;
+      if (order.feeId !== null && order.feeId !== undefined) {
+        const feeRecord = await getRecord<Fee>(
+          FEES,
+          scopedEntityId(profileId, String(order.feeId))
+        );
+        if (feeRecord?.data.status === 'paid') {
+          const orders = await listOrders(profileId);
+          overpaid = orders.some(
+            (other) =>
+              other.feeId === order.feeId &&
+              other.orderId !== order.orderId &&
+              other.status === 'SUCCESS'
+          );
+        }
+      }
+
       const receipts = await listReceipts(profileId);
       const existingReceipt = receipts.find((receipt) =>
         String(receipt.data.notes ?? '').includes(order.orderId)
@@ -924,7 +1182,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       } else {
         receiptId = await nextReceiptId(profileId);
         const receiptUpi = order.upiId || '';
-        const notes = `YOUPI PG · Method: ${confirmedMethod}${receiptUpi ? ` · UPI: ${receiptUpi}` : ''}${confirmedUtr ? ` · UTR: ${confirmedUtr}` : ''} · Order: ${order.orderId}`;
+        const notes = `YOUPI PG · Method: ${confirmedMethod}${receiptUpi ? ` · UPI: ${receiptUpi}` : ''}${confirmedUtr ? ` · UTR: ${confirmedUtr}` : ''} · Order: ${order.orderId}${overpaid ? ' · OVERPAID: fee already settled by another payment' : ''}`;
         const receipt: ReceiptRecord = {
           profileId,
           receiptId,
@@ -938,7 +1196,7 @@ export async function paymentRoutes(app: FastifyInstance) {
           utr: confirmedUtr || undefined,
           institutionName: order.institutionName || undefined,
           paymentDate: paymentDate(),
-          status: 'Paid',
+          status: overpaid ? 'Overpaid' : 'Paid',
           notes,
         };
         await putRecord<ReceiptRecord>(RECEIPTS, scopedEntityId(profileId, receiptId), receipt);
@@ -1158,8 +1416,10 @@ export async function paymentRoutes(app: FastifyInstance) {
     }
     if (!profileId) profileId = SUPER_PROFILE_ID;
 
-    // Only receipt money that was actually received.
-    const moneyReceived = event === 'SUCCESS';
+    // Only receipt money that was actually received. Per the YOUPI webhook
+    // contract, SUCCESS with method COD carries NO money (cash on delivery
+    // has not been collected yet) — it must never issue a receipt.
+    const moneyReceived = event === 'SUCCESS' && method !== 'COD';
 
     // Hold the order at PROCESSING until the receipt exists, so the UI never
     // shows "paid" without its receipt being recorded.
@@ -1236,177 +1496,100 @@ export async function paymentRoutes(app: FastifyInstance) {
     });
 
     if (moneyReceived) {
-      let current = (await getLocalOrder(profileId, orderId)) ?? order;
-
-      // Resolve the fee to mark paid: explicit id, else a matching pending fee.
-      let feeId: number | null = metaFeeId ?? current.feeId ?? null;
-      const paidAmount = Number(payload.amount ?? current.amount ?? '');
-      if (feeId === null && Number.isFinite(paidAmount)) {
-        const match = await findFeeByStudentAndAmount(
-          profileId,
-          current.studentName,
-          paidAmount
-        );
-        feeId = match ? match.id : null;
-      }
-      if (feeId !== null) {
-        const feeEntityId = scopedEntityId(profileId, String(feeId));
-        const feeRecord = await getRecord<Fee>(FEES, feeEntityId);
-        if (feeRecord && feeRecord.data.status !== 'paid') {
-          await putRecord<Fee>(FEES, feeEntityId, {
-            ...feeRecord.data,
-            status: 'paid',
-          });
-        }
-        // Remember a fuzzy-matched fee so a webhook retry cannot mark a
-        // second fee for the same student/amount.
-        if (current.feeId !== feeId) {
-          current = { ...current, feeId, updatedAt: nowIso() };
-          await saveLocalOrder(current);
-        }
-      }
-
-      // Create exactly one receipt per order, even across webhook retries.
-      try {
-        await withReceiptLock(async () => {
-          const latest = (await getLocalOrder(profileId, orderId)) ?? current;
-          if (latest.receiptId) return;
-
-          const receipts = await listReceipts(profileId);
-          const existingReceipt = receipts.find((receipt) =>
-            String(receipt.data.notes ?? '').includes(orderId)
-          );
-          if (existingReceipt) {
-            existingReceipt.data.receiptId = existingReceipt.data.receiptId || existingReceipt.entityId;
-            await saveLocalOrder({
-              ...latest,
-              receiptId: existingReceipt.data.receiptId,
-              updatedAt: nowIso(),
-            });
-            return;
-          }
-
-          const receiptId = await nextReceiptId(profileId);
-          const receiptMethodName = receiptMethod(method || latest.method);
-          const receiptUpi = latest.upiId || metaUpiId;
-          const receiptUtr = utr || latest.utr;
-          const notes = `YOUPI PG · Method: ${receiptMethodName}${receiptUpi ? ` · UPI: ${receiptUpi}` : ''}${receiptUtr ? ` · UTR: ${receiptUtr}` : ''} · Order: ${orderId}`;
-          const receipt: ReceiptRecord = {
-            profileId,
-            receiptId,
-            orderId,
-            paymentId: latest.paymentId || undefined,
-            studentId: latest.studentId || '',
-            studentName: latest.studentName || metaStudentName,
-            amount: payload.amount ?? latest.amount ?? '',
-            method: receiptMethodName,
-            upiId: receiptUpi || undefined,
-            utr: receiptUtr || undefined,
-            payerVpa: latest.payerVpa || undefined,
-            institutionName: latest.institutionName || undefined,
-            paymentDate: paymentDate(payload.completedAt),
-            status: 'Paid',
-            notes,
-          };
-          await putRecord<ReceiptRecord>(
-            RECEIPTS,
-            scopedEntityId(profileId, receiptId),
-            receipt
-          );
-          await saveLocalOrder({
-            ...latest,
-            receiptId,
-            updatedAt: nowIso(),
-          });
-        });
-      } catch (err) {
-        app.log.error({ err, profileId }, 'Failed to create receipt for YOUPI payment');
+      const settledResult = await settleSuccessPayment(
+        app,
+        profileId,
+        existing ?? order,
+        {
+          orderId,
+          event,
+          method,
+          utr,
+          amount: payload.amount,
+          completedAt: payload.completedAt,
+          explicitFeeId: metaFeeId,
+          metaStudentName,
+          metaPhone:
+            payload.metadata && typeof payload.metadata.phone === 'string'
+              ? payload.metadata.phone
+              : undefined,
+        },
+        'webhook'
+      );
+      if (!settledResult) {
         // Ask the gateway to retry: the receipt has not been recorded yet.
         return reply.code(500).send({ error: 'Could not record receipt' });
       }
-
-      // Receipt and fee are durable now: publish the authoritative SUCCESS.
-      const settled = (await getLocalOrder(profileId, orderId)) ?? current;
-      const finalOrder: LocalOrder = {
-        ...settled,
-        profileId,
-        status: event,
-        gatewayStatus: event,
-        updatedAt: nowIso(),
-      };
-      await saveLocalOrder(finalOrder);
-
-      await recordPaymentEvent(profileId, {
-        orderId,
-        status: event,
-        gatewayStatus: event,
-        method,
-        source: 'webhook',
-        message: finalOrder.receiptId
-          ? `Receipt ${finalOrder.receiptId} created and the fee is marked paid.`
-          : 'Payment settled by the gateway.',
-      });
-
-      // Automatically send payment receipt confirmation to student WhatsApp if phone is available
-      try {
-        const wa = getWaState();
-        if (wa.status === 'ready') {
-          let recipientPhone = '';
-          if (finalOrder.studentId) {
-            const stuRec = await getRecord<{ phone?: string }>(
-              APPWRITE_COLLECTIONS.students,
-              scopedEntityId(profileId, finalOrder.studentId)
-            );
-            recipientPhone = stuRec?.data?.phone || '';
-          }
-          if (!recipientPhone && payload.metadata && typeof payload.metadata.phone === 'string') {
-            recipientPhone = String(payload.metadata.phone);
-          }
-          if (recipientPhone) {
-            const cleanPhone = recipientPhone.replace(/\D/g, '');
-            if (cleanPhone.length >= 10) {
-              const receiptText = `🎉 *Payment Confirmation - Receipt #${finalOrder.receiptId || 'Paid'}*\n\nDear ${finalOrder.studentName || 'Student / Parent'},\n\nWe have successfully received your fee payment of *₹${finalOrder.amount || payload.amount || '0'}*.\n\n• *Order ID:* ${orderId}\n• *Method:* ${method || 'UPI'}${utr ? `\n• *UTR / Ref:* ${utr}` : ''}\n• *Date:* ${paymentDate(payload.completedAt)}\n• *Status:* Confirmed (Paid)\n\nPlease find your official fee payment receipt attached in PDF format.\n\nThank you for your payment!\n— Accounts Desk`;
-
-              const attachments: WaAttachment[] = [];
-              try {
-                const receiptPayload: any = {
-                  receiptId: finalOrder.receiptId || orderId,
-                  paymentDate: paymentDate(payload.completedAt),
-                  amount: finalOrder.amount || payload.amount || '0',
-                  method: method || 'UPI',
-                  status: 'Paid',
-                  orderId,
-                  utr,
-                  payerVpa: finalOrder.payerVpa,
-                  studentId: finalOrder.studentId || '',
-                  studentName: finalOrder.studentName,
-                  notes: `Fee payment confirmation for ${finalOrder.studentName || 'Student'} · Order: ${orderId}${utr ? ` · UTR: ${utr}` : ''}`,
-                };
-
-                const pdfData = await buildReceiptPdfData(profileId, receiptPayload);
-                const pdfBuffer = await generateReceiptPdf(pdfData);
-
-                attachments.push({
-                  name: `Receipt_${finalOrder.receiptId || orderId}.pdf`,
-                  mime: 'application/pdf',
-                  data: pdfBuffer.toString('base64'),
-                });
-              } catch (pdfErr) {
-                app.log.warn({ pdfErr }, 'Could not generate receipt PDF for WhatsApp send');
-              }
-
-              void sendWaMessage(cleanPhone, receiptText, attachments).catch((err: any) => {
-                app.log.warn({ err }, 'Could not send WhatsApp payment confirmation');
-              });
-            }
-          }
-        }
-      } catch (err) {
-        // Non-blocking
+      if (settledResult.overpaid) {
+        req.log.warn(
+          { orderId, profileId },
+          'OVERPAID: a different order already settled this fee — receipt flagged instead of silently double-collecting'
+        );
       }
     }
 
     return { received: true, event, orderId };
+  });
+
+  // POST /api/payments/reconcile — recovery sweep for lost webhooks. Any
+  // non-terminal order in this workspace whose gateway session already
+  // reports SUCCESS but which never received its signed webhook (e.g. the
+  // merchant webhook was misconfigured) is settled here through the exact
+  // same code path as the webhook — receipt, fee, OVERPAID checks and all.
+  app.post('/api/payments/reconcile', async (req, reply) => {
+    const profileId = await resolveProfileId(req);
+    const orders = await listOrders(profileId);
+    const openOrders = orders.filter((o) => !TERMINAL_STATUSES.has(o.status));
+
+    const settled: string[] = [];
+    const failed: Array<{ orderId: string; error: string }> = [];
+    for (const order of openOrders) {
+      // A locally-settled order does not need recovery.
+      if (order.receiptId) continue;
+
+      const gateway = await fetchGatewayPayment(order.paymentId, order.orderId);
+      const gatewayStatus = (gateway?.internalStatus ?? gateway?.status ?? '').toUpperCase();
+      if (gatewayStatus !== 'SUCCESS') continue;
+
+      const gatewayMethod = (gateway?.method ?? order.method ?? 'UPI').toUpperCase();
+      // COD never carries money (see webhook contract) — skip it.
+      if (gatewayMethod === 'COD') continue;
+
+      const result = await settleSuccessPayment(
+        app,
+        profileId,
+        order,
+        {
+          orderId: order.orderId,
+          event: 'SUCCESS',
+          method: gatewayMethod,
+          utr: gateway?.utr ?? '',
+          amount: order.amount,
+          completedAt: gateway?.completedAt,
+        },
+        'reconciliation'
+      );
+      if (result) {
+        settled.push(order.orderId);
+      } else {
+        failed.push({ orderId: order.orderId, error: 'receipt write failed; will retry' });
+      }
+    }
+
+    if (settled.length > 0) {
+      app.log.info(
+        { profileId, settled, failedCount: failed.length },
+        'Gateway reconciliation settled order(s) missing their webhook'
+      );
+    }
+    return reply.send({
+      data: {
+        checked: openOrders.length,
+        settled,
+        settledCount: settled.length,
+        failed,
+      },
+    });
   });
 
   // GET /api/public/profile/:slug — read public workspace payment details for checkout page
