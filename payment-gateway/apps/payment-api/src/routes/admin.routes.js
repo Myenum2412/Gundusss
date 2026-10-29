@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { HttpServer } from '../server.js';
-import { PaymentStatus, PaymentMethod, SellingMode, AuditActorType, isValidVpa, toRupeesString, deriveCloudflareRoutes, resolveRuntimeUrls, resolveGmailRedirectUri, createOAuthState, validateOutboundWebhookUrl } from '@youpi/common';
+import { PaymentStatus, PaymentMethod, SellingMode, AuditActorType, isValidVpa, toRupeesString, deriveCloudflareRoutes, resolveRuntimeUrls, resolveGmailRedirectUri, createOAuthState, validateOutboundWebhookUrl, TERMINAL_STATES } from '@youpi/common';
 import { PaymentVerificationPipeline } from '@youpi/core';
 import { globalTunnelManager } from '../services/tunnel-manager.js';
 import { formatQrDataUrl } from '../services/whatsapp-berry.service.js';
@@ -285,11 +285,25 @@ export function registerAdminRoutes(server, ctx) {
       return;
     }
 
-    if (session.status === PaymentStatus.SUCCESS) {
-      HttpServer.json(res, 200, {
-        confirmed: true,
+    // A counter confirmation stands for money physically taken at the desk.
+    // Digital UPI sessions MUST settle exclusively through the verification
+    // engine — force-settling them here lets one fee be collected twice.
+    const counterMethods = new Set([PaymentMethod.CASH_COUNTER, PaymentMethod.CARD_COUNTER]);
+    if (!counterMethods.has(session.method)) {
+      HttpServer.json(res, 400, {
+        error: `Only cash or card counter sessions can be confirmed at the counter (session method: ${session.method || 'UNKNOWN'}).`
+      });
+      return;
+    }
+
+    // A session can be confirmed once, and only once: refusals instead of a
+    // silent 200 replay keep two different receipts from being issued for
+    // the same payment.
+    if (TERMINAL_STATES.includes(session.status)) {
+      HttpServer.json(res, 409, {
+        error: `Payment is already ${session.status} and cannot be confirmed again.`,
         paymentId: session.id,
-        status: PaymentStatus.SUCCESS,
+        status: session.status,
         orderId: session.orderId
       });
       return;
