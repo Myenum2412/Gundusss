@@ -56,16 +56,17 @@ function formatDate(value: string) {
 // The gateway-admin panel is served privately under the fees API origin
 // (https://api.myenum.in/youpi-admin/) and is gated per-request by the fees
 // session JWT — not by any public URL. The console appends its own session
-// token; nginx validates it with the backend before the panel loads.
-// Super-admin (orgmenu) only: regular workspaces never get this panel.
+// token; the panel exchanges it once for the gateway admin token (verified
+// against /api/auth/gate for super-admin sessions only), so no admin-token
+// prompt ever appears. Super-admin (orgmenu) only: regular workspaces never
+// get this panel.
 function gatewayAdminUrl(token: string | null): string {
   if (typeof window === "undefined") return ""
+  const query = token ? `?fees_token=${encodeURIComponent(token)}` : ""
   if (/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
-    return "http://127.0.0.1:6001/"
+    return `http://127.0.0.1:6001/${query}`
   }
-  return token
-    ? `https://api.myenum.in/youpi-admin/?fees_token=${encodeURIComponent(token)}`
-    : ""
+  return token ? `https://api.myenum.in/youpi-admin/${query}` : ""
 }
 
 function CopyLinkButton({ value }: { value: string }) {
