@@ -70,7 +70,10 @@ export function DashboardCollectionsChart({
   className,
 }: {
   data: CollectionsPoint[]
-  totals: { paid: number; unpaid: number }
+  totals: {
+    paid: { amount: number; count: number }
+    unpaid: { amount: number; count: number }
+  }
   className?: string
 }) {
   const [activeChart, setActiveChart] =
@@ -106,7 +109,12 @@ export function DashboardCollectionsChart({
                 {chartConfig[key].label}
               </span>
               <span className="text-lg leading-none font-bold tabular-nums sm:text-xl">
-                {inr(totals[key])}
+                {inr(totals[key].amount)}
+              </span>
+              <span className="text-[11px] text-muted-foreground tabular-nums">
+                {key === "paid"
+                  ? `${totals.paid.count} payment${totals.paid.count === 1 ? "" : "s"}`
+                  : `${totals.unpaid.count} student${totals.unpaid.count === 1 ? "" : "s"} awaiting`}
               </span>
             </button>
           ))}

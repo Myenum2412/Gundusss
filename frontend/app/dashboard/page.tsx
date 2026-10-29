@@ -226,7 +226,10 @@ export default function Page() {
       <div className="grid shrink-0 gap-3 lg:grid-cols-5">
         <DashboardCollectionsChart
           data={collectionsData}
-          totals={{ paid: collected, unpaid: unpaidTotal }}
+          totals={{
+            paid: { amount: collected, count: paidReceipts.length },
+            unpaid: { amount: unpaidTotal, count: unpaidDues.length },
+          }}
           className="lg:col-span-3"
         />
 
