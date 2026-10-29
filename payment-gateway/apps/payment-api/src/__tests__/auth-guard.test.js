@@ -125,6 +125,39 @@ describe('Auth guard: admin, observer and force-success endpoints', () => {
     assert.equal(second.status, 409);
   });
 
+  test('counter-decline cannot decline a UPI session, even with the admin token', async () => {
+    const created = await call('/api/v1/payments', {
+      method: 'POST',
+      token: TEST_ADMIN_TOKEN,
+      body: { orderId: 'UPI-NO-DECLINE-1', amount: '100.00', method: PaymentMethod.UPI, autoActivate: true }
+    });
+    assert.equal(created.status, 201);
+    const { paymentId } = await created.json();
+
+    const res = await call('/api/v1/admin/counter-decline', {
+      method: 'POST',
+      token: TEST_ADMIN_TOKEN,
+      body: { paymentId, operatorId: 'op1', reason: 'test' }
+    });
+    assert.equal(res.status, 400);
+
+    const state = await (await call(`/api/v1/payments/${paymentId}`, { token: TEST_ADMIN_TOKEN })).json();
+    assert.notEqual(state.internalStatus, 'FAILED');
+  });
+
+  test('a cash counter session can be declined once at the desk', async () => {
+    const created = await call('/api/v1/payments', {
+      method: 'POST',
+      token: TEST_ADMIN_TOKEN,
+      body: { orderId: 'CASH-DECLINE-1', amount: '50.00', method: PaymentMethod.CASH_COUNTER }
+    });
+    const { paymentId } = await created.json();
+    const res = await call('/api/v1/admin/counter-decline', { method: 'POST', token: TEST_ADMIN_TOKEN, body: { paymentId, operatorId: 'op1' } });
+    assert.equal(res.status, 200);
+    const state = await (await call(`/api/v1/payments/${paymentId}`, { token: TEST_ADMIN_TOKEN })).json();
+    assert.equal(state.internalStatus, 'FAILED');
+  });
+
   test('the APK download stays public', async () => {
     const apk = await call('/api/v1/admin/sms-gateway/download-apk');
     assert.notEqual(apk.status, 401);

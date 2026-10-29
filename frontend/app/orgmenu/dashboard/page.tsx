@@ -12,6 +12,8 @@ import {
   LayoutDashboardIcon,
   Loader2Icon,
   LogOutIcon,
+  ServerIcon,
+  ShieldAlertIcon,
   ShieldCheckIcon,
   UsersIcon,
 } from "lucide-react"
@@ -36,6 +38,7 @@ import {
 import { listProfiles, type ProfileSummary } from "@/lib/profiles"
 import {
   clearActiveProfileId,
+  getToken,
   setActiveProfileId,
 } from "@/lib/session"
 
@@ -48,6 +51,22 @@ function formatDate(value: string) {
     month: "short",
     day: "numeric",
   })
+}
+
+// The gateway-admin panel is served privately under the fees API origin
+// (https://api.myenum.in/youpi-admin/) and is gated per-request by the fees
+// session JWT — not by any public URL. The console appends its own session
+// token; the panel exchanges it once for the gateway admin token (verified
+// against /api/auth/gate for super-admin sessions only), so no admin-token
+// prompt ever appears. Super-admin (orgmenu) only: regular workspaces never
+// get this panel.
+function gatewayAdminUrl(token: string | null): string {
+  if (typeof window === "undefined") return ""
+  const query = token ? `?fees_token=${encodeURIComponent(token)}` : ""
+  if (/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
+    return `http://127.0.0.1:6001/${query}`
+  }
+  return token ? `https://api.myenum.in/youpi-admin/${query}` : ""
 }
 
 function CopyLinkButton({ value }: { value: string }) {
@@ -82,6 +101,12 @@ export default function OrgMenuDashboardPage() {
   const [profiles, setProfiles] = useState<ProfileSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Session token (first-party cookie) — read after mount so SSR renders safely.
+  const [sessionToken, setSessionToken] = useState<string | null>(null)
+  useEffect(() => {
+    setSessionToken(getToken())
+  }, [])
+  const gatewayAdminSrc = gatewayAdminUrl(sessionToken)
 
   const viewingOther = activeProfile.profileId !== profile.profileId
 
@@ -398,6 +423,55 @@ export default function OrgMenuDashboardPage() {
             </Table>
           </div>
         </div>
+
+        {/* YOUPI PG Gateway Admin — private, session-gated super-admin console.
+            Keep this block in orgmenu ONLY: it must never reappear in
+            workspace settings. */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between border-b pb-2">
+            <div>
+              <h2 className="text-[13px] font-semibold tracking-tight">
+                YOUPI PG Gateway Admin
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                UPI accounts, slots, observers and payment queue — served privately
+                under the dashboard (not publicly linked).
+              </p>
+            </div>
+            {gatewayAdminSrc && (
+              <a
+                href={gatewayAdminSrc}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+              >
+                <ShieldAlertIcon className="size-3.5" />
+                <span>Open Console</span>
+                <ExternalLinkIcon className="size-3" />
+              </a>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-400">
+            The panel loads with your super-admin session and is not reachable
+            from anywhere else. No extra sign-in is needed.
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+            {gatewayAdminSrc ? (
+              <iframe
+                src={gatewayAdminSrc}
+                title="YOUPI PG Gateway Admin"
+                className="h-[720px] w-full border-0"
+                loading="lazy"
+              />
+            ) : (
+              <p className="p-6 text-sm text-muted-foreground">
+                Sign in as super admin to load the payment gateway console.
+              </p>
+            )}
+          </div>
+        </section>
       </main>
     </div>
   )

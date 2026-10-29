@@ -140,14 +140,35 @@ export function runMigrations(targetDb) {
   } else {
     defaultMerchant = existing[0];
     if (!defaultMerchant.webhookSecret) {
+      // Preserve a merchant's configured webhook URL. Previously this branch
+      // hardcoded the demo-store URL, which silently reverted the fees
+      // backend's webhook whenever the secret needed rotation — so every
+      // successful payment stopped settling.
       merchantRepo.update(defaultMerchant.id, {
-        webhookUrl: 'http://localhost:5000/api/webhook',
-        webhookSecret: getCoinStoreWebhookSecret()
+        webhookUrl:
+          process.env.COIN_STORE_WEBHOOK_URL?.trim() ||
+          defaultMerchant.webhookUrl ||
+          'http://localhost:5000/api/webhook',
+        webhookSecret: getCoinStoreWebhookSecret(),
       });
     } else if (defaultMerchant.webhookSecret === LEGACY_DEFAULT_WEBHOOK_SECRET) {
       // Older installs were seeded with a publicly known secret: rotate it.
       merchantRepo.update(defaultMerchant.id, { webhookSecret: getCoinStoreWebhookSecret() });
       console.warn('[migrate] Rotated the default merchant webhook secret away from the legacy public value. Update your merchant webhook verifier.');
+    } else if (
+      process.env.COIN_STORE_WEBHOOK_URL?.trim() &&
+      (!defaultMerchant.webhookUrl || defaultMerchant.webhookUrl.includes('localhost:5000'))
+    ) {
+      // Heal the misconfiguration we actually found in production-like setups:
+      // the merchant kept the demo-store webhook URL even though the fees
+      // backend was configured, so SUCCESS webhooks 404'd and payments never
+      // settled.
+      merchantRepo.update(defaultMerchant.id, {
+        webhookUrl: process.env.COIN_STORE_WEBHOOK_URL.trim(),
+      });
+      console.warn(
+        `[migrate] Re-pointed merchant ${defaultMerchant.businessName} webhook from the demo store to COIN_STORE_WEBHOOK_URL`
+      );
     }
   }
 

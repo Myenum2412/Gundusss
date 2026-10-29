@@ -11,7 +11,15 @@ import { getProfile, listProfiles, resolveProfileId } from '../profiles.js';
 import { scopedEntityId } from '../tenant.js';
 import { getWaState, sendWaMessage } from '../whatsapp.js';
 import { enqueueReminderJob, workerSecret, type QueueItem } from '../queue.js';
-import { createGatewayCheckout } from './payments.js';
+import {
+  TERMINAL_STATUSES,
+  createGatewayCheckout,
+} from './payments.js';
+import {
+  generateNextMonthBillsForProfile,
+  markOverdueFees,
+} from '../billing.js';
+import { SUPER_PROFILE_ID } from '../tenant.js';
 
 const CRONJOB_API_BASE = 'https://api.cron-job.org';
 // Never hardcode this: set CRONJOB_API_KEY in backend/.env (gitignored) and in
@@ -40,6 +48,137 @@ function cronJobKey(storedKey?: string): string {
     throw new Error('CRONJOB_API_KEY is not configured in the backend environment');
   }
   return key;
+}
+
+/** 1 → 1st, 2 → 2nd, 3 → 3rd, 4 → 4th, 11 → 11th, 21 → 21st … */
+function ordinal(value: number): string {
+  const suffixes = ['th', 'st', 'nd', 'rd'];
+  const v = value % 100;
+  return value + (suffixes[(v - 20) % 10] ?? suffixes[v] ?? suffixes[0]);
+}
+
+/** "2026-11-05" → "5th November 2026" (or null when unparseable). */
+function formatDueDate(dueDate: string): string | null {
+  const parsed = new Date(`${dueDate}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const month = parsed.toLocaleString('en', { month: 'long', timeZone: 'UTC' });
+  return `${ordinal(parsed.getUTCDate())} ${month} ${parsed.getUTCFullYear()}`;
+}
+
+interface FeeStructureRow {
+  data: {
+    amount?: string | number;
+    courseGroup?: string;
+    studentIds?: string[];
+  };
+}
+
+/**
+ * Resolve the reminder amount for a student in priority order:
+ * 1. a fee structure whose studentIds list contains this student,
+ * 2. the fee amount configured on the student's group,
+ * 3. a structure matching the student's course/group name,
+ * 4. the first structure of the workspace (legacy behaviour),
+ * 5. the historical last-resort default.
+ */
+function resolveStudentFeeAmount(
+  student: { studentId?: string; course?: string; group?: string },
+  feeStructures: FeeStructureRow[],
+  feeMap: Map<string, string>
+): string {
+  for (const structure of feeStructures) {
+    if (structure.data.studentIds?.includes(student.studentId ?? '') && structure.data.amount) {
+      return String(structure.data.amount);
+    }
+  }
+  if (student.group && feeMap.has(student.group.toLowerCase())) {
+    return feeMap.get(student.group.toLowerCase())!;
+  }
+  for (const structure of feeStructures) {
+    const courseGroup = (structure.data.courseGroup ?? '').toLowerCase();
+    if (
+      ((student.course && courseGroup.includes(student.course.toLowerCase())) ||
+        (student.group && courseGroup.includes(student.group.toLowerCase()))) &&
+      structure.data.amount
+    ) {
+      return String(structure.data.amount);
+    }
+  }
+  if (feeStructures[0]?.data?.amount) return String(feeStructures[0].data.amount);
+  return '5000';
+}
+
+interface FeeBill {
+  id: number;
+  student_name: string;
+  amount: string | number;
+  status: 'pending' | 'paid' | 'overdue';
+  due_date: string;
+}
+
+/** The student's nearest unpaid bill (pending/overdue), if one exists. */
+function findStudentUnpaidFee(studentName: string, bills: FeeBill[]): FeeBill | null {
+  return (
+    bills
+      .filter(
+        (fee) =>
+          fee.status !== 'paid' &&
+          fee.student_name.toLowerCase() === studentName.toLowerCase()
+      )
+      .sort((a, b) => a.due_date.localeCompare(b.due_date))[0] ?? null
+  );
+}
+
+/**
+ * Find an already-open (non-terminal) UPI checkout for this exact student and
+ * amount that can still be paid, so repeated reminder runs reuse one session
+ * instead of creating sticky duplicate "INITIATED" orders forever.
+ */
+async function findReusableCheckoutOrder(
+  profileId: string,
+  studentId: string,
+  amountStr: string,
+  paidFeeIds: Set<number>
+): Promise<{ paymentUrl: string } | null> {
+  try {
+    const amount = Number(amountStr);
+    if (!Number.isFinite(amount)) return null;
+    const records = await listScopedRecords<{
+      studentId?: string;
+      amount?: string | number;
+      status?: string;
+      method?: string;
+      feeId?: number | null;
+      receiptId?: string | null;
+      paymentUrl?: string;
+      checkoutUrl?: string;
+      createdAt?: string;
+      updatedAt?: string;
+    }>(APPWRITE_COLLECTIONS.paymentOrders, profileId);
+    const candidates = records
+      .map((r) => r.data)
+      .filter(
+        (o) =>
+          o.studentId === studentId &&
+          Number(o.amount) === amount &&
+          !TERMINAL_STATUSES.has(String(o.status)) &&
+          !o.receiptId &&
+          String(o.method ?? 'UPI').toUpperCase() === 'UPI' &&
+          Boolean(o.paymentUrl || o.checkoutUrl) &&
+          !(o.feeId != null && paidFeeIds.has(Number(o.feeId)))
+      )
+      .sort((a, b) =>
+        String(b.updatedAt ?? b.createdAt ?? '').localeCompare(
+          String(a.updatedAt ?? a.createdAt ?? '')
+        )
+      );
+    const best = candidates[0];
+    return best
+      ? { paymentUrl: best.paymentUrl || best.checkoutUrl || '' }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface CronScheduleConfig {
@@ -107,6 +246,10 @@ export interface ReminderRunLog {
   sentCount: number;
   status: 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'SKIPPED' | 'QUEUED';
   details: string;
+  /** Bills flipped from pending → overdue during the hygiene sweep. */
+  overdueMarked?: number;
+  /** Next-month bills auto-created during the run. */
+  billsGenerated?: number;
   recipients: Array<{
     studentId: string;
     studentName: string;
@@ -280,19 +423,49 @@ async function executeMonthlyReminders(
   // randomized spacing instead of blasting them inline.
   const workerMode = Boolean(workerSecret());
 
+  // Bill hygiene before a single reminder goes out: past-due bills are marked
+  // overdue so the reminder text never lies, and students with a settled bill
+  // get their next month's pending bill generated automatically.
+  const overdueMarked = await markOverdueFees(profileId);
+  const generatedBills = await generateNextMonthBillsForProfile(profileId);
+
+  // The student's actual outstanding bill drives both the amount and the due
+  // date in the message.
+  const feeBills: FeeBill[] = (
+    await listScopedRecords<FeeBill>(APPWRITE_COLLECTIONS.fees, profileId)
+  ).map((r) => r.data);
+
+  // Fallback due day: the workspace's configured schedule (no more hardcoded
+  // "5th" when the fee structure says otherwise).
+  const reminderSettingsRecord = await getRecord<StoredReminderSettings>(
+    APPWRITE_COLLECTIONS.paymentSettings,
+    scopedEntityId(profileId, 'cron_reminders')
+  );
+  const scheduleDueDay =
+    Number(
+      reminderSettingsRecord?.data?.schedule?.dueDate ??
+        reminderSettingsRecord?.data?.schedule?.dayOfMonth ??
+        DEFAULT_SCHEDULE.dueDate
+    ) || (DEFAULT_SCHEDULE.dueDate as number);
+
   const recipientResults: ReminderRunLog['recipients'] = [];
   let sentCount = 0;
   const jobItems: QueueItem[] = [];
 
   for (const student of students) {
-    const studentFee =
-      feeMap.get((student.group || '').toLowerCase()) ||
-      feeRecords[0]?.data?.amount ||
-      '5000';
+    const studentFee = resolveStudentFeeAmount(student, feeRecords, feeMap);
     const amountStr = `₹${parseFloat(studentFee).toLocaleString('en-IN')}`;
     const studentPhone = (student.phone || '').replace(/\D/g, '');
+    const unpaidFee = findStudentUnpaidFee(student.studentName, feeBills);
 
-    const message = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${student.studentName}*,\n\nThis is your monthly fee reminder for *${student.course || 'Course'}* (${student.group || 'Batch'}).\n\n• Student ID: *${student.studentId}*\n• Monthly Fee: *${amountStr}*\n• Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\n\n— ${companyName} Accounts Desk`;
+    // Due date: the student's real bill due date when one exists, otherwise
+    // the workspace schedule day. Always concrete — never a hardcoded "5th".
+    const dueDateLabel =
+      (unpaidFee ? formatDueDate(unpaidFee.due_date) : null) ??
+      `${ordinal(scheduleDueDay)} of this month`;
+    const overdueNote = unpaidFee?.status === 'overdue' ? '⚠️ *This bill is overdue!*\n\n' : '';
+
+    const message = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${student.studentName}*,\n\n${overdueNote}This is your monthly fee reminder for *${student.course || 'Course'}* (${student.group || 'Batch'}).\n\n• Student ID: *${student.studentId}*\n• Monthly Fee: *${amountStr}*\n• Due Date: *${dueDateLabel}*\n\nPlease tap the link below to pay directly via UPI / Card:\n\n— ${companyName} Accounts Desk`;
 
     // Every reminder must carry a real, payable gateway checkout. Never fall
     // back to a hand-built workspace page URL: those links could not be
@@ -301,22 +474,41 @@ async function executeMonthlyReminders(
     let linkError: string | undefined;
     if (studentPhone.length >= 10 && isWaReady) {
       try {
-        const checkout = await createGatewayCheckout({
+        // Reuse an already-open, payable checkout for this same student and
+        // amount instead of minting a fresh gateway session on every run
+        // (which spams the orders list).
+        const reusable = await findReusableCheckoutOrder(
           profileId,
-          studentId: student.studentId,
-          studentName: student.studentName,
-          amount: studentFee,
-          email: student.email,
-          phone: studentPhone,
-          description: `Monthly fee payment for ${student.studentName} (${student.studentId})`,
-          method: 'UPI',
-          source: 'fee-reminder',
-          eventMessage: 'Monthly reminder checkout created.',
-        });
-        studentPaymentUrl = studentCheckoutUrl(
-          checkout.paymentUrl,
-          student.studentId
+          student.studentId,
+          String(Number(studentFee)),
+          unpaidFee ? new Set([unpaidFee.id]) : new Set<number>()
         );
+        if (reusable) {
+          studentPaymentUrl = studentCheckoutUrl(
+            reusable.paymentUrl,
+            student.studentId
+          );
+        } else {
+          const checkout = await createGatewayCheckout({
+            profileId,
+            studentId: student.studentId,
+            studentName: student.studentName,
+            amount: studentFee,
+            // Link the outstanding bill when one exists so the payment
+            // settles to it directly and duplicate payments are guarded.
+            feeId: unpaidFee ? unpaidFee.id : null,
+            email: student.email,
+            phone: studentPhone,
+            description: `Monthly fee payment for ${student.studentName} (${student.studentId})`,
+            method: 'UPI',
+            source: 'fee-reminder',
+            eventMessage: 'Monthly reminder checkout created.',
+          });
+          studentPaymentUrl = studentCheckoutUrl(
+            checkout.paymentUrl,
+            student.studentId
+          );
+        }
       } catch (err: any) {
         linkError =
           err?.message || 'Could not create a payment link for this student.';
@@ -433,6 +625,8 @@ async function executeMonthlyReminders(
     sentCount,
     status,
     details,
+    overdueMarked,
+    billsGenerated: generatedBills.length,
     recipients: recipientResults,
   };
 
@@ -489,41 +683,88 @@ export async function reminderRoutes(app: FastifyInstance) {
           .send({ error: 'Unauthorized cron trigger: valid X-Cron-Key required' });
       }
 
-      // Find default profile (Amarnath / ORG-XD3SLDDC or all profiles)
+      // Multi-tenant: the cron webhook must serve every workspace, not just
+      // one hardcoded profile id. By default ALL workspaces (except the super
+      // admin's own) run their reminders; an optional ?profile=ORG-… query
+      // targets exactly one workspace instead.
+      const queryProfile = (
+        (req.query as { profile?: string } | undefined)?.profile ?? ''
+      ).trim();
       const profiles = await listProfiles();
-      const targetProfile =
-        profiles.find((p) => p.profileId === 'ORG-XD3SLDDC') || profiles[0];
+      const targetProfiles = queryProfile
+        ? profiles.filter((p) => p.profileId === queryProfile)
+        : profiles.filter((p) => p.profileId !== SUPER_PROFILE_ID);
 
-      if (!targetProfile) {
-        return reply.code(404).send({ error: 'No active profile found for cron' });
+      if (targetProfiles.length === 0) {
+        return reply
+          .code(404)
+          .send({ error: 'No matching active profile found for cron' });
       }
 
-      const runLog = await executeMonthlyReminders(
-        targetProfile.profileId,
-        'cron-job.org'
-      );
+      const results: Array<{
+        profileId: string;
+        name: string;
+        status: string;
+        totalStudents: number;
+        overdueMarked: number;
+        billsGenerated: number;
+      }> = [];
 
-      // Load settings and append log
-      const record = await getRecord<StoredReminderSettings>(
-        APPWRITE_COLLECTIONS.paymentSettings,
-        scopedEntityId(targetProfile.profileId, 'cron_reminders')
-      );
-      const settings = record?.data || defaultSettings();
-      settings.lastRun = runLog.timestamp;
-      settings.lastStatus = runLog.status;
-      settings.logs = [runLog, ...(settings.logs || [])].slice(0, 50);
+      for (const targetProfile of targetProfiles) {
+        const record = await getRecord<StoredReminderSettings>(
+          APPWRITE_COLLECTIONS.paymentSettings,
+          scopedEntityId(targetProfile.profileId, 'cron_reminders')
+        );
+        const settings = record?.data || defaultSettings();
+        // A workspace that explicitly disabled reminders is skipped in the
+        // fan-out (an explicit ?profile targeting still runs it).
+        if (queryProfile === '' && settings.enabled === false) {
+          continue;
+        }
 
-      await putRecord(
-        APPWRITE_COLLECTIONS.paymentSettings,
-        scopedEntityId(targetProfile.profileId, 'cron_reminders'),
-        settings
-      );
+        const runLog = await executeMonthlyReminders(
+          targetProfile.profileId,
+          'cron-job.org'
+        );
+
+        // Load settings again (the run may have touched them) and append log
+        const latestRecord = await getRecord<StoredReminderSettings>(
+          APPWRITE_COLLECTIONS.paymentSettings,
+          scopedEntityId(targetProfile.profileId, 'cron_reminders')
+        );
+        const latestSettings = latestRecord?.data || defaultSettings();
+        latestSettings.lastRun = runLog.timestamp;
+        latestSettings.lastStatus = runLog.status;
+        latestSettings.logs = [runLog, ...(latestSettings.logs || [])].slice(0, 50);
+
+        await putRecord(
+          APPWRITE_COLLECTIONS.paymentSettings,
+          scopedEntityId(targetProfile.profileId, 'cron_reminders'),
+          latestSettings
+        );
+
+        results.push({
+          profileId: targetProfile.profileId,
+          name: targetProfile.name,
+          status: runLog.status,
+          totalStudents: runLog.totalStudents,
+          overdueMarked: runLog.overdueMarked ?? 0,
+          billsGenerated: runLog.billsGenerated ?? 0,
+        });
+        req.log.info(
+          {
+            profileId: targetProfile.profileId,
+            status: runLog.status,
+            students: runLog.totalStudents,
+          },
+          'Cron reminders executed for workspace'
+        );
+      }
 
       return {
         success: true,
-        message: 'Monthly fee reminder cron executed successfully',
-        jobId: settings.jobId,
-        runLog,
+        message: `Monthly fee reminder cron executed for ${results.length} workspace(s)`,
+        results,
       };
     } catch (err: any) {
       req.log.error(err, 'Failed to execute cron-job reminder');

@@ -24,7 +24,6 @@ import {
   startWa,
   type WaState,
 } from "@/lib/api"
-import { getToken } from "@/lib/session"
 import {
   DROPDOWN_KEYS,
   DROPDOWN_LABELS,
@@ -44,24 +43,9 @@ import {
   PlugIcon,
   QrCodeIcon,
   SendIcon,
-  ServerIcon,
   ShieldAlertIcon,
   SlidersHorizontalIcon,
 } from "lucide-react"
-
-// The gateway-admin panel is served privately under the fees API origin
-// (https://api.myenum.in/youpi-admin/) and is gated per-request by the fees
-// session JWT — not by any public URL. The dashboard appends its own session
-// token; nginx validates it with the backend before the panel loads.
-function gatewayAdminUrl(token: string | null): string {
-  if (typeof window === "undefined") return ""
-  if (/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
-    return "http://127.0.0.1:6001/"
-  }
-  return token
-    ? `https://api.myenum.in/youpi-admin/?fees_token=${encodeURIComponent(token)}`
-    : ""
-}
 
 const waLabel: Record<WaState["status"], string> = {
   idle: "Not started",
@@ -74,13 +58,7 @@ const waLabel: Record<WaState["status"], string> = {
 
 export default function SettingsPage() {
   const { can } = useAuth()
-  const [activeTab, setActiveTab] = useState<"all" | "upi" | "whatsapp" | "dropdowns" | "cron" | "gateway">("upi")
-  // Session token (first-party cookie) — read after mount so SSR renders safely.
-  const [sessionToken, setSessionToken] = useState<string | null>(null)
-  useEffect(() => {
-    setSessionToken(getToken())
-  }, [])
-  const gatewayAdminSrc = gatewayAdminUrl(sessionToken)
+  const [activeTab, setActiveTab] = useState<"all" | "upi" | "whatsapp" | "dropdowns" | "cron">("upi")
   const [wa, setWa] = useState<WaState | null>(null)
   const [waError, setWaError] = useState("")
   const [to, setTo] = useState("")
@@ -308,20 +286,6 @@ export default function SettingsPage() {
 
         <button
           type="button"
-          onClick={() => setActiveTab("gateway")}
-          className={cn(
-            "flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition",
-            activeTab === "gateway"
-              ? "bg-primary text-primary-foreground shadow-sm"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          )}
-        >
-          <ServerIcon className="size-4" />
-          <span>Gateway Admin</span>
-        </button>
-
-        <button
-          type="button"
           onClick={() => setActiveTab("cron")}
           className={cn(
             "flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition",
@@ -508,55 +472,6 @@ export default function SettingsPage() {
                 </div>
               </div>
             ))}
-          </div>
-        </section>
-      )}
-
-      {/* Gateway Admin Tab — YOUPI PG console, embedded from the gated host */}
-      {(activeTab === "gateway" || activeTab === "all") && can("settings:manage") && (
-        <section className="space-y-4">
-          <div className="flex items-center justify-between border-b pb-2">
-            <div>
-              <h2 className="text-sm font-semibold text-foreground">
-                YOUPI PG Gateway Admin
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                UPI accounts, slots, observers and payment queue — served privately under
-                the dashboard (not publicly linked).
-              </p>
-            </div>
-            {gatewayAdminSrc && (
-              <a
-                href={gatewayAdminSrc}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
-              >
-                <ShieldAlertIcon className="size-3.5" />
-                <span>Open Console</span>
-                <ExternalLinkIcon className="size-3" />
-              </a>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-400">
-            The panel loads with your dashboard session and is not reachable from
-            anywhere else. No extra sign-in is needed.
-          </div>
-
-          <div className="overflow-hidden rounded-2xl border bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-            {gatewayAdminSrc ? (
-              <iframe
-                src={gatewayAdminSrc}
-                title="YOUPI PG Gateway Admin"
-                className="h-[720px] w-full border-0"
-                loading="lazy"
-              />
-            ) : (
-              <p className="p-6 text-sm text-muted-foreground">
-                Sign in to the dashboard to load the payment gateway console.
-              </p>
-            )}
           </div>
         </section>
       )}

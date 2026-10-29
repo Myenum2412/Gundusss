@@ -9,17 +9,55 @@ describe('Merchant Admin Integration Tests', () => {
   let serverInstance;
   let baseUrl;
   let testDb;
+  let fakeGate;
 
   before(async () => {
     testDb = new Database({ inMemory: true });
-    serverInstance = await startAdminServer(6101, { db: testDb });
+    // Fake fees-backend gate: GET with x-fees-arg returns a verdict keyed on
+    // the presented token (mirrors /api/auth/gate's response contract).
+    fakeGate = http.createServer((req, res) => {
+      const token = req.headers['x-fees-arg'] || '';
+      const verdict =
+        token === 'super-token' ? { ok: true, super: true } :
+        token === 'basic-token' ? { ok: true, super: false } :
+        { ok: false };
+      res.writeHead(token === 'super-token' || token === 'basic-token' ? 200 : 401, {
+        'Content-Type': 'application/json'
+      });
+      res.end(JSON.stringify(verdict));
+    });
+    await new Promise(resolve => fakeGate.listen(0, '127.0.0.1', resolve));
+    const fakeGatePort = fakeGate.address().port;
+    serverInstance = await startAdminServer(6101, { db: testDb, feesGateUrl: `http://127.0.0.1:${fakeGatePort}/api/auth/gate` });
     baseUrl = `http://localhost:${serverInstance.port}`;
   });
 
   after(async () => {
     await serverInstance.close();
     testDb.close();
+    fakeGate.close();
   });
+
+  function post(path, body) {
+    const payload = JSON.stringify(body);
+    return new Promise((resolve, reject) => {
+      const req = http.request(`${baseUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload)
+        }
+      }, res => {
+        let data = '';
+        res.on('data', chunk => { data += chunk; });
+        res.on('end', () => {
+          resolve({ status: res.statusCode, headers: res.headers, text: data });
+        });
+      });
+      req.on('error', reject);
+      req.end(payload);
+    });
+  }
 
   function get(path, headers = {}) {
     return new Promise((resolve, reject) => {
@@ -77,5 +115,29 @@ describe('Merchant Admin Integration Tests', () => {
 
     const wrongQueryLogs = await get('/api/logs/stream?token=wrong-token');
     assert.equal(wrongQueryLogs.status, 401);
+  });
+
+  test('POST /api/admin/session exchanges a confirmed SUPER fees session for the admin token', async () => {
+    const res = await post('/api/admin/session', { fees_token: 'super-token' });
+    assert.equal(res.status, 200);
+    const json = JSON.parse(res.text);
+    assert.equal(json.adminToken, getAdminToken());
+    assert.equal(res.headers['cache-control'], 'no-store');
+  });
+
+  test('POST /api/admin/session refuses non-super sessions even when the fees session is valid', async () => {
+    const res = await post('/api/admin/session', { fees_token: 'basic-token' });
+    assert.equal(res.status, 401);
+    assert.ok(!JSON.parse(res.text).adminToken);
+  });
+
+  test('POST /api/admin/session rejects fees tokens the gate rejects', async () => {
+    const res = await post('/api/admin/session', { fees_token: 'not-a-session' });
+    assert.equal(res.status, 401);
+  });
+
+  test('POST /api/admin/session requires a fees_token body field', async () => {
+    const missing = await post('/api/admin/session', {});
+    assert.equal(missing.status, 400);
   });
 });

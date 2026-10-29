@@ -215,7 +215,14 @@ export async function authRoutes(app: FastifyInstance) {
       }
       // A signed token that no longer matches an active account is rejected
       // outright — fall through to 401 rather than trying other sources.
-      if (user && user.active) return reply.code(200).send({ ok: true });
+      // The super flag lets the gateway-admin panel's exchange endpoint hand
+      // its admin token to super sessions only; nginx auth_request ignores
+      // extra body fields, so this does not affect page gating.
+      if (user && user.active) {
+        return reply
+          .code(200)
+          .send({ ok: true, super: user.super === true });
+      }
       break;
     }
     return reply.code(401).send({
