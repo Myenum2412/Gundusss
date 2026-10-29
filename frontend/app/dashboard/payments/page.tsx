@@ -109,6 +109,18 @@ function getSimplifiedStatus(
 
 const STATUS_OPTIONS = ["PAID", "UNPAID"]
 
+// Dead checkout attempts — real dues never come back from these states.
+// They must not count as outstanding "Unpaid (Due)" money.
+const UNPAID_BUT_TERMINAL = new Set([
+  "FAILED",
+  "EXPIRED",
+  "CANCELLED",
+  "CANCELED",
+  "SUSPICIOUS",
+  "BLOCKED",
+  "REFUNDED",
+])
+
 
 const METHOD_ICONS: Record<string, LucideIcon> = {
   UPI: QrCodeIcon,
@@ -1261,6 +1273,12 @@ export default function PaymentsPage() {
     }
     for (const r of unifiedRecords) {
       const s = getSimplifiedStatus(r.status, r.receiptId)
+      if (
+        s === "UNPAID" &&
+        UNPAID_BUT_TERMINAL.has((r.status || "").trim().toUpperCase())
+      ) {
+        continue // stale checkout attempt, not an outstanding due
+      }
       map[s].count += 1
       map[s].totalAmount += Number(r.amount) || 0
     }
@@ -1299,9 +1317,14 @@ export default function PaymentsPage() {
     })
   }, [unifiedRecords, statusFilter, searchQuery])
 
-  // Statistics calculation across all student records: PAID vs UNPAID
+  // Statistics calculation across all student records: PAID vs UNPAID.
+  // Unpaid excludes dead checkout attempts (FAILED / EXPIRED / CANCELLED …) —
+  // only live dues count: payable orders, pending receipts, awaiting students.
+  const isOutstandingDue = (r: UnifiedPaymentRecord) =>
+    getSimplifiedStatus(r.status, r.receiptId) === "UNPAID" &&
+    !UNPAID_BUT_TERMINAL.has((r.status || "").trim().toUpperCase())
   const paidRecords = unifiedRecords.filter((r) => getSimplifiedStatus(r.status, r.receiptId) === "PAID")
-  const unpaidRecords = unifiedRecords.filter((r) => getSimplifiedStatus(r.status, r.receiptId) === "UNPAID")
+  const unpaidRecords = unifiedRecords.filter(isOutstandingDue)
   const awaiting = unpaidRecords.length
   const receiptsCount = unifiedRecords.filter((r) => Boolean(r.receiptId)).length
   const collected = paidRecords.reduce(

@@ -19,6 +19,7 @@ import { loadReceipts, type StoredReceipt } from "@/lib/receipts-store"
 import { loadAnnouncements, type StoredAnnouncement } from "@/lib/announcements-store"
 import { loadFeeStructures, type StoredFeeStructure } from "@/lib/fee-structures-store"
 import { resolveStudentFee } from "@/lib/fee-lookup"
+import { listPayments, type PaymentOrder } from "@/lib/payments"
 import { getWaStatus, type WaState } from "@/lib/api"
 import { momTrend } from "@/lib/stat-trend"
 import Stats01 from "@/components/stats-01"
@@ -54,24 +55,50 @@ function inr(n: number) {
 // Receipt statuses that count as collected (same rule as the Payments page).
 const PAID_RECEIPT_STATUSES = new Set(["paid", "success", "settled"])
 
+// A gateway order whose checkout already settled (money received).
+function isOrderPaid(o: PaymentOrder): boolean {
+  const st = (o.status || "").trim().toUpperCase()
+  return (
+    st === "SUCCESS" ||
+    st === "PAID" ||
+    st === "COMPLETED" ||
+    (o.gatewayStatus || "").trim().toUpperCase() === "SUCCESS" ||
+    Boolean(o.receiptId)
+  )
+}
+
+// Dead checkout attempts — a due never comes back from these states, so
+// they are not outstanding money (same rule as the Payments page).
+const UNPAID_BUT_TERMINAL = new Set([
+  "FAILED",
+  "EXPIRED",
+  "CANCELLED",
+  "CANCELED",
+  "SUSPICIOUS",
+  "BLOCKED",
+  "REFUNDED",
+])
+
 export default function Page() {
   const { can } = useAuth()
   const [students, setStudents] = useState<StoredStudent[]>([])
   const [receipts, setReceipts] = useState<StoredReceipt[]>([])
   const [announcements, setAnnouncements] = useState<StoredAnnouncement[]>([])
   const [feeStructures, setFeeStructures] = useState<StoredFeeStructure[]>([])
+  const [orders, setOrders] = useState<PaymentOrder[]>([])
   const [wa, setWa] = useState<WaState | null>(null)
   const [viewReceipt, setViewReceipt] = useState<StoredReceipt | null>(null)
 
   const reloadOverview = useCallback(() => {
     if (isSyncing()) return
-    Promise.all([loadStudents(), loadReceipts(), loadAnnouncements(), loadFeeStructures()]).then(
-      ([s, r, a, f]) => {
+    Promise.all([loadStudents(), loadReceipts(), loadAnnouncements(), loadFeeStructures(), listPayments()]).then(
+      ([s, r, a, f, o]) => {
         if (isSyncing()) return
         setStudents((prev) => (sameJson(prev, s) ? prev : s))
         setReceipts((prev) => (sameJson(prev, r) ? prev : r))
         setAnnouncements((prev) => (sameJson(prev, a) ? prev : a))
         setFeeStructures((prev) => (sameJson(prev, f) ? prev : f))
+        setOrders((prev) => (sameJson(prev, o) ? prev : o))
       }
     ).catch((error) => {
       console.error("Failed to load the dashboard data", error)
@@ -117,9 +144,11 @@ export default function Page() {
     },
   ]
 
-  // Paid vs unpaid per month — "Paid" is summed from successful receipts,
-  // "Unpaid" is the fee still due from students without a paid receipt,
-  // grouped by their joining month (mirrors the Payments page).
+  // Paid vs unpaid — "Paid" is summed from successful receipts. "Unpaid" is
+  // the outstanding due per student (unique identities): the fee of students
+  // without a paid receipt, plus payable gateway orders (INITIATED/PENDING…)
+  // for already-paid students. Stale terminal attempts (FAILED/EXPIRED/
+  // CANCELLED) and settled orders never count. Mirrors the Payments page.
   const currentMonth = new Date().toISOString().slice(0, 7)
   const unpaidDues = (() => {
     const studentsWithPaidReceipt = new Set<string>()
@@ -127,7 +156,33 @@ export default function Page() {
       if (r.studentId) studentsWithPaidReceipt.add(r.studentId.trim().toLowerCase())
       if (r.studentName) studentsWithPaidReceipt.add(r.studentName.trim().toLowerCase())
     }
-    const dues: { month: string; amount: number }[] = []
+
+    // Payable gateway orders, grouped per student identity.
+    const orderDues = new Map<string, { month: string; amount: number }>()
+    for (const o of orders) {
+      if (isOrderPaid(o)) continue
+      const st = (o.status || "").trim().toUpperCase()
+      if (!st || UNPAID_BUT_TERMINAL.has(st)) continue
+      const amount = parseFloat(String(o.amount)) || 0
+      if (amount <= 0) continue
+      const month = (o.createdAt || "").slice(0, 7)
+      if (!/^\d{4}-\d{2}$/.test(month)) continue
+      const key = (
+        (o.studentId || o.studentName || "").trim().toLowerCase()
+      )
+      if (!key) continue
+      const existing = orderDues.get(key)
+      if (existing) {
+        existing.amount += amount
+      } else {
+        orderDues.set(key, { month, amount })
+      }
+    }
+
+    const dues = new Map<string, { month: string; amount: number }>()
+    // 1. Students without a paid receipt owe their (resolved) fee. Any
+    //    payable order they have is just the checkout for that same fee,
+    //    so the fee stands — no double counting.
     for (const s of students) {
       if (
         (s.studentId && studentsWithPaidReceipt.has(s.studentId.trim().toLowerCase())) ||
@@ -137,12 +192,19 @@ export default function Page() {
       }
       const amount = parseFloat(String(resolveStudentFee(s, feeStructures).amount)) || 0
       if (amount <= 0) continue
-      dues.push({
+      const key = (s.studentId || s.studentName || "").trim().toLowerCase()
+      dues.set(key, {
         month: (s.joiningDate || "").slice(0, 7) || currentMonth,
         amount,
       })
     }
-    return dues
+    // 2. Payable orders for everyone else (e.g. a paid student with a new
+    //    unpaid checkout) are extra outstanding dues.
+    for (const [key, due] of orderDues) {
+      if (dues.has(key)) continue
+      dues.set(key, due)
+    }
+    return [...dues.values()]
   })()
 
   const unpaidTotal = unpaidDues.reduce((sum, d) => sum + d.amount, 0)
