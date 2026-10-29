@@ -98,17 +98,6 @@ export interface BusinessProfile {
     videoUrl: string
   }
 
-  links: {
-    appointmentUrl: string
-    reservationUrl: string
-    orderAheadUrl: string
-    menuUrl: string
-    placeId: string
-    profileUrl: string
-    bookingPolicy: string
-  }
-
-  messagingEnabled: boolean
   verificationStatus: "Unverified" | "Pending" | "Verified"
   verifiedOn: string
   notes: string
@@ -190,17 +179,6 @@ export function defaultBusinessProfile(): BusinessProfile {
       videoUrl: "",
     },
 
-    links: {
-      appointmentUrl: "",
-      reservationUrl: "",
-      orderAheadUrl: "",
-      menuUrl: "",
-      placeId: "",
-      profileUrl: "",
-      bookingPolicy: "",
-    },
-
-    messagingEnabled: false,
     verificationStatus: "Unverified",
     verifiedOn: "",
     notes: "",

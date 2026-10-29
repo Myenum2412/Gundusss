@@ -35,7 +35,6 @@ import {
   ImageIcon,
   InfoIcon,
   Link2,
-  Link2Icon,
   ListChecksIcon,
   Loader2Icon,
   LogOut,
@@ -827,7 +826,7 @@ export default function BusinessProfileForm({
   }
 
   function patchSection<
-    K extends "social" | "location" | "hours" | "attributes" | "media" | "links",
+    K extends "social" | "location" | "hours" | "attributes" | "media",
   >(key: K, value: Partial<BusinessProfile[K]>) {
     setProfile((current) =>
       current
@@ -1548,91 +1547,6 @@ export default function BusinessProfileForm({
                 </div>
               </SectionCard>
 
-              <SectionCard
-                icon={Link2Icon}
-                title="Booking & action links"
-                description="Give customers a direct path to book, order, or learn more."
-              >
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <TextField
-                    id="bp-appointment"
-                    label="Appointment URL"
-                    type="url"
-                    value={profile.links.appointmentUrl}
-                    onChange={(value) =>
-                      patchSection("links", { appointmentUrl: value })
-                    }
-                    placeholder="https://…"
-                  />
-                  <TextField
-                    id="bp-reservation"
-                    label="Reservation URL"
-                    type="url"
-                    value={profile.links.reservationUrl}
-                    onChange={(value) =>
-                      patchSection("links", { reservationUrl: value })
-                    }
-                    placeholder="https://…"
-                  />
-                  <TextField
-                    id="bp-order"
-                    label="Order ahead URL"
-                    type="url"
-                    value={profile.links.orderAheadUrl}
-                    onChange={(value) =>
-                      patchSection("links", { orderAheadUrl: value })
-                    }
-                    placeholder="https://…"
-                  />
-                  <TextField
-                    id="bp-menu"
-                    label="Menu / brochure URL"
-                    type="url"
-                    value={profile.links.menuUrl}
-                    onChange={(value) =>
-                      patchSection("links", { menuUrl: value })
-                    }
-                    placeholder="https://…"
-                  />
-                  <TextField
-                    id="bp-profile-url"
-                    label="Google Business Profile URL"
-                    type="url"
-                    value={profile.links.profileUrl}
-                    onChange={(value) =>
-                      patchSection("links", { profileUrl: value })
-                    }
-                    placeholder="https://g.page/…"
-                  />
-                  <TextField
-                    id="bp-place-id"
-                    label="Place ID"
-                    value={profile.links.placeId}
-                    onChange={(value) =>
-                      patchSection("links", { placeId: value })
-                    }
-                    placeholder="Google Maps place ID"
-                  />
-                </div>
-                <div className="mt-4 flex flex-col gap-3">
-                  <Toggle
-                    label="Allow customers to message you"
-                    description="Shows a Message button on your Google listing."
-                    checked={profile.messagingEnabled}
-                    onChange={(value) => patch("messagingEnabled", value)}
-                  />
-                  <TextAreaField
-                    id="bp-booking-policy"
-                    label="Booking policy"
-                    value={profile.links.bookingPolicy}
-                    onChange={(value) =>
-                      patchSection("links", { bookingPolicy: value })
-                    }
-                    placeholder="Cancellations must be made at least 24 hours in advance…"
-                    rows={3}
-                  />
-                </div>
-              </SectionCard>
             </TabsContent>
 
             {/* -------------------------------------------------------- Location */}

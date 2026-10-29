@@ -103,19 +103,6 @@ const BusinessProfileSchema = z.object({
     })
     .default({}),
 
-  links: z
-    .object({
-      appointmentUrl: str(1000),
-      reservationUrl: str(1000),
-      orderAheadUrl: str(1000),
-      menuUrl: str(1000),
-      placeId: str(200),
-      profileUrl: str(1000),
-      bookingPolicy: str(2000),
-    })
-    .default({}),
-
-  messagingEnabled: z.boolean().default(false),
   verificationStatus: z
     .enum(['Unverified', 'Pending', 'Verified'])
     .default('Unverified'),
