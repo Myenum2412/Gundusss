@@ -25,7 +25,7 @@ import Stats01 from "@/components/stats-01"
 import { RowActions } from "@/components/row-actions"
 import { DetailItem, DetailList } from "@/components/detail-list"
 import { LiveBadge } from "@/components/live-badge"
-import { DashboardCollectionsChart } from "@/components/dashboard-collections-chart"
+import { DashboardCollectionsChart, DashboardMethodsDonut } from "@/components/dashboard-collections-chart"
 import {
   Dialog,
   DialogContent,
@@ -173,19 +173,19 @@ export default function Page() {
     return months
   })()
 
-  // Collections by payment method (from receipts page data)
+  // Collections by payment method — paid receipts only, so the donut's
+  // center total matches the "Paid" toggle total and the "Fees collected" stat.
   const byMethod = (() => {
     const map = new Map<string, { count: number; total: number }>()
-    for (const r of receipts) {
+    for (const r of paidReceipts) {
       const m = r.method || "Other"
       const e = map.get(m) ?? { count: 0, total: 0 }
       e.count += 1
       e.total += parseFloat(String(r.amount)) || 0
       map.set(m, e)
     }
-    return [...map.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 5)
+    return [...map.entries()].sort((a, b) => b[1].total - a[1].total)
   })()
-  const maxMethod = Math.max(1, ...byMethod.map(([, v]) => v.total))
 
   const recentReceipts = receipts.slice(-6).reverse()
   const recentStudents = students.slice(-5).reverse()
@@ -230,33 +230,11 @@ export default function Page() {
           className="lg:col-span-3"
         />
 
-        <section className="rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:col-span-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-[13px] font-semibold tracking-tight">By payment method</h2>
-              <p className="text-xs text-muted-foreground">Top methods from Receipts</p>
-            </div>
-          </div>
-          {byMethod.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">No receipts yet.</p>
-          ) : (
-            <ul className="mt-4 flex flex-col gap-3">
-              {byMethod.map(([method, v]) => (
-                <li key={method}>
-                  <div className="flex items-center justify-between text-[13px]">
-                    <span className="font-medium">{method}</span>
-                    <span className="text-muted-foreground tabular-nums">
-                      {v.count} · {inr(v.total)}
-                    </span>
-                  </div>
-                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
-                    <div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(4, (v.total / maxMethod) * 100)}%` }} />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <DashboardMethodsDonut
+          methods={byMethod.map(([method, v]) => ({ method, count: v.count, total: v.total }))}
+          receiptCount={receipts.length}
+          className="lg:col-span-2"
+        />
       </div>
 
       {/* Recent receipts — full width table. min-h so the surface never
