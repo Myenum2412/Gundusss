@@ -17,12 +17,15 @@ import {
 import { loadStudents, type StoredStudent } from "@/lib/students-store"
 import { loadReceipts, type StoredReceipt } from "@/lib/receipts-store"
 import { loadAnnouncements, type StoredAnnouncement } from "@/lib/announcements-store"
+import { loadFeeStructures, type StoredFeeStructure } from "@/lib/fee-structures-store"
+import { resolveStudentFee } from "@/lib/fee-lookup"
 import { getWaStatus, type WaState } from "@/lib/api"
 import { momTrend } from "@/lib/stat-trend"
 import Stats01 from "@/components/stats-01"
 import { RowActions } from "@/components/row-actions"
 import { DetailItem, DetailList } from "@/components/detail-list"
 import { LiveBadge } from "@/components/live-badge"
+import { DashboardCollectionsChart } from "@/components/dashboard-collections-chart"
 import {
   Dialog,
   DialogContent,
@@ -48,22 +51,27 @@ function inr(n: number) {
   return `₹ ${n.toLocaleString("en-IN")}`
 }
 
+// Receipt statuses that count as collected (same rule as the Payments page).
+const PAID_RECEIPT_STATUSES = new Set(["paid", "success", "settled"])
+
 export default function Page() {
   const { can } = useAuth()
   const [students, setStudents] = useState<StoredStudent[]>([])
   const [receipts, setReceipts] = useState<StoredReceipt[]>([])
   const [announcements, setAnnouncements] = useState<StoredAnnouncement[]>([])
+  const [feeStructures, setFeeStructures] = useState<StoredFeeStructure[]>([])
   const [wa, setWa] = useState<WaState | null>(null)
   const [viewReceipt, setViewReceipt] = useState<StoredReceipt | null>(null)
 
   const reloadOverview = useCallback(() => {
     if (isSyncing()) return
-    Promise.all([loadStudents(), loadReceipts(), loadAnnouncements()]).then(
-      ([s, r, a]) => {
+    Promise.all([loadStudents(), loadReceipts(), loadAnnouncements(), loadFeeStructures()]).then(
+      ([s, r, a, f]) => {
         if (isSyncing()) return
         setStudents((prev) => (sameJson(prev, s) ? prev : s))
         setReceipts((prev) => (sameJson(prev, r) ? prev : r))
         setAnnouncements((prev) => (sameJson(prev, a) ? prev : a))
+        setFeeStructures((prev) => (sameJson(prev, f) ? prev : f))
       }
     ).catch((error) => {
       console.error("Failed to load the dashboard data", error)
@@ -77,7 +85,13 @@ export default function Page() {
 
   useLiveReload(reloadOverview)
 
-  const collected = receipts.reduce((sum, r) => sum + (parseFloat(String(r.amount)) || 0), 0)
+  // Collected = receipts with a paid/success status (counters may issue
+  // receipts without a status; those still count as collected).
+  const paidReceipts = receipts.filter((r) =>
+    PAID_RECEIPT_STATUSES.has((r.status || "").trim().toLowerCase())
+  )
+  const collected = paidReceipts.reduce((sum, r) => sum + (parseFloat(String(r.amount)) || 0), 0)
+
   const waOk = wa?.status === "ready"
 
   const stats = [
@@ -103,17 +117,57 @@ export default function Page() {
     },
   ]
 
-  // Collections by month (last 6 months, from receipts page data)
-  const byMonth = (() => {
-    const map = new Map<string, number>()
-    for (const r of receipts) {
+  // Paid vs unpaid per month — "Paid" is summed from successful receipts,
+  // "Unpaid" is the fee still due from students without a paid receipt,
+  // grouped by their joining month (mirrors the Payments page).
+  const currentMonth = new Date().toISOString().slice(0, 7)
+  const unpaidDues = (() => {
+    const studentsWithPaidReceipt = new Set<string>()
+    for (const r of paidReceipts) {
+      if (r.studentId) studentsWithPaidReceipt.add(r.studentId.trim().toLowerCase())
+      if (r.studentName) studentsWithPaidReceipt.add(r.studentName.trim().toLowerCase())
+    }
+    const dues: { month: string; amount: number }[] = []
+    for (const s of students) {
+      if (
+        (s.studentId && studentsWithPaidReceipt.has(s.studentId.trim().toLowerCase())) ||
+        (s.studentName && studentsWithPaidReceipt.has(s.studentName.trim().toLowerCase()))
+      ) {
+        continue
+      }
+      const amount = parseFloat(String(resolveStudentFee(s, feeStructures).amount)) || 0
+      if (amount <= 0) continue
+      dues.push({
+        month: (s.joiningDate || "").slice(0, 7) || currentMonth,
+        amount,
+      })
+    }
+    return dues
+  })()
+
+  const unpaidTotal = unpaidDues.reduce((sum, d) => sum + d.amount, 0)
+
+  // Monthly series (last 6 months) for the interactive Paid/Unpaid chart.
+  const collectionsData = (() => {
+    const map = new Map<string, { paid: number; unpaid: number }>()
+    for (const r of paidReceipts) {
       const key = (r.paymentDate || "").slice(0, 7)
       if (!/^\d{4}-\d{2}$/.test(key)) continue
-      map.set(key, (map.get(key) ?? 0) + (parseFloat(String(r.amount)) || 0))
+      const e = map.get(key) ?? { paid: 0, unpaid: 0 }
+      e.paid += parseFloat(String(r.amount)) || 0
+      map.set(key, e)
     }
-    return [...map.entries()].sort().slice(-6)
+    for (const d of unpaidDues) {
+      if (!/^\d{4}-\d{2}$/.test(d.month)) continue
+      const e = map.get(d.month) ?? { paid: 0, unpaid: 0 }
+      e.unpaid += d.amount
+      map.set(d.month, e)
+    }
+    return [...map.entries()]
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+      .slice(-6)
+      .map(([month, v]) => ({ month, paid: v.paid, unpaid: v.unpaid }))
   })()
-  const maxMonth = Math.max(1, ...byMonth.map(([, v]) => v))
 
   // Collections by payment method (from receipts page data)
   const byMethod = (() => {
@@ -164,42 +218,13 @@ export default function Page() {
       {/* Stat strip — stats-01 block, one stat per area */}
       <Stats01 stats={stats} />
 
-      {/* Collections + methods */}
+      {/* Collections (Paid/Unpaid interactive chart) + methods */}
       <div className="grid shrink-0 gap-3 lg:grid-cols-5">
-        <section className="rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:col-span-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-[13px] font-semibold tracking-tight">Collections by month</h2>
-              <p className="text-xs text-muted-foreground">Summed from the Receipts page</p>
-            </div>
-            <Button variant="outline" size="sm" render={<Link href="/dashboard/receipts" />}>
-              Receipts
-              <ArrowRightIcon />
-            </Button>
-          </div>
-          {byMonth.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              No dated receipts yet — record a payment to see monthly totals here.
-            </p>
-          ) : (
-            <div className="mt-4 flex h-36 items-end gap-2">
-              {byMonth.map(([month, total]) => (
-                <div key={month} className="flex min-w-0 flex-1 flex-col items-center gap-1.5" title={`${month}: ${inr(total)}`}>
-                  <span className="text-[11px] font-medium tabular-nums text-muted-foreground">
-                    {total >= 1000 ? `${Math.round(total / 1000)}k` : total}
-                  </span>
-                  <div className="flex w-full flex-1 items-end rounded-lg bg-muted/60">
-                    <div
-                      className="w-full rounded-lg bg-primary"
-                      style={{ height: `${Math.max(6, (total / maxMonth) * 100)}%` }}
-                    />
-                  </div>
-                  <span className="text-[11px] text-muted-foreground">{month.slice(5)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+        <DashboardCollectionsChart
+          data={collectionsData}
+          totals={{ paid: collected, unpaid: unpaidTotal }}
+          className="lg:col-span-3"
+        />
 
         <section className="rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:col-span-2">
           <div className="flex items-center justify-between">
