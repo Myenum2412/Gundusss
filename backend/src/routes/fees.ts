@@ -9,26 +9,20 @@ import {
 import { resolveProfileId } from '../profiles.js';
 import { CreateFeeSchema, UpdateFeeSchema, type Fee } from '../schemas.js';
 import { scopedEntityId } from '../tenant.js';
+import {
+  generateNextMonthBillsRoute,
+  markOverdueFees,
+  withFeeCreateLock as withCreateLock,
+} from '../billing.js';
 
 const COLLECTION = APPWRITE_COLLECTIONS.fees;
 
-// Appwrite has no unique auto-increment id. Serializing fee creation keeps two
-// simultaneous creates from reading the same max id and overwriting each other.
-let createQueue: Promise<unknown> = Promise.resolve();
-
-function withCreateLock<T>(fn: () => Promise<T>): Promise<T> {
-  const run = createQueue.then(fn, fn);
-  createQueue = run.then(
-    () => undefined,
-    () => undefined
-  );
-  return run;
-}
-
 export async function feeRoutes(app: FastifyInstance) {
-  // GET /api/fees
+  // GET /api/fees — lazily sweep past-due pending bills to `overdue` first so
+  // the dashboard always reflects reality without waiting for a cron job.
   app.get('/api/fees', async (req) => {
     const profileId = await resolveProfileId(req);
+    await markOverdueFees(profileId);
     const records = await listScopedRecords<Fee>(COLLECTION, profileId);
     const rows = records
       .map((record) => record.data)
@@ -120,4 +114,8 @@ export async function feeRoutes(app: FastifyInstance) {
     await deleteRecord(COLLECTION, entityId);
     return { success: true };
   });
+
+  // POST /api/fees/generate-next-month — auto-generate the next month's
+  // pending bills for every student whose latest bill is settled.
+  await generateNextMonthBillsRoute(app);
 }
