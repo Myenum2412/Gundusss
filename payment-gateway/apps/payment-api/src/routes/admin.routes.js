@@ -371,6 +371,17 @@ export function registerAdminRoutes(server, ctx) {
       return;
     }
 
+    // Mirror counter-confirm: the desk only manages cash/card sessions. UPI and
+    // COD sessions expire or fail through their own lifecycle — declining them
+    // manually here would bypass that state machine.
+    const declineMethods = new Set([PaymentMethod.CASH_COUNTER, PaymentMethod.CARD_COUNTER]);
+    if (!declineMethods.has(session.method)) {
+      HttpServer.json(res, 400, {
+        error: `Only cash or card counter sessions can be declined at the counter (session method: ${session.method || 'UNKNOWN'}).`
+      });
+      return;
+    }
+
     const updated = ctx.sessionRepo.transitionToTerminal(paymentId, PaymentStatus.FAILED);
 
     ctx.auditRepo.log({
