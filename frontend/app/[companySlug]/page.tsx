@@ -378,7 +378,7 @@ export default function PublicPaymentPage() {
                   <WalletIcon className="size-3.5" />
                 </span>
                 <div>
-                  <p className="text-xs font-bold leading-tight">YOUPI PG</p>
+                  <p className="text-xs font-bold leading-tight">MyFees</p>
                   <p className="text-[9px] leading-tight text-white/60">
                     Payment Receipt
                   </p>
@@ -571,7 +571,7 @@ export default function PublicPaymentPage() {
                   <WalletIcon className="size-3.5" />
                 </span>
                 <div>
-                  <p className="text-xs font-bold leading-tight tracking-wide">YOUPI PG</p>
+                  <p className="text-xs font-bold leading-tight tracking-wide">MyFees</p>
                   <p className="text-[9px] leading-tight text-white/60">
                     Secure UPI checkout
                   </p>

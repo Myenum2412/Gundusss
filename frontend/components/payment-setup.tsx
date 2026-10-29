@@ -52,9 +52,7 @@ const UPI_APPS = [
   { name: "Google Pay", short: "Google Pay", icon: "/upi-apps/gpay.png" },
   { name: "PhonePe", short: "PhonePe", icon: "/upi-apps/phonepe.png" },
   { name: "Paytm", short: "Paytm", icon: "/upi-apps/paytm.png" },
-  { name: "CRED", short: "CRED", icon: "/upi-apps/cred.png" },
   { name: "BHIM UPI", short: "BHIM", icon: "/upi-apps/bhim.png" },
-  { name: "Amazon Pay", short: "Amazon Pay", icon: "/upi-apps/amazonpay.png" },
 ] as const
 
 function formatAmount(value: number) {
@@ -192,16 +190,16 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
       setQr(next.qrCodeDataUrl)
       if (next.gateway?.synced) {
         setNoticeTone("success")
-        setNotice("Saved and synced to YOUPI PG. New checkouts will use this UPI ID.")
+        setNotice("Saved and synced to MyFees. New checkouts will use this UPI ID.")
       } else if (next.gateway?.connected) {
         setNoticeTone("warning")
         setNotice(
-          "Saved in the fees app. YOUPI PG did not confirm the sync yet. Retry sync once the gateway is available."
+          "Saved in the fees app. MyFees did not confirm the sync yet. Retry sync once the gateway is available."
         )
       } else {
         setNoticeTone("warning")
         setNotice(
-          "Saved in the fees app. YOUPI PG is offline, so the sync is pending. It will be applied automatically before the next checkout."
+          "Saved in the fees app. MyFees is offline, so the sync is pending. It will be applied automatically before the next checkout."
         )
       }
       onSaved?.()
@@ -223,11 +221,11 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
       setQr(next.qrCodeDataUrl)
       if (next.gateway?.synced) {
         setNoticeTone("success")
-        setNotice("Synced to YOUPI PG. New checkouts will use this UPI ID.")
+        setNotice("Synced to MyFees. New checkouts will use this UPI ID.")
       } else {
         setNoticeTone("warning")
         setNotice(
-          "YOUPI PG is still offline. The UPI ID stays saved and will sync before the next checkout."
+          "MyFees is still offline. The UPI ID stays saved and will sync before the next checkout."
         )
       }
     } catch (err) {
@@ -521,8 +519,8 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
           {!error && !notice && settings?.gateway && !settings.gateway.synced && (
             <p className="text-xs text-muted-foreground">
               {settings.gateway.connected
-                ? "YOUPI PG has not confirmed this UPI ID yet. Save the setup or use Retry sync."
-                : "YOUPI PG is offline. The saved UPI ID will sync before the next checkout."}
+                ? "MyFees has not confirmed this UPI ID yet. Save the setup or use Retry sync."
+                : "MyFees is offline. The saved UPI ID will sync before the next checkout."}
             </p>
           )}
         </form>
@@ -547,7 +545,7 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
                   <WalletIcon className="size-4" />
                 </span>
                 <div>
-                  <p className="text-xs font-semibold leading-tight">YOUPI PG</p>
+                  <p className="text-xs font-semibold leading-tight">MyFees</p>
                   <p className="text-[10px] leading-tight text-white/60">
                     Secure UPI checkout
                   </p>

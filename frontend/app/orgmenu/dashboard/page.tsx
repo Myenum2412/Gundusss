@@ -431,7 +431,7 @@ export default function OrgMenuDashboardPage() {
           <div className="flex items-center justify-between border-b pb-2">
             <div>
               <h2 className="text-[13px] font-semibold tracking-tight">
-                YOUPI PG Gateway Admin
+                MyFees Gateway Admin
               </h2>
               <p className="text-xs text-muted-foreground">
                 UPI accounts, slots, observers and payment queue — served privately
@@ -461,7 +461,7 @@ export default function OrgMenuDashboardPage() {
             {gatewayAdminSrc ? (
               <iframe
                 src={gatewayAdminSrc}
-                title="YOUPI PG Gateway Admin"
+                title="MyFees Gateway Admin"
                 className="h-[720px] w-full border-0"
                 loading="lazy"
               />

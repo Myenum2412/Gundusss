@@ -255,7 +255,7 @@ export default function Page() {
 
   const shortcuts = [
     { title: "Fee Structure", desc: "Define fee heads and assign students", icon: ClipboardListIcon, href: "/dashboard/fee-structure" },
-    { title: "Payments", desc: "Collect fees with UPI via YOUPI PG", icon: CreditCardIcon, href: "/dashboard/payments" },
+    { title: "Payments", desc: "Collect fees with UPI via MyFees", icon: CreditCardIcon, href: "/dashboard/payments" },
     { title: "Student Groups", desc: "Bundle students by course and batch", icon: LayersIcon, href: "/dashboard/students/groups" },
     { title: "Announcements", desc: "Message students on WhatsApp", icon: MegaphoneIcon, href: "/dashboard/announcements" },
     { title: "Settings", desc: wa ? (waOk ? `WhatsApp connected (+${wa.connectedNumber ?? "?"})` : "WhatsApp not connected") : "WhatsApp and dropdown options", icon: SettingsIcon, href: "/dashboard/settings", badge: wa ? (waOk ? "Connected" : "Not connected") : undefined },

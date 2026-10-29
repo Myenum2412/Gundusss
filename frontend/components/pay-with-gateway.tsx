@@ -619,7 +619,7 @@ export function PayWithGateway({
                         <div className="overflow-hidden rounded-xl border bg-muted/30">
                           <iframe
                             src={order.checkoutUrl}
-                            title={`YOUPI PG ${methodLabel} checkout`}
+                            title={`MyFees ${methodLabel} checkout`}
                             className="h-[540px] w-full border-0"
                             allow="clipboard-write"
                           />

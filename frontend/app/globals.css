@@ -233,7 +233,7 @@
 }
 
 /* Legacy fees homepage styles (scoped so they don't leak into shadcn pages). */
-.legacy { background: #f6f7f9; color: #111; font-family: system-ui, -apple-system, sans-serif; }
+.legacy { background: #f6f7f9; color: #111; font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif; }
 .legacy .container { max-width: 900px; margin: 0 auto; padding: 32px 16px; }
 .legacy .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
 .legacy table { width: 100%; border-collapse: collapse; }
