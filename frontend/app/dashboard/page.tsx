@@ -230,8 +230,9 @@ export default function Page() {
         </section>
       </div>
 
-      {/* Recent receipts — full width table */}
-      <div className="data-table-surface">
+      {/* Recent receipts — full width table. min-h so the surface never
+          collapses to zero height when stats/charts take the space above. */}
+      <div className="data-table-surface min-h-[360px]">
         <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
           <div>
             <h2 className="text-[13px] font-semibold tracking-tight">Recent receipts</h2>
