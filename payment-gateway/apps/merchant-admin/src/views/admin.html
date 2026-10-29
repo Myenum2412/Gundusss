@@ -3728,7 +3728,7 @@
         if (!isProtected(url)) return nativeFetch(input, init);
         await seedFromFeesToken();
         if (!read()) {
-          await prompt();
+          await prompt(rejectionHint());
           if (typeof connectAdminEventsSse === 'function') connectAdminEventsSse();
           if (typeof connectServicesLogsSse === 'function') connectServicesLogsSse();
         }
@@ -3752,11 +3752,15 @@
       // .../youpi-admin/?fees_token=<fees session JWT>. That JWT cannot
       // authorize /api/v1/admin/* directly, so it is exchanged once through
       // POST /api/admin/session for the real admin token; the merchant-admin
-      // server only honors the swap when the fees backend confirms the session
-      // belongs to an active super admin. The credential is stripped from the
-      // URL immediately, so it never lands in browser history, server logs or
+      // server only honors the swap when the fees backend confirms (HMAC
+      // signature, expiry, active account, SUPER role) that the session is a
+      // real one. Fake or forged tokens are refused and flagged so the caller
+      // sees a "session rejected" message instead of an invite to type
+      // anything else in. The credential is stripped from the URL
+      // immediately, so it never lands in browser history, server logs or
       // referrer headers.
       let seedPromise = null;
+      let feesTokenRejected = false;
       function seedFromFeesToken() {
         if (seedPromise) return seedPromise;
         seedPromise = (async () => {
@@ -3775,21 +3779,28 @@
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ fees_token: feesToken })
             });
-            if (!res.ok) return;
-            const data = await res.json().catch(() => null);
-            const adminToken = data && typeof data.adminToken === 'string' ? data.adminToken : '';
-            if (adminToken) write(adminToken);
+            if (res.ok) {
+              const data = await res.json().catch(() => null);
+              const adminToken = data && typeof data.adminToken === 'string' ? data.adminToken : '';
+              if (adminToken) write(adminToken);
+            } else if (res.status === 401) {
+              feesTokenRejected = true;
+            }
           } catch (e) { }
         })();
         return seedPromise;
       }
+
+      const rejectionHint = () => (feesTokenRejected
+        ? 'That session token was rejected — only a real, signed-in super-admin session from the orgmenu dashboard can open this console. Reopen it from the dashboard.'
+        : undefined);
 
       window.fetch = authedFetch;
       return {
         token: read,
         ensure: async () => {
           await seedFromFeesToken();
-          return read() ? Promise.resolve() : prompt();
+          return read() ? Promise.resolve() : prompt(rejectionHint());
         }
       };
     })();
