@@ -123,6 +123,11 @@ describe('Merchant Admin Integration Tests', () => {
     const json = JSON.parse(res.text);
     assert.equal(json.adminToken, getAdminToken());
     assert.equal(res.headers['cache-control'], 'no-store');
+    // The fees session is planted as an HttpOnly cookie so later panel calls
+    // (carrying the ADMIN bearer) can pass the origin's gating.
+    const setCookie = Array.isArray(res.headers['set-cookie']) ? res.headers['set-cookie'].join('; ') : String(res.headers['set-cookie'] || '');
+    assert.match(setCookie, /fees_session=/);
+    assert.match(setCookie, /HttpOnly/);
   });
 
   test('POST /api/admin/session refuses non-super sessions even when the fees session is valid', async () => {

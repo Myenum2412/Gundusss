@@ -30,6 +30,11 @@
 | `FEES_WHATSAPP_BRIDGE_URL` | `http://127.0.0.1:4000` | Fees backend base URL used to deliver WhatsApp OTPs when this gateway's own WhatsApp session is not linked |
 | `FEES_WHATSAPP_BRIDGE_TOKEN` | falls back to `COIN_STORE_WEBHOOK_SECRET` | Shared secret sent as `X-WhatsApp-Bridge-Token`. Must match `WHATSAPP_BRIDGE_TOKEN` (or `YOUPI_WEBHOOK_SECRET`) on the fees backend |
 | `FEES_GATE_URL` | `http://127.0.0.1:4000/api/auth/gate` | Fees backend session-gate endpoint used by `POST /api/admin/session` to validate a `?fees_token=` exchange. Only sessions the gate confirms as active SUPER admins receive `ADMIN_API_TOKEN` |
+
+##### Mounted deployments (nginx auth_request, e.g. `/youpi-admin/` under the fees API origin)
+
+- The panel page derives its API mount from `location.pathname` (`/youpi-admin` on a pinned deployment, root `/` or `/admin` locally), so all its API calls target the gated subtree.
+- Every call the page makes also carries the credentials the gate needs: the one-shot exchange POST sends the fees JWT as the Bearer; afterwards the exchange response plants `fees_session` (HttpOnly, scoped, 12h — mirrors the fees session lifetime) so subsequent calls carrying the **admin** Bearer still pass the auth gate. No nginx/site config change is needed for a new mount — point the gated location at the merchant-admin and the page adapts.
 | `YOUPI_EXPOSE_DEV_OTP` | unset | Set to `true` for local development to get the OTP in the `send-otp` response. Ignored when `NODE_ENV=production` |
 | `YOUPI_ALLOW_DEV_TOOLS` | unset | Developer test-mode / simulator endpoints (`/admin/dev/*`, `simulate-observation`) are refused when `NODE_ENV=production` unless this is `true` |
 | `GMAIL_REDIRECT_URI` | derived | Gmail OAuth redirect URI. Defaults to `<gmail host from your configured domain>/oauth/callback` |

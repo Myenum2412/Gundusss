@@ -200,7 +200,20 @@ export class AdminServer {
             res.end(JSON.stringify({ error: 'Open the Gateway Admin from the dashboard to continue.' }));
             return;
           }
-          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...BASE_SECURITY_HEADERS });
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store',
+            // The exchange response also plants the fees session as a cookie on
+            // this origin (scoped, HttpOnly). Later panel API calls carry the
+            // ADMIN bearer instead, which the gate cannot validate itself — the
+            // cookie is what lets them pass the nginx auth_request while the
+            // admin token still authorizes the API.
+            'Set-Cookie': [
+              `fees_session=${encodeURIComponent(feesToken)}; Path=/; Max-Age=43200; HttpOnly; SameSite=Lax` +
+                (String(req.headers['x-forwarded-proto'] || '').includes('https') ? '; Secure' : '')
+            ],
+            ...BASE_SECURITY_HEADERS
+          });
           res.end(JSON.stringify({ adminToken: getAdminToken() }));
         });
         return;

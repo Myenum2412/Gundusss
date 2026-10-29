@@ -3774,9 +3774,17 @@
           } catch (e) { }
           if (read()) return;
           try {
-            const res = await nativeFetch('/api/admin/session', {
+            // The POST itself is behind the same nginx gate in production, so
+            // the fees JWT rides as the Bearer: the gate validates it and the
+            // exchange handler consumes it again. On success the handler also
+            // sets a fees_session cookie for this origin, which lets all later
+            // panel calls (which carry the ADMIN bearer instead) pass the gate.
+            const res = await nativeFetch(API_BASE + '/api/admin/session', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + feesToken
+              },
               body: JSON.stringify({ fees_token: feesToken })
             });
             if (res.ok) {
@@ -3805,7 +3813,17 @@
       };
     })();
 
-    const API_BASE = "{{API_BASE_URL}}";
+    const API_BASE = (() => {
+      // Explicit deployment override wins (rendered by the server).
+      const declared = "{{API_BASE_URL}}";
+      if (declared) return declared;
+      // Production mounts the panel at https://api.myenum.in/youpi-admin/
+      // (nginx gates and proxies that subtree, stripping the prefix). The
+      // local panel is served at / and /admin with no prefix.
+      const p = window.location.pathname;
+      if (p === '/' || p === '/admin') return '';
+      return p.replace(/\/+$/, '');
+    })();
     let currentEnvMode = 'localhost';
     let currentDomainPrefix = 'pay';
     let currentDomainTld = '';
@@ -4027,7 +4045,7 @@
     // --- MERGED CONTROL CENTER & SYSTEM SUPERVISOR ---
     async function loadServices() {
       try {
-        const res = await fetch('/api/services');
+        const res = await fetch(API_BASE + '/api/services');
         if (!res.ok) throw new Error('Supervisor unreachable');
         servicesList = await res.json();
         renderServicesTable(servicesList);
@@ -4151,7 +4169,7 @@
 
     async function startService(id) {
       try {
-        const res = await fetch(`/api/services/${id}/start`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/api/services/${id}/start`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) alert(data.error || 'Failed to start service');
         loadServices();
@@ -4162,7 +4180,7 @@
 
     async function stopService(id) {
       try {
-        const res = await fetch(`/api/services/${id}/stop`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/api/services/${id}/stop`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) alert(data.error || 'Failed to stop service');
         loadServices();
@@ -4173,7 +4191,7 @@
 
     async function restartService(id) {
       try {
-        const res = await fetch(`/api/services/${id}/restart`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/api/services/${id}/restart`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) alert(data.error || 'Failed to restart service');
         loadServices();
@@ -4184,7 +4202,7 @@
 
     async function startAllServices() {
       try {
-        await fetch('/api/services/start-all', { method: 'POST' });
+        await fetch(API_BASE + '/api/services/start-all', { method: 'POST' });
         showAdminToast('Starting all modular services...');
         setTimeout(loadServices, 1000);
       } catch (e) { }
@@ -4193,7 +4211,7 @@
     async function stopAllServices() {
       if (!confirm('Are you sure you want to stop all background gateway services? (Control supervisor will remain online).')) return;
       try {
-        await fetch('/api/services/stop-all', { method: 'POST' });
+        await fetch(API_BASE + '/api/services/stop-all', { method: 'POST' });
         showAdminToast('Stopping all services...');
         setTimeout(loadServices, 1000);
       } catch (e) { }
@@ -4296,7 +4314,7 @@
       if (!token) return;
       try {
         servicesLogsSse = openAuthenticatedEventStream(
-          '/api/logs/stream',
+          API_BASE + '/api/logs/stream',
           token,
           (eventName, data) => {
             if (eventName === 'log') {
