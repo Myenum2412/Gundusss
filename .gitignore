@@ -15,3 +15,5 @@ backend/.pgdata.corrupt-*
 whatsapp-qr-*.png
 
 queue-worker/__pycache__/
+.vercel
+
