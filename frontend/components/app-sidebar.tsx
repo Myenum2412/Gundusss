@@ -29,6 +29,7 @@ import {
   Building2Icon,
   GitBranchIcon,
   BellRingIcon,
+  CircleUserRoundIcon,
 } from "lucide-react"
 import type { Permission } from "@/lib/session"
 
@@ -106,6 +107,12 @@ const navigation: { navMain: NavItem[]; navBottom: NavItem[] } = {
     },
   ],
   navBottom: [
+    {
+      title: "Profile",
+      url: "/dashboard/profile",
+      icon: <CircleUserRoundIcon />,
+      permission: "data:read",
+    },
     {
       title: "Users",
       url: "/dashboard/users",
