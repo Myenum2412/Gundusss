@@ -1,7 +1,7 @@
 import '../src/env.js';
 import { listUsers } from '../src/users.js';
 import { listProfiles } from '../src/profiles.js';
-import { APPWRITE_COLLECTIONS, listScopedRecords } from '../src/appwrite.js';
+import { APPWRITE_COLLECTIONS, listScopedRecords } from '../src/db.js';
 
 async function main() {
   const users = await listUsers();

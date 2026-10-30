@@ -1,5 +1,5 @@
 import '../src/env.js';
-import { listScopedRecords, APPWRITE_COLLECTIONS } from '../src/appwrite.js';
+import { listScopedRecords, APPWRITE_COLLECTIONS } from '../src/db.js';
 
 async function inspect(profileId: string) {
   console.log('\n*** Records for', profileId, '***');

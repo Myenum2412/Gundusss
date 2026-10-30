@@ -6,7 +6,7 @@ import {
   getRecord,
   listRecords,
   putRecord,
-} from './appwrite.js';
+} from './db.js';
 import { SUPER_ADMIN_EMAIL } from './tenant.js';
 
 /**

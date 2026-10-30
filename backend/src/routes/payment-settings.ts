@@ -4,7 +4,7 @@ import {
   APPWRITE_COLLECTIONS,
   getRecord,
   putRecord,
-} from '../appwrite.js';
+} from '../db.js';
 import { resolveProfileId } from '../profiles.js';
 import { scopedEntityId } from '../tenant.js';
 

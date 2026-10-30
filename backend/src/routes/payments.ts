@@ -6,7 +6,7 @@ import {
   listRecords,
   listScopedRecords,
   putRecord,
-} from '../appwrite.js';
+} from '../db.js';
 import {
   findProfileBySlug,
   getProfile,

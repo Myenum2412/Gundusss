@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { claimJob, finishJob, queueDepth, workerSecret } from '../queue.js';
-import { APPWRITE_COLLECTIONS, getRecord, putRecord } from '../appwrite.js';
+import { APPWRITE_COLLECTIONS, getRecord, putRecord } from '../db.js';
 import { scopedEntityId } from '../tenant.js';
 import { sendWaMessage, waSessionKeyFor } from '../whatsapp.js';
 import type { ReminderRunLog } from './reminders.js';

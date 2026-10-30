@@ -6,7 +6,7 @@ import {
   getRecord,
   listScopedRecords,
   putRecord,
-} from '../appwrite.js';
+} from '../db.js';
 import { getProfile, listProfiles, resolveProfileId } from '../profiles.js';
 import { scopedEntityId } from '../tenant.js';
 import { getWaState, sendWaMessage, waSessionKeyFor } from '../whatsapp.js';

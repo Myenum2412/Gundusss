@@ -1,15 +1,16 @@
-﻿import './env.js';
+import './env.js';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { Readable } from 'node:stream';
 import {
-  assertAppwriteSetup,
-  getAppwriteStatus,
-  isAppwriteConfigured,
-} from './appwrite.js';
+  assertDatabaseSetup,
+  getDatabaseStatus,
+  isDatabaseConfigured,
+} from './db.js';
 import { authGuard } from './auth.js';
 import {
   ensureAccountsAndProfiles,
+  ensureDefaultAccounts,
   listProfiles,
   migrateLegacyData,
   seedProfileDefaults,
@@ -134,7 +135,8 @@ app.get('/api/health', async () => ({
   time: new Date().toISOString(),
 }));
 
-app.get('/api/appwrite/status', async () => ({ data: getAppwriteStatus() }));
+app.get('/api/db/status', async () => ({ data: getDatabaseStatus() }));
+app.get('/api/appwrite/status', async () => ({ data: getDatabaseStatus() }));
 
 await app.register(feeRoutes);
 await app.register(authRoutes);
@@ -148,8 +150,8 @@ await app.register(businessProfileRoutes);
 await app.register(reminderRoutes);
 await app.register(queueRoutes);
 
-async function ensureAppwriteSeed(): Promise<void> {
-  await assertAppwriteSetup();
+async function ensureDatabaseSeed(): Promise<void> {
+  await assertDatabaseSetup();
 
   // 1. Ensure the fixed super admin exists and owns the `orgmenu` profile.
   // 2. Give every pre-multi-tenant account its own workspace and backfill the
@@ -167,6 +169,9 @@ async function ensureAppwriteSeed(): Promise<void> {
   for (const profile of profiles) {
     await seedProfileDefaults(profile.profileId);
   }
+
+  // 5. Ensure default workspace accounts (Amarnath / Myenum) exist
+  await ensureDefaultAccounts();
 
   console.log(
     `Workspaces ready: ${profiles.length} (${profiles
@@ -191,17 +196,17 @@ process.on('uncaughtException', (err) => {
 });
 
 try {
-  if (!isAppwriteConfigured()) {
+  if (!isDatabaseConfigured()) {
     throw new Error(
-      'APPWRITE_API_KEY is required. Add it to backend/.env and restart the backend.'
+      'DATABASE_URL is required. Add it to backend/.env and restart the backend.'
     );
   }
-  await ensureAppwriteSeed();
+  await ensureDatabaseSeed();
   await hydrateQueue();
   await app.listen({ port, host });
   console.log(`Backend listening on http://${host}:${port}`);
   console.log(
-    `Appwrite store connected: ${getAppwriteStatus().endpoint} | database ${getAppwriteStatus().databaseId}`
+    `PostgreSQL store connected: database ${getDatabaseStatus().database}`
   );
 
   // Warm the WhatsApp engine at boot: inside startWa the Baileys WebSocket is

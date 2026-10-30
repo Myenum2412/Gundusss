@@ -5,7 +5,7 @@ import {
   getRecord,
   listScopedRecords,
   putRecord,
-} from '../appwrite.js';
+} from '../db.js';
 import { resolveProfileId } from '../profiles.js';
 import { CreateFeeSchema, UpdateFeeSchema, type Fee } from '../schemas.js';
 import { scopedEntityId } from '../tenant.js';

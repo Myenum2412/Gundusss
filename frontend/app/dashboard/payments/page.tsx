@@ -811,7 +811,7 @@ function ConfirmPaymentDialog({
                 Confirm Payment &amp; Issue Receipt
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                Mark as PAID. Creates an official receipt and marks fee paid in Appwrite.
+                Mark as PAID. Creates an official receipt and marks fee paid in database.
               </DialogDescription>
             </div>
           </div>

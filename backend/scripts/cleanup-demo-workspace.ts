@@ -3,7 +3,7 @@ import {
   APPWRITE_COLLECTIONS,
   deleteRecord,
   listScopedRecords,
-} from '../src/appwrite.js';
+} from '../src/db.js';
 
 const DEMO_PROFILE_ID = 'ORG-2SXWUGA4';
 

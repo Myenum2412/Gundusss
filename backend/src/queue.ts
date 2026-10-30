@@ -16,7 +16,7 @@ import {
   deleteRecord,
   listRecords,
   putRecord,
-} from './appwrite.js';
+} from './db.js';
 import { scopedEntityId } from './tenant.js';
 
 export interface QueueItem {

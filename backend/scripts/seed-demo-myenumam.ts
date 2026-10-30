@@ -15,7 +15,7 @@ import {
   putRecord,
   replaceScopedRecords,
   type StoredRecord,
-} from '../src/appwrite.js';
+} from '../src/db.js';
 import { listUsers, normalizeEmail } from '../src/users.js';
 import { getProfile, seedProfileDefaults } from '../src/profiles.js';
 

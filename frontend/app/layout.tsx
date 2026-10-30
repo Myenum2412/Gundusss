@@ -4,9 +4,6 @@ import './globals.css';
 import { cn } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
-// Initializes the Appwrite client and pings once when the app starts.
-import "@/lib/appwrite";
-
 const inter = Inter({ subsets: ['latin'], display: 'swap' });
 
 export const metadata: Metadata = {

@@ -5,7 +5,7 @@ Monorepo with workspaces:
 ```
 fees/
   frontend/         Next.js 14 App Router (port 3000)
-  backend/          Fastify 5 + Appwrite (port 4000)
+  backend/          Fastify 5 + PostgreSQL (port 4000)
   payment-gateway/  YOUPI PG self-hosted UPI gateway (payment API on 6100,
                     checkout on 7000, merchant admin on 6001)
   docker-compose.yml  Optional container setup for frontend + backend
@@ -13,15 +13,14 @@ fees/
 
 ## Quick start (local dev)
 
-Appwrite is the app's primary database. Local development needs **no Postgres**
-and no Docker.
+PostgreSQL is the app's primary database.
 
 1. Install dependencies and create the env files:
 ```bash
 npm install
 copy backend\.env.example backend\.env
 copy payment-gateway\.env.example payment-gateway\.env
-# set APPWRITE_API_KEY in backend/.env (scopes listed below)
+# set DATABASE_URL in backend/.env
 # set ENCRYPTION_MASTER_KEY and JWT_SECRET in payment-gateway/.env
 npm run gateway:install
 ```
@@ -115,8 +114,7 @@ dev server is running; restart `npm run dev --workspace=frontend` afterwards.
 ### Data storage
 
 All application data — profiles, students, fees, receipts, payment orders,
-payment settings, reminder logs, and the WhatsApp reminder queue — is stored in
-**Appwrite**. The backend keeps no local database or JSON data store, and the
+payment settings, reminder logs, and the WhatsApp reminder queue — is stored in **PostgreSQL**. The backend keeps no local database or JSON data store, and the
 frontend stores no business data in the browser. Deleting or redeploying the
 server does not lose application data; only the WhatsApp pairing session
 (`backend/.baileys_auth/`) is local, and it can be re-paired at any time.
@@ -238,9 +236,9 @@ The gateway's real verification engine runs, then delivers the signed webhook to
 the backend. The payment row should become `SUCCESS`, a receipt should appear,
 and the matching fee should become `paid`.
 
-## Appwrite data store
+## PostgreSQL data store
 
-Appwrite is the primary store for all app data: fees, users, students, student
+PostgreSQL is the primary store for all app data: fees, users, students, student
 groups, fee structures, receipts, announcements, dropdown options, payment
 orders, payment events, payment settings, and the business profile.
 
@@ -262,8 +260,7 @@ key.
 
 The browser never stores app data or account details in `localStorage`. A
 first-party session cookie holds the signed token (used only as a page gate),
-the signed-in account is kept in memory, and every page loads its data from
-Appwrite through the API. Old browser caches are cleared when the app starts.
+the signed-in account is kept in memory, and every page loads its data from the database through the API. Old browser caches are cleared when the app starts.
 
 1. In the Appwrite console, create a server API key for project
    `6adaf4be003ae5c9e622` with these scopes:
@@ -346,4 +343,4 @@ docker compose up --build
 - `GET /api/payments/settings/qr?upiId=&payeeName=&amount=` (live QR preview)
 - `POST /api/payments/settings/sync` (retry a pending YOUPI PG UPI sync)
 - `POST /api/payments/webhook` (YOUPI PG -> backend, HMAC-SHA256 verified)
-- `GET /api/appwrite/status` (Appwrite connection and tables)
+- `GET /api/db/status` (Appwrite connection and tables)

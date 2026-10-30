@@ -4,7 +4,7 @@ import {
   APPWRITE_COLLECTIONS,
   putRecord,
   replaceScopedRecords,
-} from '../src/appwrite.js';
+} from '../src/db.js';
 import { scopedEntityId } from '../src/tenant.js';
 import {
   findUserByEmail,

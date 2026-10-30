@@ -8,7 +8,7 @@ import {
   listRecords,
   listScopedRecords,
   putRecord,
-} from './appwrite.js';
+} from './db.js';
 import {
   SUPER_ADMIN_EMAIL,
   SUPER_ADMIN_NAME,
@@ -633,3 +633,46 @@ export async function getSessionProfiles(
 
   return { profile: home, activeProfile: active };
 }
+
+export async function ensureDefaultAccounts(): Promise<void> {
+  const amarnathEmail = normalizeEmail('testuser2412@gmail.com');
+  const existingAmarnath = await findUserByEmail(amarnathEmail);
+  if (!existingAmarnath) {
+    const profileId = 'ORG-XD3SLDDC';
+    await createUser({
+      name: 'Amarnath',
+      email: amarnathEmail,
+      password: 'Password@123',
+      role: 'admin',
+      profileId,
+      super: false,
+    });
+    await ensureProfileRecord(profileId, {
+      name: 'Amarnath',
+      ownerName: 'Amarnath',
+      ownerEmail: amarnathEmail,
+    });
+    await seedProfileDefaults(profileId);
+  }
+
+  const myenumEmail = normalizeEmail('myenumam@gmail.com');
+  const existingMyenum = await findUserByEmail(myenumEmail);
+  if (!existingMyenum) {
+    const profileId = 'ORG-MYENUM';
+    await createUser({
+      name: 'Myenum',
+      email: myenumEmail,
+      password: 'Password@123',
+      role: 'admin',
+      profileId,
+      super: false,
+    });
+    await ensureProfileRecord(profileId, {
+      name: 'Myenum',
+      ownerName: 'Myenum',
+      ownerEmail: myenumEmail,
+    });
+    await seedProfileDefaults(profileId);
+  }
+}
+
