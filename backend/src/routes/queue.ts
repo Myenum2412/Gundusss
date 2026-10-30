@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { claimJob, finishJob, queueDepth, workerSecret } from '../queue.js';
 import { APPWRITE_COLLECTIONS, getRecord, putRecord } from '../appwrite.js';
 import { scopedEntityId } from '../tenant.js';
-import { sendWaMessage } from '../whatsapp.js';
+import { sendWaMessage, waSessionKeyFor } from '../whatsapp.js';
 import type { ReminderRunLog } from './reminders.js';
 
 const ResultItemSchema = z.object({
@@ -64,7 +64,9 @@ export async function queueRoutes(app: FastifyInstance) {
   });
 
   // POST /api/queue/send - the worker pushes one paced message through the
-  // Baileys engine (which applies its own final safety spacing).
+  // Baileys engine (which applies its own final safety spacing). The item
+  // carries the owning user's WhatsApp session key, so each workspace's
+  // reminders go through that workspace owner's own connected WhatsApp number.
   app.post('/api/queue/send', async (req, reply) => {
     if (!requireWorker(req, reply)) return;
     const body = (req.body as any) || {};
@@ -79,8 +81,10 @@ export async function queueRoutes(app: FastifyInstance) {
       body.ctaUrl && typeof body.ctaUrl.displayText === 'string' && typeof body.ctaUrl.url === 'string'
         ? { displayText: body.ctaUrl.displayText, url: body.ctaUrl.url }
         : undefined;
+    const userEmail = typeof body.userEmail === 'string' ? body.userEmail.trim().toLowerCase() : '';
+    const waKey = userEmail ? waSessionKeyFor(userEmail) : waSessionKeyFor();
     try {
-      const result = await sendWaMessage(phone, message, [], cta);
+      const result = await sendWaMessage(phone, message, [], cta, waKey);
       return { data: { delivered: true, id: result.id } };
     } catch (err: any) {
       return reply.code(err?.statusCode ?? 500).send({

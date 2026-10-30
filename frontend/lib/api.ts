@@ -43,6 +43,8 @@ export interface WaState {
   qr: string | null;
   connectedNumber: string | null;
   lastError: string | null;
+  /** WhatsApp session key (account email) this state belongs to. */
+  sessionKey?: string | null;
 }
 
 async function waReq(path: string, init?: RequestInit): Promise<WaState> {

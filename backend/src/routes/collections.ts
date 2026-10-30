@@ -9,7 +9,7 @@ import {
 } from '../appwrite.js';
 import { getProfile, resolveProfileId } from '../profiles.js';
 import { scopedEntityId } from '../tenant.js';
-import { sendWaMessage } from '../whatsapp.js';
+import { sendWaMessage, waSessionKeyFor } from '../whatsapp.js';
 import { generateReceiptPdf, type ReceiptPdfData } from '../receipt-pdf.js';
 
 const str = (max = 500) => z.string().max(max).default('');
@@ -547,6 +547,8 @@ export async function collectionsRoutes(app: FastifyInstance) {
     const messageText = `🎉 *Payment Receipt #${receipt.receiptId}*\n\nDear ${pdfData.student.studentName},\n\nThank you for your payment! Please find your official payment receipt PDF attached for your records.\n\n• *Receipt ID:* ${receipt.receiptId}\n• *Amount:* ₹${receipt.amount}\n• *Method:* ${receipt.method || 'Cash / UPI'}\n• *Date:* ${receipt.paymentDate || '—'}\n• *Status:* Confirmed (Paid)\n\n— ${pdfData.organization.name || 'Accounts Desk'}`;
 
     try {
+      // Sent through the signed-in user's OWN isolated WhatsApp session.
+      const waKey = waSessionKeyFor(req.auth?.email);
       const waResult = await sendWaMessage(
         cleanPhone,
         messageText,
@@ -556,7 +558,9 @@ export async function collectionsRoutes(app: FastifyInstance) {
             mime: 'application/pdf',
             data: pdfBase64,
           },
-        ]
+        ],
+        undefined,
+        waKey
       );
       return { ok: true, sentTo: cleanPhone, messageId: waResult.id };
     } catch (err: any) {

@@ -6,11 +6,23 @@
  * and took ~26s to boot per connection; Baileys runs in a few tens of MB and
  * connects in seconds.
  *
- * The exported API is identical to the previous engine, so every route keeps
- * working unchanged: getWaState / startWa / logoutWa / sendWaMessage /
- * normalizeWaNumber.
+ * EVERY signed-in user account owns an ISOLATED WhatsApp session:
+ *   - its own Baileys auth dir on disk (one folder per user key)
+ *   - its own socket / QR code / status / reconnect timer
+ *   - its own paced send queue
+ * A user's reminders, announcements and receipts are only ever delivered
+ * through that user's OWN connected WhatsApp number — user A's session is never
+ * used by user B (and vice versa).
+ *
+ * System-level senders (cron-job.org, the queue worker, the payment-gateway
+ * bridge, signed webhooks) carry no user session, so they fall back to the
+ * fixed super admin session key.
+ *
+ * The exported API is: getWaState / startWa / logoutWa / sendWaMessage /
+ * normalizeWaNumber / waSessionKeyFor — every caller passes the acting user's
+ * session key (or none, for system-level sends).
  */
-import { rmSync, mkdirSync, existsSync } from 'node:fs';
+import { rmSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { randomBytes } from 'node:crypto';
@@ -53,6 +65,31 @@ try {
   // ignore
 }
 
+// Migrate the legacy single-session auth folder (created before per-user
+// sessions existed) into the fixed super-admin session folder so the existing
+// pairing is not lost on upgrade.
+try {
+  const legacyCreds = path.join(AUTH_DIR, 'creds.json');
+  if (existsSync(legacyCreds)) {
+    const targetDir = authDirFor(
+      process.env.SUPER_ADMIN_EMAIL?.trim().toLowerCase() || 'developer@myenum.in'
+    );
+    const legacySignalNames = ['app-state-sync-key-1.json', 'app-state-sync-key-2.json'];
+    const destCreds = path.join(targetDir, 'creds.json');
+    const destSignals = legacySignalNames.map((n) => path.join(targetDir, n));
+    if (!existsSync(destCreds)) {
+      copyFileSync(legacyCreds, destCreds);
+      for (const name of legacySignalNames) {
+        const src = path.join(AUTH_DIR, name);
+        if (existsSync(src)) copyFileSync(src, path.join(targetDir, name));
+      }
+    }
+    rmSync(legacyCreds, { force: true });
+  }
+} catch {
+  // ignore — fall back to a fresh pairing flow
+}
+
 export type WaStatus =
   | 'idle'
   | 'starting'
@@ -61,14 +98,74 @@ export type WaStatus =
   | 'disconnected'
   | 'error';
 
-let sock: any | null = null;
-let status: WaStatus = 'idle';
-let qrDataUrl: string | null = null;
-let connectedNumber: string | null = null;
-let lastError: string | null = null;
-let starting = false;
-let restartAttempts = 0;
-let reconnectTimer: any = null;
+/** Per-user WhatsApp session handle. Keyed by normalized account email. */
+export interface WaSession {
+  sock: any | null;
+  status: WaStatus;
+  qrDataUrl: string | null;
+  connectedNumber: string | null;
+  lastError: string | null;
+  starting: boolean;
+  restartAttempts: number;
+  reconnectTimer: any;
+}
+
+function newSession(): WaSession {
+  return {
+    sock: null,
+    status: 'idle',
+    qrDataUrl: null,
+    connectedNumber: null,
+    lastError: null,
+    starting: false,
+    restartAttempts: 0,
+    reconnectTimer: null,
+  };
+}
+
+const sessions = new Map<string, WaSession>();
+
+function sanitizeSessionKey(key: string): string {
+  const clean = String(key ?? '')
+    .trim()
+    .toLowerCase();
+  const safe = clean.replace(/[^a-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
+  return safe || 'default';
+}
+
+/**
+ * Resolve the session key for an account. Falls back to the fixed super admin
+ * session when no account email is present (system senders: cron, worker,
+ * gateway bridge, signed webhooks).
+ */
+export function waSessionKeyFor(email?: string | null): string {
+  const clean = String(email ?? '').trim().toLowerCase();
+  if (clean) return clean;
+  const fallback =
+    process.env.SUPER_ADMIN_EMAIL?.trim().toLowerCase() ||
+    'developer@myenum.in';
+  return sanitizeSessionKey(fallback);
+}
+
+function authDirFor(key: string): string {
+  const dir = path.join(AUTH_DIR, sanitizeSessionKey(key) || 'default');
+  try {
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  } catch {
+    // ignore — Baileys will surface the real error if the dir is unusable
+  }
+  return dir;
+}
+
+function getSession(userKey?: string | null): WaSession {
+  const key = waSessionKeyFor(userKey);
+  let session = sessions.get(key);
+  if (!session) {
+    session = newSession();
+    sessions.set(key, session);
+  }
+  return session;
+}
 
 // ---------------------------------------------------------------------------
 // E2EE retry caches
@@ -104,24 +201,29 @@ function persistMessage(keyId: string, remoteJid: string, messageProto: any) {
 
 /**
  * Delete the paired session from disk. ONLY called when the user explicitly
- * clicks "Log out" in the Settings UI. Never called on transient disconnects.
+ * clicks "Log out" for THEIR OWN session in the Settings UI. Never called on
+ * transient disconnects.
  */
-function purgeWaSession() {
+function purgeWaSession(key: string) {
   try {
-    rmSync(AUTH_DIR, { recursive: true, force: true });
-    console.log('[wa] auth session purged from disk');
+    rmSync(authDirFor(key), { recursive: true, force: true });
+    console.log(`[wa] auth session purged for ${key}`);
   } catch (err: any) {
-    console.log(`[wa] could not purge auth session: ${err?.message ?? err}`);
+    console.log(`[wa] could not purge auth session for ${key}: ${err?.message ?? err}`);
   }
 }
 
-export function getWaState() {
+export function getWaState(userKey?: string | null) {
+  const key = waSessionKeyFor(userKey);
+  const session = getSession(key);
   return {
-    status,
-    hasQr: qrDataUrl !== null,
-    qr: qrDataUrl,
-    connectedNumber,
-    lastError,
+    status: session.status,
+    hasQr: session.qrDataUrl !== null,
+    qr: session.qrDataUrl,
+    connectedNumber: session.connectedNumber,
+    lastError: session.lastError,
+    /** The WhatsApp session key (account email) this state belongs to. */
+    sessionKey: key,
   };
 }
 
@@ -131,33 +233,59 @@ interface ConnUpdate {
   lastDisconnect?: { error?: any };
 }
 
-async function handleConnectionUpdate(update: ConnUpdate) {
+function clearReconnectTimer(session: WaSession) {
+  if (session.reconnectTimer) {
+    clearTimeout(session.reconnectTimer);
+    session.reconnectTimer = null;
+  }
+}
+
+function scheduleReconnect(session: WaSession, key: string, code: number | null, reason: string) {
+  session.restartAttempts += 1;
+  // Exponential backoff capped at 30 seconds
+  const delay = Math.min(30_000, 2_000 * Math.pow(1.5, Math.min(session.restartAttempts, 8)));
+  session.status = 'starting';
+  session.lastError = `Connection closed (${code ?? 'unknown'}). Reconnecting in ${Math.round(delay / 1000)}s...`;
+
+  console.log(
+    `[wa] WhatsApp (${key}) connection closed (code: ${code}, reason: ${reason}) — scheduling reconnect #${session.restartAttempts} in ${Math.round(delay / 1000)}s...`
+  );
+  if (session.reconnectTimer) clearTimeout(session.reconnectTimer);
+  session.reconnectTimer = setTimeout(() => {
+    void startWa(key);
+  }, delay);
+  session.reconnectTimer.unref?.();
+}
+
+async function handleConnectionUpdate(update: ConnUpdate, key: string) {
+  const session = getSession(key);
+
   if (update.qr) {
     try {
-      qrDataUrl = await QRCode.toDataURL(update.qr);
-      status = 'qr';
-      starting = false; // QR is on screen; pairing can now happen at any time
-      console.log('[wa] New QR code generated for scanning in Settings');
+      session.qrDataUrl = await QRCode.toDataURL(update.qr);
+      session.status = 'qr';
+      session.starting = false; // QR is on screen; pairing can now happen at any time
+      console.log(`[wa] (${key}) New QR code generated for scanning in Settings`);
     } catch (err: any) {
-      lastError = err?.message ?? 'Failed to render QR';
+      session.lastError = err?.message ?? 'Failed to render QR';
     }
     return;
   }
 
   if (update.connection === 'open') {
-    status = 'ready';
-    qrDataUrl = null;
-    lastError = null;
-    starting = false;
-    restartAttempts = 0;
+    session.status = 'ready';
+    session.qrDataUrl = null;
+    session.lastError = null;
+    session.starting = false;
+    session.restartAttempts = 0;
     try {
       // user.id looks like "916374984055:12@s.whatsapp.net"
-      connectedNumber =
-        String(sock?.user?.id ?? '').split(':')[0].replace(/@.*/, '') || null;
+      session.connectedNumber =
+        String(session.sock?.user?.id ?? '').split(':')[0].replace(/@.*/, '') || null;
     } catch {
-      connectedNumber = null;
+      session.connectedNumber = null;
     }
-    console.log(`[wa] WhatsApp connection open! Connected as +${connectedNumber ?? 'unknown'}`);
+    console.log(`[wa] WhatsApp (${key}) connection open! Connected as +${session.connectedNumber ?? 'unknown'}`);
     return;
   }
 
@@ -169,14 +297,14 @@ async function handleConnectionUpdate(update: ConnUpdate) {
       error?.statusCode ??
       null;
     const reason = error?.message ?? String(error ?? 'connection closed');
-    starting = false;
-    qrDataUrl = null;
-    connectedNumber = null;
+    session.starting = false;
+    session.qrDataUrl = null;
+    session.connectedNumber = null;
 
-    console.log(`[wa] Connection closed (code: ${code}, reason: ${reason})`);
+    console.log(`[wa] WhatsApp (${key}) Connection closed (code: ${code}, reason: ${reason})`);
 
-    const dead = sock;
-    sock = null;
+    const dead = session.sock;
+    session.sock = null;
     try {
       void (async () => {
         await dead?.end(undefined);
@@ -186,51 +314,42 @@ async function handleConnectionUpdate(update: ConnUpdate) {
     }
 
     // CRITICAL: We NEVER call purgeWaSession() on disconnect!
-    // The session credentials stay safely stored on disk in .baileys_auth.
-    // If phone revoked the session, Baileys will automatically emit a new QR.
+    // The session credentials stay safely stored on disk in the per-user auth
+    // dir. If the phone revoked the session, Baileys will automatically emit a
+    // new QR.
 
-    restartAttempts += 1;
-    // Exponential backoff capped at 30 seconds
-    const delay = Math.min(30_000, 2_000 * Math.pow(1.5, Math.min(restartAttempts, 8)));
-    status = 'starting';
-    lastError = `Connection closed (${code ?? 'unknown'}). Reconnecting in ${Math.round(delay / 1000)}s...`;
-
-    console.log(`[wa] Scheduling reconnect attempt #${restartAttempts} in ${Math.round(delay / 1000)}s...`);
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(() => {
-      void startWa();
-    }, delay);
-    reconnectTimer.unref?.();
+    scheduleReconnect(session, key, code, reason);
   }
 }
 
-export async function startWa() {
-  if (status === 'ready' && sock) return getWaState();
-  if (starting) return getWaState();
-  starting = true;
-  status = 'starting';
-  lastError = null;
+export async function startWa(userKey?: string | null) {
+  const key = waSessionKeyFor(userKey);
+  const session = getSession(key);
 
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
+  if (session.status === 'ready' && session.sock) return getWaState(key);
+  if (session.starting) return getWaState(key);
+  session.starting = true;
+  session.status = 'starting';
+  session.lastError = null;
+
+  clearReconnectTimer(session);
 
   // A previous socket may still be half-alive after an error or disconnect.
   // Tear it (and its listeners) down before creating a new one.
-  if (sock) {
+  if (session.sock) {
     try {
-      sock.ev?.removeAllListeners?.('connection.update');
-      sock.ev?.removeAllListeners?.('creds.update');
-      await sock.end(undefined);
+      session.sock.ev?.removeAllListeners?.('connection.update');
+      session.sock.ev?.removeAllListeners?.('creds.update');
+      await session.sock.end(undefined);
     } catch {
       // stale socket may be half-dead; the TCP side dies either way
     }
-    sock = null;
+    session.sock = null;
   }
 
+  const authDir = authDirFor(key);
   try {
-    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    const { state, saveCreds } = await useMultiFileAuthState(authDir);
     let version: [number, number, number] = [2, 3000, 1043857760];
     try {
       const fetched = await fetchLatestBaileysVersion();
@@ -239,7 +358,7 @@ export async function startWa() {
       console.log(`[wa] fetchLatestBaileysVersion fallback used: ${e?.message ?? e}`);
     }
 
-    sock = makeWASocket({
+    const sock = makeWASocket({
       version,
       auth: {
         creds: state.creds,
@@ -276,9 +395,10 @@ export async function startWa() {
       maxMsgRetryCount: 5,
     });
 
+    session.sock = sock;
     sock.ev.on('creds.update', saveCreds);
     sock.ev.on('connection.update', (update: ConnUpdate) => {
-      void handleConnectionUpdate(update);
+      void handleConnectionUpdate(update, key);
     });
     sock.ev.on('messages.upsert', ({ messages }: { messages: any[] }) => {
       for (const m of messages || []) {
@@ -291,43 +411,43 @@ export async function startWa() {
       console.log('[wa] history sync acknowledged');
     });
   } catch (err: any) {
-    status = 'error';
-    lastError = err?.message ?? 'Failed to start WhatsApp client';
-    starting = false;
-    sock = null;
-    console.error('[wa] Error starting WhatsApp socket:', err);
+    session.status = 'error';
+    session.lastError = err?.message ?? 'Failed to start WhatsApp client';
+    session.starting = false;
+    session.sock = null;
+    console.error(`[wa] Error starting WhatsApp socket for ${key}:`, err);
   } finally {
-    starting = false;
+    session.starting = false;
   }
 
-  return getWaState();
+  return getWaState(key);
 }
 
-export async function logoutWa() {
-  console.log('[wa] Manual logout initiated by user');
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
+export async function logoutWa(userKey?: string | null) {
+  const key = waSessionKeyFor(userKey);
+  const session = getSession(key);
+  console.log(`[wa] (${key}) Manual logout initiated by user`);
+
+  clearReconnectTimer(session);
   try {
-    await sock?.logout();
+    await session.sock?.logout();
   } catch {
     // ignore — socket may already be logged out
   }
   try {
-    await sock?.end(undefined);
+    await session.sock?.end(undefined);
   } catch {
     // ignore
   }
-  sock = null;
-  starting = false;
-  status = 'disconnected';
-  qrDataUrl = null;
-  connectedNumber = null;
-  lastError = 'Logged out by user. Click "Restart client" or scan QR to reconnect.';
+  session.sock = null;
+  session.starting = false;
+  session.status = 'disconnected';
+  session.qrDataUrl = null;
+  session.connectedNumber = null;
+  session.lastError = 'Logged out by user. Click "Restart client" or scan QR to reconnect.';
   // User explicitly logged out: delete disk credentials so fresh QR can generate
-  purgeWaSession();
-  return getWaState();
+  purgeWaSession(key);
+  return getWaState(key);
 }
 
 /**
@@ -361,13 +481,14 @@ export interface WaAttachment {
 }
 
 // ---------------------------------------------------------------------------
-// Global anti-ban send queue
+// Global anti-ban send queue (per WhatsApp session)
 //
 // Every outbound message (reminders, announcements, custom sends) is funneled
-// through one serialized queue that enforces a minimum spacing between sends
-// plus random jitter. Mass-sending in a tight loop is the #1 reason WhatsApp
-// flags business accounts; the queue makes bursts physically impossible and
-// spreads them out so nothing needs to be sent "instantly".
+// through a serialized queue that enforces a minimum spacing between sends plus
+// random jitter. Mass-sending in a tight loop is the #1 reason WhatsApp flags
+// business accounts; the queue makes bursts physically impossible and spreads
+// them out so nothing needs to be sent "instantly". Each user session keeps its
+// own queue so different users' numbers never pace against each other.
 // ---------------------------------------------------------------------------
 
 const WA_SEND_GAP_MS = Math.min(
@@ -381,22 +502,22 @@ const WA_SEND_JITTER_MS = Math.min(
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-let sendChain: Promise<unknown> = Promise.resolve();
-let lastSentAt = 0;
+const sendChains = new Map<string, Promise<unknown>>();
+const lastSentAtByKey = new Map<string, number>();
 
-function enqueueSend<T>(fn: () => Promise<T>): Promise<T> {
-  const run = sendChain.then(async () => {
-    const minNext = lastSentAt + WA_SEND_GAP_MS + Math.random() * WA_SEND_JITTER_MS;
+function enqueueSend<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const run = (sendChains.get(key) ?? Promise.resolve()).then(async () => {
+    const minNext = (lastSentAtByKey.get(key) ?? 0) + WA_SEND_GAP_MS + Math.random() * WA_SEND_JITTER_MS;
     const wait = minNext - Date.now();
     if (wait > 0) await sleep(wait);
     try {
       return await fn();
     } finally {
-      lastSentAt = Date.now();
+      lastSentAtByKey.set(key, Date.now());
     }
   });
   // Never poison the chain for later senders.
-  sendChain = run.catch(() => undefined);
+  sendChains.set(key, run.catch(() => undefined) as Promise<unknown>);
   return run as Promise<T>;
 }
 
@@ -447,13 +568,13 @@ function buildCtaUrlMessage(jid: string, body: string, footer: string, cta: WaCt
 }
 
 async function performSend(
+  sock: any,
   jid: string,
   message: string,
   attachments: WaAttachment[],
   cta?: WaCtaUrl
 ): Promise<{ id: string | null }> {
-  const s = sock;
-  if (!s) throw new Error('WhatsApp socket is gone');
+  if (!sock) throw new Error('WhatsApp socket is gone');
   let firstId: string | null = null;
 
   const plainText = message.trim();
@@ -477,7 +598,7 @@ async function performSend(
       conversation: textToSend,
       extendedTextMessage: { text: textToSend },
     };
-    const sent = await s.sendMessage(jid, { text: textToSend });
+    const sent = await sock.sendMessage(jid, { text: textToSend });
     firstId = sent?.key?.id ?? null;
     if (firstId) {
       persistMessage(firstId, jid, protoPayload);
@@ -487,7 +608,7 @@ async function performSend(
 
   for (const att of attachments) {
     const buf = Buffer.from(att.data, 'base64');
-    const sent = await s.sendMessage(
+    const sent = await sock.sendMessage(
       jid,
       att.mime.startsWith('image/')
         ? { image: buf, caption: att.name }
@@ -505,15 +626,17 @@ async function performSend(
   return { id: firstId };
 }
 
-function waitForReady(maxWaitMs: number): Promise<boolean> {
-  if (status === 'ready' && sock) return Promise.resolve(true);
+function waitForReady(userKey: string, maxWaitMs: number): Promise<boolean> {
+  const session = getSession(userKey);
+  if (session.status === 'ready' && session.sock) return Promise.resolve(true);
   return new Promise((resolve) => {
     const start = Date.now();
     const interval = setInterval(() => {
-      if (status === 'ready' && sock) {
+      const s = getSession(userKey);
+      if (s.status === 'ready' && s.sock) {
         clearInterval(interval);
         resolve(true);
-      } else if (Date.now() - start >= maxWaitMs || status === 'error' || status === 'qr') {
+      } else if (Date.now() - start >= maxWaitMs || s.status === 'error' || s.status === 'qr') {
         clearInterval(interval);
         resolve(false);
       }
@@ -526,20 +649,24 @@ export async function sendWaMessage(
   to: string,
   message: string,
   attachments: WaAttachment[] = [],
-  cta?: WaCtaUrl
+  cta?: WaCtaUrl,
+  userKey?: string | null
 ) {
+  const key = waSessionKeyFor(userKey);
+  const session = getSession(key);
+
   // If socket is starting or reconnecting, wait briefly for connection to open
-  if (status === 'starting' || (!sock && status !== 'qr' && status !== 'error')) {
-    await waitForReady(7_000);
+  if (session.status === 'starting' || (!session.sock && session.status !== 'qr' && session.status !== 'error')) {
+    await waitForReady(key, 7_000);
   }
 
-  if (!sock || status !== 'ready') {
+  if (!session.sock || session.status !== 'ready') {
     const hint =
-      status === 'qr'
+      session.status === 'qr'
         ? 'WhatsApp is not connected. Scan the QR code on the Settings page first.'
-        : status === 'starting'
+        : session.status === 'starting'
           ? 'WhatsApp client is currently connecting. Please try again in a few moments.'
-          : `WhatsApp is not connected (status: ${status}). Scan the QR code on the Settings page first.`;
+          : `WhatsApp is not connected (status: ${session.status}). Scan the QR code on the Settings page first.`;
     const err = new Error(hint) as Error & { statusCode?: number };
     err.statusCode = 409;
     throw err;
@@ -554,14 +681,14 @@ export async function sendWaMessage(
   }
   const jid = `${digits}@s.whatsapp.net`;
 
-  // Funnel through the global paced queue so concurrent callers (cron run,
-  // announcements, manual sends) can never burst-line WhatsApp.
+  // Funnel through the per-session paced queue so concurrent callers (cron
+  // run, announcements, manual sends) can never burst-line WhatsApp.
   try {
-    return await enqueueSend(() => performSend(jid, message, attachments, cta));
+    return await enqueueSend(key, () => performSend(session.sock, jid, message, attachments, cta));
   } catch (err: any) {
     // Connection lost mid-queue: surface as 409 so callers show "not
     // connected" instead of a raw protocol error.
-    if (status !== 'ready') {
+    if (getSession(key).status !== 'ready') {
       err.statusCode = 409;
       throw new Error(
         `WhatsApp connection dropped while sending to +${jidToPhone(jid)}. Reconnect and try again.`

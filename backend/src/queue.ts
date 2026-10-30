@@ -24,6 +24,8 @@ export interface QueueItem {
   message: string;
   studentId?: string;
   studentName?: string;
+  /** WhatsApp session (user email) this item must be delivered through. */
+  userEmail?: string;
   /** Interactive CTA button (e.g. "Pay Now" → payment portal link). */
   ctaUrl?: { displayText: string; url: string };
 }

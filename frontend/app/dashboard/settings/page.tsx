@@ -57,7 +57,7 @@ const waLabel: Record<WaState["status"], string> = {
 }
 
 export default function SettingsPage() {
-  const { can } = useAuth()
+  const { can, user } = useAuth()
   const [activeTab, setActiveTab] = useState<"all" | "upi" | "whatsapp" | "dropdowns" | "cron">("upi")
   const [wa, setWa] = useState<WaState | null>(null)
   const [waError, setWaError] = useState("")
@@ -340,6 +340,10 @@ export default function SettingsPage() {
               <p className="flex items-center gap-2 text-sm">
                 <CheckCircle2Icon className="size-4 text-emerald-600" />
                 Connected as <span className="font-semibold">+{wa.connectedNumber ?? "unknown"}</span>
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Connected account: <span className="font-semibold">{user?.email ?? "this account"}</span>{" "}
+                — this WhatsApp number only sends for that account&apos;s workspace.
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Session is saved — the QR is not needed again unless you log out.

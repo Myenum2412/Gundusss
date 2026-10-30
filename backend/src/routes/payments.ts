@@ -25,7 +25,7 @@ import {
   getEffectiveCheckoutUpi,
   isUsableUpiId,
 } from './payment-settings.js';
-import { getWaState, sendWaMessage, type WaAttachment } from '../whatsapp.js';
+import { getWaState, sendWaMessage, waSessionKeyFor, type WaAttachment } from '../whatsapp.js';
 import { generateReceiptPdf } from '../receipt-pdf.js';
 import { buildReceiptPdfData } from './collections.js';
 import { generateNextMonthBill } from '../billing.js';
@@ -495,7 +495,8 @@ async function settleSuccessPayment(
   profileId: string,
   order: LocalOrder,
   detail: SettlementDetail,
-  source: string
+  source: string,
+  waUserKey?: string
 ): Promise<{ order: LocalOrder; overpaid: boolean } | null> {
   const orderId = detail.orderId;
   let current = (await getLocalOrder(profileId, orderId)) ?? order;
@@ -627,9 +628,15 @@ async function settleSuccessPayment(
   });
 
   // Automatically send payment receipt confirmation to student WhatsApp if
-  // a phone number is available.
+  // a phone number is available. Sent through the workspace OWNER's own
+  // isolated WhatsApp session (each account owns its own connected number).
   try {
-    const wa = getWaState();
+    const senderProfile = await getProfile(profileId);
+    const waKey =
+      (waUserKey ?? '').trim() ||
+      (senderProfile?.ownerEmail ? String(senderProfile.ownerEmail).trim().toLowerCase() : '') ||
+      waSessionKeyFor();
+    const wa = getWaState(waKey);
     if (wa.status === 'ready') {
       let recipientPhone = '';
       if (finalOrder.studentId) {
@@ -675,7 +682,7 @@ async function settleSuccessPayment(
             app.log.warn({ pdfErr }, 'Could not generate receipt PDF for WhatsApp send');
           }
 
-          void sendWaMessage(cleanPhone, receiptText, attachments).catch((err: any) => {
+          void sendWaMessage(cleanPhone, receiptText, attachments, undefined, waKey).catch((err: any) => {
             app.log.warn({ err }, 'Could not send WhatsApp payment confirmation');
           });
         }

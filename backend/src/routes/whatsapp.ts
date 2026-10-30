@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { getWaState, startWa, logoutWa, sendWaMessage } from '../whatsapp.js';
+import { getWaState, startWa, logoutWa, sendWaMessage, waSessionKeyFor } from '../whatsapp.js';
 
 const AttachmentSchema = z
   .object({
@@ -25,7 +25,20 @@ const SendSchema = z.object({
   message: z.string().max(4000),
   attachment: AttachmentSchema.optional(),
   cta: CtaSchema.optional(),
+  // Optional account email — lets machine-to-machine callers (payment
+  // gateway bridge) target a specific user's WhatsApp session. Omitted means the
+  // fixed super admin session (system sender).
+  userEmail: z.string().optional(),
 });
+
+/** Resolve the WhatsApp session key that owns this request.
+ *
+ * Every signed-in user gets their OWN isolated WhatsApp session (own auth dir,
+ * QR, socket, status, send queue). System senders pass no user and fall back to
+ * the fixed super admin session. */
+function sessionKeyFor(req: FastifyRequest): string {
+  return waSessionKeyFor(req.auth?.email);
+}
 
 /** Shared secret the payment gateway presents when it asks this app to send an OTP. */
 function bridgeToken(): string {
@@ -43,36 +56,36 @@ function secureEquals(a: string, b: string): boolean {
 }
 
 export async function whatsappRoutes(app: FastifyInstance) {
-  // GET /api/whatsapp/status (auto-starts the client on first call)
-  app.get('/api/whatsapp/status', async () => {
-    const state = getWaState();
+  // GET /api/whatsapp/status (auto-starts the caller's own client on first call)
+  app.get('/api/whatsapp/status', async (req) => {
+    const key = sessionKeyFor(req);
+    const state = getWaState(key);
     if (state.status === 'idle') {
       // Start in background; return the transitional state immediately.
-      void startWa();
+      void startWa(key);
       return { data: { ...state, status: 'starting' as const } };
     }
     return { data: state };
   });
 
-  // POST /api/whatsapp/start
-  // Fire-and-forget: Chromium takes ~25s to boot on the 512MB droplet.
-  // Returning immediately lets the UI show "starting" and keep polling
-  // status instead of a request hanging until the engine is up.
-  app.post('/api/whatsapp/start', async () => {
-    void startWa();
-    const state = getWaState();
+  // POST /api/whatsapp/start — starts the caller's own WhatsApp session.
+  app.post('/api/whatsapp/start', async (req) => {
+    const key = sessionKeyFor(req);
+    void startWa(key);
+    const state = getWaState(key);
     return {
       data: { ...state, status: state.status === 'idle' ? ('starting' as const) : state.status },
     };
   });
 
-  // POST /api/whatsapp/logout
-  app.post('/api/whatsapp/logout', async () => {
-    const state = await logoutWa();
+  // POST /api/whatsapp/logout — logs the caller's own WhatsApp session out.
+  app.post('/api/whatsapp/logout', async (req) => {
+    const key = sessionKeyFor(req);
+    const state = await logoutWa(key);
     return { data: state };
   });
 
-  // POST /api/whatsapp/send { to, message, attachment?, cta? }
+  // POST /api/whatsapp/send { to, message, attachment?, cta?, userEmail? }
   app.post('/api/whatsapp/send', async (req, reply) => {
     const parsed = SendSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -80,18 +93,23 @@ export async function whatsappRoutes(app: FastifyInstance) {
         .code(400)
         .send({ error: 'Invalid body', details: parsed.error.flatten() });
     }
-    const { to, message, attachment, cta } = parsed.data;
+    const { to, message, attachment, cta, userEmail } = parsed.data;
     if (!message.trim() && !attachment && !cta) {
       return reply
         .code(400)
         .send({ error: 'A message, attachment, or CTA button is required.' });
     }
+    // A signed-in user sends through THEIR OWN WhatsApp session; the optional
+    // userEmail override (used by admins testing another account's session)
+    // defaults to the caller's own session.
+    const key = userEmail ? waSessionKeyFor(userEmail) : sessionKeyFor(req);
     try {
       const result = await sendWaMessage(
         to,
         message,
         attachment ? [attachment] : [],
-        cta
+        cta,
+        key
       );
       return { data: result };
     } catch (err: any) {
@@ -133,19 +151,22 @@ export async function whatsappRoutes(app: FastifyInstance) {
         .send({ error: 'Invalid body', details: parsed.error.flatten() });
     }
 
-    const { to, message, attachment, cta } = parsed.data;
+    const { to, message, attachment, cta, userEmail } = parsed.data;
     if (!message.trim() && !attachment && !cta) {
       return reply
         .code(400)
         .send({ error: 'A message, attachment, or CTA button is required.' });
     }
 
+    // System sender: the fixed super admin's own WhatsApp session.
+    const key = userEmail ? waSessionKeyFor(userEmail) : waSessionKeyFor();
     try {
       const result = await sendWaMessage(
         to,
         message,
         attachment ? [attachment] : [],
-        cta
+        cta,
+        key
       );
       return { data: result };
     } catch (err: any) {

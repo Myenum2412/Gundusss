@@ -9,7 +9,7 @@ import {
 } from '../appwrite.js';
 import { getProfile, listProfiles, resolveProfileId } from '../profiles.js';
 import { scopedEntityId } from '../tenant.js';
-import { getWaState, sendWaMessage } from '../whatsapp.js';
+import { getWaState, sendWaMessage, waSessionKeyFor } from '../whatsapp.js';
 import { enqueueReminderJob, workerSecret, type QueueItem } from '../queue.js';
 import {
   TERMINAL_STATUSES,
@@ -388,10 +388,20 @@ async function deleteCronJob(apiKey: string, jobId: number) {
  */
 async function executeMonthlyReminders(
   profileId: string,
-  source: 'cron-job.org' | 'manual' | 'scheduled'
+  source: 'cron-job.org' | 'manual' | 'scheduled',
+  waUserKey?: string
 ): Promise<ReminderRunLog> {
   const profile = await getProfile(profileId);
   const companyName = profile?.name || 'MyFees';
+
+  // Every workspace reminder is delivered through the OWNER's own isolated
+  // WhatsApp session (never another user's / another workspace's session). An
+  // explicitly requested user key (e.g. the signed-in admin running a manual
+  // reminder) takes precedence.
+  const senderKey =
+    (waUserKey ?? '').trim() ||
+    (profile?.ownerEmail ? String(profile.ownerEmail).trim().toLowerCase() : '') ||
+    waSessionKeyFor();
 
   // 1. Load active students for this profile
   const studentRecords = await listScopedRecords<any>(
@@ -416,7 +426,7 @@ async function executeMonthlyReminders(
     }
   }
 
-  const waState = getWaState();
+  const waState = getWaState(senderKey);
   const isWaReady = waState.status === 'ready';
   // Queue mode: when the independent Python worker is configured (and the bot
   // is connected) reminder sends belong to the worker, which paces them with
@@ -529,6 +539,7 @@ async function executeMonthlyReminders(
           studentId: student.studentId,
           studentName: student.studentName,
           ctaUrl: { displayText: 'Pay Now', url: studentPaymentUrl },
+          userEmail: senderKey,
         });
         recipientResults.push({
           studentId: student.studentId,
@@ -558,10 +569,16 @@ async function executeMonthlyReminders(
 
     if (studentPhone.length >= 10 && isWaReady && studentPaymentUrl) {
       try {
-        await sendWaMessage(studentPhone, message, [], {
-          displayText: 'Pay Now',
-          url: studentPaymentUrl,
-        });
+        await sendWaMessage(
+          studentPhone,
+          message,
+          [],
+          {
+            displayText: 'Pay Now',
+            url: studentPaymentUrl,
+          },
+          senderKey
+        );
         delivered = true;
         sentCount++;
       } catch (err: any) {
@@ -882,7 +899,7 @@ export async function reminderRoutes(app: FastifyInstance) {
   app.post('/api/reminders/trigger', async (req, reply) => {
     const profileId = await resolveProfileId(req);
     try {
-      const runLog = await executeMonthlyReminders(profileId, 'manual');
+      const runLog = await executeMonthlyReminders(profileId, 'manual', req.auth?.email);
 
       const record = await getRecord<StoredReminderSettings>(
         APPWRITE_COLLECTIONS.paymentSettings,

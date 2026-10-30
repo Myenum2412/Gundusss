@@ -83,8 +83,10 @@ def claim_job():
     return (body.get("data") or {}).get("job")
 
 
-def send_one(phone: str, message: str, cta=None):
+def send_one(phone: str, message: str, cta=None, user_email: str | None = None):
     payload = {"phone": phone, "message": message}
+    if user_email:
+        payload["userEmail"] = user_email
     if cta and isinstance(cta, dict) and cta.get("url"):
         payload["ctaUrl"] = {
             "displayText": str(cta.get("displayText") or "Open Link"),
@@ -122,7 +124,7 @@ def process_job(job: dict) -> None:
             continue
 
         delivered, error, release_now = send_one(
-            phone, message, item.get("ctaUrl")
+            phone, message, item.get("ctaUrl"), item.get("userEmail")
         )
 
         # Double protection against a half-way job: if the engine dropped
