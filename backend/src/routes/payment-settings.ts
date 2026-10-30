@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import QRCode from 'qrcode';
 import {
-  APPWRITE_COLLECTIONS,
+  DB_TABLES,
   getRecord,
   putRecord,
 } from '../db.js';
@@ -76,7 +76,7 @@ function adminToken() {
   return (process.env.YOUPI_ADMIN_TOKEN ?? '').trim();
 }
 
-const COLLECTION = APPWRITE_COLLECTIONS.paymentSettings;
+const COLLECTION = DB_TABLES.paymentSettings;
 
 async function readLocalSettings(
   profileId: string

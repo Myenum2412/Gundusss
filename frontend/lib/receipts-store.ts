@@ -13,7 +13,7 @@ export interface StoredReceipt {
   notes: string;
 }
 
-// Appwrite (through the API) is the only source of truth. Nothing is cached in
+// PostgreSQL (through the API) is the only source of truth. Nothing is cached in
 // the browser, so a signed-in account can never read another account's copy.
 export function loadReceipts(): Promise<StoredReceipt[]> {
   return getCollection<StoredReceipt>("receipts");

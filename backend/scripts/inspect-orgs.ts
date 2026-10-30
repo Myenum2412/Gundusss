@@ -1,9 +1,9 @@
 import '../src/env.js';
-import { listScopedRecords, APPWRITE_COLLECTIONS } from '../src/db.js';
+import { listScopedRecords, DB_TABLES } from '../src/db.js';
 
 async function inspect(profileId: string) {
   console.log('\n*** Records for', profileId, '***');
-  for (const [name, col] of Object.entries(APPWRITE_COLLECTIONS)) {
+  for (const [name, col] of Object.entries(DB_TABLES)) {
     const records = await listScopedRecords(col, profileId);
     if (records.length > 0) {
       console.log('  Collection', name, ':', records.length, 'records');

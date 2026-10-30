@@ -136,7 +136,6 @@ app.get('/api/health', async () => ({
 }));
 
 app.get('/api/db/status', async () => ({ data: getDatabaseStatus() }));
-app.get('/api/appwrite/status', async () => ({ data: getDatabaseStatus() }));
 
 await app.register(feeRoutes);
 await app.register(authRoutes);

@@ -275,7 +275,7 @@ export async function loadBusinessProfile(): Promise<LoadedBusinessProfile> {
     const json = await res.json()
     const raw = json?.data?.profile
     if (!raw) {
-      // No record in Appwrite yet — show an empty form to fill in.
+      // No record in PostgreSQL yet — show an empty form to fill in.
       return { profile: defaultBusinessProfile(), updatedAt: null, online: true }
     }
     return {

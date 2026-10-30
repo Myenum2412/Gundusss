@@ -9,7 +9,7 @@
 import '../src/env.js';
 
 import {
-  APPWRITE_COLLECTIONS,
+  DB_TABLES,
   getRecord,
   listScopedRecords,
   putRecord,
@@ -364,7 +364,7 @@ const DEMO_ANNOUNCEMENTS = [
 // ---------------------------------------------------------------------------
 
 async function mergeSeed<T>(
-  collection: (typeof APPWRITE_COLLECTIONS)[keyof typeof APPWRITE_COLLECTIONS],
+  collection: (typeof DB_TABLES)[keyof typeof DB_TABLES],
   items: Array<{ entityId: string; data: T }>,
   profileId: string,
   label: string
@@ -393,8 +393,8 @@ async function mergeSeed<T>(
 }
 
 async function main(): Promise<void> {
-  if (process.env.APPWRITE_API_KEY?.trim() === '') {
-    throw new Error('APPWRITE_API_KEY is missing in backend/.env');
+  if (!process.env.DATABASE_URL?.trim()) {
+    throw new Error('DATABASE_URL is missing in backend/.env');
   }
 
   console.log(`Looking up account ${TARGET_EMAIL}...`);
@@ -427,7 +427,7 @@ async function main(): Promise<void> {
   await seedProfileDefaults(profileId);
 
   const seededDropdowns = await listScopedRecords<string[]>(
-    APPWRITE_COLLECTIONS.dropdownOptions,
+    DB_TABLES.dropdownOptions,
     profileId
   );
   const dropdownPresent = new Set(seededDropdowns.map((r) => r.entityId));
@@ -446,7 +446,7 @@ async function main(): Promise<void> {
     if (record) dropdowns.push({ entityId: key, data: record.data });
   }
   await replaceScopedRecords(
-    APPWRITE_COLLECTIONS.dropdownOptions,
+    DB_TABLES.dropdownOptions,
     profileId,
     dropdowns as Array<{ entityId: string; data: unknown }>
   );
@@ -454,16 +454,16 @@ async function main(): Promise<void> {
     `  Dropdowns: ensured ${dropdowns.length} lists across all 8 form pages`
   );
 
-  await mergeSeed(APPWRITE_COLLECTIONS.branches, BRANCHES.map((branch) => ({ entityId: branch.branchId, data: branch })), profileId, 'Branches');
-  await mergeSeed(APPWRITE_COLLECTIONS.students, DEMO_STUDENTS.map((student) => ({ entityId: student.studentId, data: student })), profileId, 'Students');
-  await mergeSeed(APPWRITE_COLLECTIONS.studentGroups, DEMO_GROUPS.map((group) => ({ entityId: group.groupId, data: group })), profileId, 'Groups');
-  await mergeSeed(APPWRITE_COLLECTIONS.feeStructures, DEMO_FEE_STRUCTURES.map((structure) => ({ entityId: structure.structureId, data: structure })), profileId, 'Fee structures');
-  await mergeSeed(APPWRITE_COLLECTIONS.receipts, DEMO_RECEIPTS.map((receipt) => ({ entityId: receipt.receiptId, data: receipt })), profileId, 'Receipts');
-  await mergeSeed(APPWRITE_COLLECTIONS.announcements, DEMO_ANNOUNCEMENTS.map((announcement) => ({ entityId: announcement.announcementId, data: announcement })), profileId, 'Announcements');
+  await mergeSeed(DB_TABLES.branches, BRANCHES.map((branch) => ({ entityId: branch.branchId, data: branch })), profileId, 'Branches');
+  await mergeSeed(DB_TABLES.students, DEMO_STUDENTS.map((student) => ({ entityId: student.studentId, data: student })), profileId, 'Students');
+  await mergeSeed(DB_TABLES.studentGroups, DEMO_GROUPS.map((group) => ({ entityId: group.groupId, data: group })), profileId, 'Groups');
+  await mergeSeed(DB_TABLES.feeStructures, DEMO_FEE_STRUCTURES.map((structure) => ({ entityId: structure.structureId, data: structure })), profileId, 'Fee structures');
+  await mergeSeed(DB_TABLES.receipts, DEMO_RECEIPTS.map((receipt) => ({ entityId: receipt.receiptId, data: receipt })), profileId, 'Receipts');
+  await mergeSeed(DB_TABLES.announcements, DEMO_ANNOUNCEMENTS.map((announcement) => ({ entityId: announcement.announcementId, data: announcement })), profileId, 'Announcements');
 
   // Touch the profile so updatedAt signals the change
   if (profile) {
-    await putRecord(APPWRITE_COLLECTIONS.profiles, profileId, {
+    await putRecord(DB_TABLES.profiles, profileId, {
       ...profile,
       updatedAt: nowIso(),
     });

@@ -1,7 +1,7 @@
 import '../src/env.js';
 
 import {
-  APPWRITE_COLLECTIONS,
+  DB_TABLES,
   putRecord,
   replaceScopedRecords,
 } from '../src/db.js';
@@ -73,7 +73,7 @@ async function main() {
     profile.ownerEmail = TARGET_EMAIL;
     profile.paymentUrl = 'https://myfees.myenum.in/amarnath';
     profile.updatedAt = new Date().toISOString();
-    await putRecord(APPWRITE_COLLECTIONS.profiles, PROFILE_ID, profile);
+    await putRecord(DB_TABLES.profiles, PROFILE_ID, profile);
     console.log(`Updated profile: ${PROFILE_ID} (Name: ${profile.name})`);
   }
 
@@ -84,7 +84,7 @@ async function main() {
     data,
   }));
   await replaceScopedRecords(
-    APPWRITE_COLLECTIONS.dropdownOptions,
+    DB_TABLES.dropdownOptions,
     PROFILE_ID,
     dropdownItems
   );
@@ -106,7 +106,7 @@ async function main() {
     isHeadBranch: true,
     capacity: '100',
   };
-  await replaceScopedRecords(APPWRITE_COLLECTIONS.branches, PROFILE_ID, [
+  await replaceScopedRecords(DB_TABLES.branches, PROFILE_ID, [
     { entityId: branch.branchId, data: branch },
   ]);
   console.log(`Seeded 1 branch: ${branch.branchName}`);
@@ -127,7 +127,7 @@ async function main() {
     joiningDate: '2026-06-01',
     status: 'Active',
   };
-  await replaceScopedRecords(APPWRITE_COLLECTIONS.students, PROFILE_ID, [
+  await replaceScopedRecords(DB_TABLES.students, PROFILE_ID, [
     { entityId: student.studentId, data: student },
   ]);
   console.log(`Seeded 1 student: ${student.studentName} (${student.studentId}, WhatsApp: ${student.phone})`);
@@ -145,7 +145,7 @@ async function main() {
     description: 'Science academic batch with interactive WhatsApp reminder support',
     studentIds: [student.studentId],
   };
-  await replaceScopedRecords(APPWRITE_COLLECTIONS.studentGroups, PROFILE_ID, [
+  await replaceScopedRecords(DB_TABLES.studentGroups, PROFILE_ID, [
     { entityId: group.groupId, data: group },
   ]);
   console.log(`Seeded 1 group: ${group.groupName} (${group.groupId})`);
@@ -165,7 +165,7 @@ async function main() {
     description: 'Monthly tuition fee for Amarnath',
     studentIds: [student.studentId],
   };
-  await replaceScopedRecords(APPWRITE_COLLECTIONS.feeStructures, PROFILE_ID, [
+  await replaceScopedRecords(DB_TABLES.feeStructures, PROFILE_ID, [
     { entityId: feeStructure.structureId, data: feeStructure },
   ]);
   console.log(`Seeded 1 fee structure: ${feeStructure.structureName}`);
@@ -181,13 +181,13 @@ async function main() {
     status: 'Paid',
     notes: `Initial term fee payment for ${student.course} (${student.group}) via UPI`,
   };
-  await replaceScopedRecords(APPWRITE_COLLECTIONS.receipts, PROFILE_ID, [
+  await replaceScopedRecords(DB_TABLES.receipts, PROFILE_ID, [
     { entityId: receipt.receiptId, data: receipt },
   ]);
   console.log(`Seeded 1 receipt: ${receipt.receiptId}`);
 
   // 9. Clean announcements
-  await replaceScopedRecords(APPWRITE_COLLECTIONS.announcements, PROFILE_ID, []);
+  await replaceScopedRecords(DB_TABLES.announcements, PROFILE_ID, []);
 
   // 10. Exactly 1 Business Profile with contact details
   const businessProfile = {
@@ -261,7 +261,7 @@ async function main() {
   };
 
   await putRecord(
-    APPWRITE_COLLECTIONS.businessProfiles,
+    DB_TABLES.businessProfiles,
     scopedEntityId(PROFILE_ID, '1'),
     {
       profile: businessProfile,

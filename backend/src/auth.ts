@@ -60,7 +60,7 @@ const TOKEN_VERSION = 'v1';
 
 const SECRET = (
   process.env.AUTH_SECRET?.trim() ||
-  process.env.APPWRITE_API_KEY?.trim() ||
+  'fees_default_secret_key_4640966a53aea20862422' ||
   ''
 ).trim();
 
@@ -72,11 +72,11 @@ export const TOKEN_TTL_SECONDS = TOKEN_TTL_HOURS * 60 * 60;
 
 if (!SECRET) {
   console.warn(
-    '[auth] AUTH_SECRET is not set and APPWRITE_API_KEY is missing; session tokens cannot be signed.'
+    '[auth] AUTH_SECRET is not set; session tokens cannot be signed.'
   );
 } else if (!process.env.AUTH_SECRET?.trim()) {
   console.warn(
-    '[auth] AUTH_SECRET is not set; falling back to APPWRITE_API_KEY to sign sessions. Set AUTH_SECRET in production.'
+    '[auth] AUTH_SECRET is not set; using default dev secret. Set AUTH_SECRET in production.'
   );
 }
 

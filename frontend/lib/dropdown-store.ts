@@ -33,7 +33,7 @@ function emptyDropdowns(): DropdownMap {
   }, {} as DropdownMap);
 }
 
-// Appwrite (through the API) is the only source of truth. Options are
+// PostgreSQL (through the API) is the only source of truth. Options are
 // configured by an administrator in Settings — no built-in defaults are
 // injected in the browser.
 export async function loadDropdowns(): Promise<DropdownMap> {

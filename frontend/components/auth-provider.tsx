@@ -99,7 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [validate])
 
   React.useEffect(() => {
-    // Remove collections cached by older builds. Appwrite is the only source
+    // Remove collections cached by older builds. PostgreSQL is the only source
     // of truth, and no account data may linger in this browser.
     clearLegacyLocalData()
     // No cookie means there is no session to verify.

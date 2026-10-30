@@ -189,7 +189,7 @@ export function FeeStructurePage() {
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // Persisted to Appwrite via the save effect.
+    // Persisted to PostgreSQL via the save effect.
     if (editingIndex !== null) {
       const id = structures[editingIndex]?.structureId ?? nextStructureId(nextId)
       const updated: FeeStructure = {

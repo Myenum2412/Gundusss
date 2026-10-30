@@ -6,8 +6,8 @@ const { Pool } = pg;
  * PostgreSQL is the primary data store for the fees app.
  *
  * Each app entity is a row in its own table. A row stores the entity's JSON
- * payload plus the logical entity id, so the backend can keep the same API
- * shapes the frontend already uses.
+ * payload plus the logical entity id, so the backend keeps the same clean API
+ * shapes the frontend uses.
  */
 
 export const DB_TABLES = {
@@ -27,13 +27,8 @@ export const DB_TABLES = {
   branches: 'branches',
 } as const;
 
-// Backward-compatible alias so existing modules work seamlessly
-export const APPWRITE_COLLECTIONS = DB_TABLES;
 export type DbTable = (typeof DB_TABLES)[keyof typeof DB_TABLES];
-export type AppwriteCollection = DbTable;
-
 export const DB_TABLE_NAMES = Object.values(DB_TABLES);
-export const APPWRITE_COLLECTION_IDS = DB_TABLE_NAMES;
 
 const VALID_TABLES = new Set(DB_TABLE_NAMES as string[]);
 
@@ -60,8 +55,6 @@ export interface DatabaseStatus {
   lastError: string | null;
 }
 
-export type AppwriteStatus = DatabaseStatus;
-
 let rawUrl = (
   process.env.DATABASE_URL ?? 'postgres://fees:fees@127.0.0.1:5432/fees'
 ).trim();
@@ -85,8 +78,6 @@ export function isDatabaseConfigured(): boolean {
   return Boolean(process.env.DATABASE_URL || rawUrl);
 }
 
-export const isAppwriteConfigured = isDatabaseConfigured;
-
 export function getDatabaseStatus(): DatabaseStatus {
   return {
     configured: isDatabaseConfigured(),
@@ -97,8 +88,6 @@ export function getDatabaseStatus(): DatabaseStatus {
     lastError,
   };
 }
-
-export const getAppwriteStatus = getDatabaseStatus;
 
 function mapRow<T>(row: Record<string, unknown>): StoredRecord<T> {
   let data: T;
@@ -130,6 +119,14 @@ function mapRow<T>(row: Record<string, unknown>): StoredRecord<T> {
     createdAt,
     updatedAt,
   };
+}
+
+/** Execute a direct parameterized query against the PostgreSQL pool. */
+export async function query<T extends pg.QueryResultRow = any>(
+  text: string,
+  params?: any[]
+): Promise<pg.QueryResult<T>> {
+  return pool.query<T>(text, params);
 }
 
 /** List every row in a table ordered by created_at. */
@@ -341,7 +338,7 @@ export async function initDatabase(): Promise<void> {
   }
 }
 
-/** Return the table names that do not exist in the configured database. */
+/** Return the table names that do not exist in PostgreSQL. */
 export async function checkDatabaseSetup(): Promise<string[]> {
   try {
     const res = await pool.query(
@@ -356,8 +353,6 @@ export async function checkDatabaseSetup(): Promise<string[]> {
   }
 }
 
-export const checkAppwriteSetup = checkDatabaseSetup;
-
 /** Fail fast at boot with an actionable message when the schema is missing. */
 export async function assertDatabaseSetup(): Promise<void> {
   await initDatabase();
@@ -368,5 +363,3 @@ export async function assertDatabaseSetup(): Promise<void> {
     );
   }
 }
-
-export const assertAppwriteSetup = assertDatabaseSetup;

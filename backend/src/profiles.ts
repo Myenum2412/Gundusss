@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 
 import {
-  APPWRITE_COLLECTIONS,
+  DB_TABLES,
   deleteRecord,
   getRecord,
   listRecords,
@@ -35,7 +35,7 @@ import {
 } from './users.js';
 
 /**
- * A workspace ("profile"). The profile id is both the Appwrite row id and the
+ * A workspace ("profile"). The profile id is both the PostgreSQL row id and the
  * path segment used for the public payment link.
  */
 export interface ProfileRecord {
@@ -48,7 +48,7 @@ export interface ProfileRecord {
   updatedAt: string;
 }
 
-const PROFILES = APPWRITE_COLLECTIONS.profiles;
+const PROFILES = DB_TABLES.profiles;
 
 export const DEFAULT_DROPDOWNS: Record<string, string[]> = {
   gender: ['Male', 'Female', 'Other'],
@@ -70,17 +70,17 @@ export const DEFAULT_DROPDOWNS: Record<string, string[]> = {
 };
 
 const SCOPED_TABLES = [
-  APPWRITE_COLLECTIONS.fees,
-  APPWRITE_COLLECTIONS.students,
-  APPWRITE_COLLECTIONS.studentGroups,
-  APPWRITE_COLLECTIONS.feeStructures,
-  APPWRITE_COLLECTIONS.receipts,
-  APPWRITE_COLLECTIONS.announcements,
-  APPWRITE_COLLECTIONS.dropdownOptions,
-  APPWRITE_COLLECTIONS.paymentOrders,
-  APPWRITE_COLLECTIONS.paymentEvents,
-  APPWRITE_COLLECTIONS.paymentSettings,
-  APPWRITE_COLLECTIONS.businessProfiles,
+  DB_TABLES.fees,
+  DB_TABLES.students,
+  DB_TABLES.studentGroups,
+  DB_TABLES.feeStructures,
+  DB_TABLES.receipts,
+  DB_TABLES.announcements,
+  DB_TABLES.dropdownOptions,
+  DB_TABLES.paymentOrders,
+  DB_TABLES.paymentEvents,
+  DB_TABLES.paymentSettings,
+  DB_TABLES.businessProfiles,
 ] as const;
 
 const ID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -460,10 +460,10 @@ export async function migrateLegacyData(profileId: string): Promise<void> {
       }
 
       const data = { ...row.data };
-      if (collection === APPWRITE_COLLECTIONS.paymentOrders) {
+      if (collection === DB_TABLES.paymentOrders) {
         if (!data.profileId) data.profileId = profileId;
       }
-      if (collection === APPWRITE_COLLECTIONS.paymentEvents) {
+      if (collection === DB_TABLES.paymentEvents) {
         if (!data.profileId) data.profileId = profileId;
       }
 
@@ -487,7 +487,7 @@ export async function migrateLegacyData(profileId: string): Promise<void> {
 /** Seed the dropdown lists that previously lived in one global table. */
 export async function seedProfileDefaults(profileId: string): Promise<void> {
   const existing = await listScopedRecords<string[]>(
-    APPWRITE_COLLECTIONS.dropdownOptions,
+    DB_TABLES.dropdownOptions,
     profileId
   );
   const present = new Set(existing.map((record) => record.entityId));
@@ -495,7 +495,7 @@ export async function seedProfileDefaults(profileId: string): Promise<void> {
   for (const [key, options] of Object.entries(DEFAULT_DROPDOWNS)) {
     if (present.has(key)) continue;
     await putRecord(
-      APPWRITE_COLLECTIONS.dropdownOptions,
+      DB_TABLES.dropdownOptions,
       scopedEntityId(profileId, key),
       options
     );

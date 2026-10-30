@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import {
-  APPWRITE_COLLECTIONS,
+  DB_TABLES,
   getRecord,
   listRecords,
   listScopedRecords,
@@ -86,10 +86,10 @@ function resolveCheckoutUrl(
   return (gatewayUrl ?? '').trim();
 }
 
-const ORDERS = APPWRITE_COLLECTIONS.paymentOrders;
-const EVENTS = APPWRITE_COLLECTIONS.paymentEvents;
-const FEES = APPWRITE_COLLECTIONS.fees;
-const RECEIPTS = APPWRITE_COLLECTIONS.receipts;
+const ORDERS = DB_TABLES.paymentOrders;
+const EVENTS = DB_TABLES.paymentEvents;
+const FEES = DB_TABLES.fees;
+const RECEIPTS = DB_TABLES.receipts;
 
 const PAYMENT_METHODS = ['UPI', 'CASH_COUNTER', 'CARD_COUNTER'] as const;
 type PaymentMethodValue = (typeof PAYMENT_METHODS)[number];
@@ -411,7 +411,7 @@ async function nextReceiptId(profileId: string): Promise<string> {
   return `RCP-${String(max + 1).padStart(3, '0')}`;
 }
 
-// Appwrite has no transactions. Serializing receipt creation in-process keeps
+// PostgreSQL has no transactions. Serializing receipt creation in-process keeps
 // duplicate webhook deliveries from allocating two receipt numbers, and the
 // notes lookup below recovers if a crash happened after the receipt write.
 let receiptQueue: Promise<unknown> = Promise.resolve();
@@ -641,7 +641,7 @@ async function settleSuccessPayment(
       let recipientPhone = '';
       if (finalOrder.studentId) {
         const stuRec = await getRecord<{ phone?: string }>(
-          APPWRITE_COLLECTIONS.students,
+          DB_TABLES.students,
           scopedEntityId(profileId, finalOrder.studentId)
         );
         recipientPhone = stuRec?.data?.phone || '';
@@ -1107,7 +1107,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     if (!order) {
       const studentIdClean = id.replace(/^stu-/, '');
       const studentRecords = await listScopedRecords<{ studentId: string; studentName: string }>(
-        APPWRITE_COLLECTIONS.students,
+        DB_TABLES.students,
         profileId
       );
       const studentMatch = studentRecords.find(
@@ -1252,7 +1252,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     return refreshed;
   }
 
-  // POST /api/payments/:id/confirm — marks payment as paid, creates receipt, updates fee in Appwrite
+  // POST /api/payments/:id/confirm — marks payment as paid, creates receipt, updates fee in PostgreSQL
   app.post('/api/payments/:id/confirm', async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = (req.body ?? {}) as { operatorId?: string; utr?: string; method?: string; amount?: number | string; notes?: string };
@@ -1611,7 +1611,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       upi_id?: string;
       payee_name?: string;
       qr_code_data_url?: string;
-    }>(APPWRITE_COLLECTIONS.paymentSettings, scopedEntityId(profile.profileId, '1'));
+    }>(DB_TABLES.paymentSettings, scopedEntityId(profile.profileId, '1'));
 
     const bizRecord = await getRecord<{
       profile?: {
@@ -1620,7 +1620,7 @@ export async function paymentRoutes(app: FastifyInstance) {
         email?: string;
         description?: string;
       };
-    }>(APPWRITE_COLLECTIONS.businessProfiles, scopedEntityId(profile.profileId, '1'));
+    }>(DB_TABLES.businessProfiles, scopedEntityId(profile.profileId, '1'));
 
     const biz = bizRecord?.data?.profile;
 
@@ -1632,12 +1632,12 @@ export async function paymentRoutes(app: FastifyInstance) {
       phone?: string;
       email?: string;
       status?: string;
-    }>(APPWRITE_COLLECTIONS.students, profile.profileId);
+    }>(DB_TABLES.students, profile.profileId);
 
     const groupRecords = await listScopedRecords<{
       groupName?: string;
       feeAmount?: string | number;
-    }>(APPWRITE_COLLECTIONS.studentGroups, profile.profileId);
+    }>(DB_TABLES.studentGroups, profile.profileId);
     const feeMap = new Map<string, string>();
     for (const g of groupRecords) {
       if (g.data.groupName && g.data.feeAmount) {
@@ -1650,7 +1650,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       courseGroup?: string;
       studentIds?: string[];
       status?: string;
-    }>(APPWRITE_COLLECTIONS.feeStructures, profile.profileId);
+    }>(DB_TABLES.feeStructures, profile.profileId);
 
     const getStudentFeeAmount = (s: { studentId: string; group?: string; course?: string }) => {
       for (const f of feeStructures) {
@@ -1736,7 +1736,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       phone?: string;
       email?: string;
       status?: string;
-    }>(APPWRITE_COLLECTIONS.students, profile.profileId);
+    }>(DB_TABLES.students, profile.profileId);
 
     const students = studentRecords
       .map((r) => r.data)
@@ -1881,7 +1881,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     let receipt: any = null;
     if (order.receiptId) {
       const rec = await getRecord<any>(
-        APPWRITE_COLLECTIONS.receipts,
+        DB_TABLES.receipts,
         scopedEntityId(profileId, order.receiptId)
       );
       if (rec?.data) receipt = rec.data;
@@ -1889,7 +1889,7 @@ export async function paymentRoutes(app: FastifyInstance) {
 
     if (!receipt) {
       const allReceipts = await listScopedRecords<any>(
-        APPWRITE_COLLECTIONS.receipts,
+        DB_TABLES.receipts,
         profileId
       );
       const match = allReceipts.find(
@@ -1940,7 +1940,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     let receipt: any = null;
     if (order.receiptId) {
       const rec = await getRecord<any>(
-        APPWRITE_COLLECTIONS.receipts,
+        DB_TABLES.receipts,
         scopedEntityId(profileId, order.receiptId)
       );
       if (rec?.data) receipt = rec.data;

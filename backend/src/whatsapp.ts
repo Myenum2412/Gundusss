@@ -57,7 +57,7 @@ if (!existsSync(AUTH_DIR)) {
 }
 
 // Older builds persisted the E2EE message cache to disk. Purge that file so no
-// WhatsApp content is left on the server outside Appwrite.
+// WhatsApp content is left on the server outside database.
 try {
   const legacyMessages = path.join(AUTH_DIR, 'recent_messages.json');
   if (existsSync(legacyMessages)) rmSync(legacyMessages, { force: true });
@@ -172,7 +172,7 @@ function getSession(userKey?: string | null): WaSession {
 // Prevents "Waiting for this message. This may take a while" by answering
 // Signal protocol retry requests when WhatsApp recipients need session keys.
 // These caches are process-local on purpose: the app's business data lives in
-// Appwrite, and no message content is written to the server filesystem.
+// PostgreSQL, and no message content is written to the server filesystem.
 // ---------------------------------------------------------------------------
 const NodeCache = require('node-cache');
 const msgRetryCounterCache = new NodeCache({ stdTTL: 3600, checkperiod: 600 });

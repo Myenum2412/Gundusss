@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
-  APPWRITE_COLLECTIONS,
+  DB_TABLES,
   getRecord,
   listRecords,
   listScopedRecords,
@@ -114,7 +114,7 @@ type Announcement = z.infer<typeof AnnouncementSchema>;
 type Branch = z.infer<typeof BranchSchema>;
 
 async function listData<T>(
-  collection: (typeof APPWRITE_COLLECTIONS)[keyof typeof APPWRITE_COLLECTIONS],
+  collection: (typeof DB_TABLES)[keyof typeof DB_TABLES],
   sortKey: (value: T) => string,
   profileId: string
 ): Promise<T[]> {
@@ -132,7 +132,7 @@ export async function buildReceiptPdfData(
   let studentData: any = {};
   if (receipt.studentId) {
     const stuRec = await getRecord<any>(
-      APPWRITE_COLLECTIONS.students,
+      DB_TABLES.students,
       scopedEntityId(profileId, receipt.studentId)
     );
     if (stuRec?.data) {
@@ -144,7 +144,7 @@ export async function buildReceiptPdfData(
   if (!studentData.studentName && receipt.studentName) {
     try {
       const allStudents = await listScopedRecords<any>(
-        APPWRITE_COLLECTIONS.students,
+        DB_TABLES.students,
         profileId
       );
       const matched = allStudents.find(
@@ -166,7 +166,7 @@ export async function buildReceiptPdfData(
   // 2a. Business Profile (primary information: name, category, contact, address)
   try {
     const bizRec = await getRecord<any>(
-      APPWRITE_COLLECTIONS.businessProfiles,
+      DB_TABLES.businessProfiles,
       scopedEntityId(profileId, '1')
     );
     if (bizRec?.data?.profile) {
@@ -191,7 +191,7 @@ export async function buildReceiptPdfData(
   // 2b. Branches lookup (campus / branch specific details)
   try {
     const branches = await listScopedRecords<any>(
-      APPWRITE_COLLECTIONS.branches,
+      DB_TABLES.branches,
       profileId
     );
     if (branches.length > 0) {
@@ -238,7 +238,7 @@ export async function buildReceiptPdfData(
   // 2d. Payment Settings (Merchant UPI ID)
   try {
     const paySetRec = await getRecord<any>(
-      APPWRITE_COLLECTIONS.paymentSettings,
+      DB_TABLES.paymentSettings,
       scopedEntityId(profileId, '1')
     );
     if (paySetRec?.data?.upi_id) {
@@ -271,7 +271,7 @@ export async function buildReceiptPdfData(
   if (orderId && (!utr || !payerVpa || !studentData.studentName)) {
     try {
       const orderRec = await getRecord<any>(
-        APPWRITE_COLLECTIONS.paymentOrders,
+        DB_TABLES.paymentOrders,
         scopedEntityId(profileId, orderId)
       );
       if (orderRec?.data) {
@@ -332,7 +332,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
     const profileId = await resolveProfileId(req);
     return {
       data: await listData<Student>(
-        APPWRITE_COLLECTIONS.students,
+        DB_TABLES.students,
         (student) => student.studentId,
         profileId
       ),
@@ -344,7 +344,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
     const profileId = await resolveProfileId(req);
     await replaceScopedRecords(
-      APPWRITE_COLLECTIONS.students,
+      DB_TABLES.students,
       profileId,
       parsed.data.items.map((student) => ({
         entityId: student.studentId,
@@ -359,7 +359,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
     const profileId = await resolveProfileId(req);
     return {
       data: await listData<Group>(
-        APPWRITE_COLLECTIONS.studentGroups,
+        DB_TABLES.studentGroups,
         (group) => group.groupId,
         profileId
       ),
@@ -371,7 +371,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
     const profileId = await resolveProfileId(req);
     await replaceScopedRecords(
-      APPWRITE_COLLECTIONS.studentGroups,
+      DB_TABLES.studentGroups,
       profileId,
       parsed.data.items.map((group) => ({
         entityId: group.groupId,
@@ -386,7 +386,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
     const profileId = await resolveProfileId(req);
     return {
       data: await listData<FeeStructure>(
-        APPWRITE_COLLECTIONS.feeStructures,
+        DB_TABLES.feeStructures,
         (structure) => structure.structureId,
         profileId
       ),
@@ -398,7 +398,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
     const profileId = await resolveProfileId(req);
     await replaceScopedRecords(
-      APPWRITE_COLLECTIONS.feeStructures,
+      DB_TABLES.feeStructures,
       profileId,
       parsed.data.items.map((structure) => ({
         entityId: structure.structureId,
@@ -413,7 +413,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
     const profileId = await resolveProfileId(req);
     return {
       data: await listData<Receipt>(
-        APPWRITE_COLLECTIONS.receipts,
+        DB_TABLES.receipts,
         (receipt) => receipt.receiptId,
         profileId
       ),
@@ -425,7 +425,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
     const profileId = await resolveProfileId(req);
     await replaceScopedRecords(
-      APPWRITE_COLLECTIONS.receipts,
+      DB_TABLES.receipts,
       profileId,
       parsed.data.items.map((receipt) => ({
         entityId: receipt.receiptId,
@@ -442,7 +442,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
 
     let receipt: any = null;
     const record = await getRecord<Receipt>(
-      APPWRITE_COLLECTIONS.receipts,
+      DB_TABLES.receipts,
       scopedEntityId(profileId, receiptId)
     );
     if (record?.data) {
@@ -450,7 +450,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
     } else {
       // Fallback: search receipts in profile by receiptId or entityId
       const allReceipts = await listScopedRecords<Receipt>(
-        APPWRITE_COLLECTIONS.receipts,
+        DB_TABLES.receipts,
         profileId
       );
       const match = allReceipts.find(
@@ -482,7 +482,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
   // GET /api/public/receipts/:receiptId/pdf — public receipt download without login
   app.get('/api/public/receipts/:receiptId/pdf', async (req, reply) => {
     const { receiptId } = req.params as { receiptId: string };
-    const allReceipts = await listRecords<Receipt>(APPWRITE_COLLECTIONS.receipts);
+    const allReceipts = await listRecords<Receipt>(DB_TABLES.receipts);
     const match = allReceipts.find(
       (r) =>
         r.data.receiptId.toLowerCase() === receiptId.toLowerCase() ||
@@ -516,7 +516,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
     const profileId = await resolveProfileId(req);
 
     const record = await getRecord<Receipt>(
-      APPWRITE_COLLECTIONS.receipts,
+      DB_TABLES.receipts,
       scopedEntityId(profileId, receiptId)
     );
     if (!record?.data) {
@@ -575,7 +575,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
     const profileId = await resolveProfileId(req);
     return {
       data: await listData<Announcement>(
-        APPWRITE_COLLECTIONS.announcements,
+        DB_TABLES.announcements,
         (announcement) => announcement.announcementId,
         profileId
       ),
@@ -587,7 +587,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
     const profileId = await resolveProfileId(req);
     await replaceScopedRecords(
-      APPWRITE_COLLECTIONS.announcements,
+      DB_TABLES.announcements,
       profileId,
       parsed.data.items.map((announcement) => ({
         entityId: announcement.announcementId,
@@ -604,7 +604,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
   app.get('/api/dropdowns', async (req) => {
     const profileId = await resolveProfileId(req);
     const records = await listScopedRecords<string[]>(
-      APPWRITE_COLLECTIONS.dropdownOptions,
+      DB_TABLES.dropdownOptions,
       profileId
     );
     const map: Record<string, string[]> = {};
@@ -619,7 +619,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
     const profileId = await resolveProfileId(req);
     await replaceScopedRecords(
-      APPWRITE_COLLECTIONS.dropdownOptions,
+      DB_TABLES.dropdownOptions,
       profileId,
       Object.entries(parsed.data.dropdowns).map(([key, options]) => ({
         entityId: key,
@@ -634,7 +634,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
     const profileId = await resolveProfileId(req);
     return {
       data: await listData<Branch>(
-        APPWRITE_COLLECTIONS.branches,
+        DB_TABLES.branches,
         (branch) => branch.branchId,
         profileId
       ),
@@ -646,7 +646,7 @@ export async function collectionsRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
     const profileId = await resolveProfileId(req);
     await replaceScopedRecords(
-      APPWRITE_COLLECTIONS.branches,
+      DB_TABLES.branches,
       profileId,
       parsed.data.items.map((branch) => ({
         entityId: branch.branchId,

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import {
-  APPWRITE_COLLECTIONS,
+  DB_TABLES,
   deleteRecord,
   getRecord,
   listScopedRecords,
@@ -15,7 +15,7 @@ import {
   withFeeCreateLock as withCreateLock,
 } from '../billing.js';
 
-const COLLECTION = APPWRITE_COLLECTIONS.fees;
+const COLLECTION = DB_TABLES.fees;
 
 export async function feeRoutes(app: FastifyInstance) {
   // GET /api/fees — lazily sweep past-due pending bills to `overdue` first so

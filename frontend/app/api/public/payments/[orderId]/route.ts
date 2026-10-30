@@ -14,7 +14,7 @@ export async function GET(
 
   // The backend owns the payment order. Never invent a status when it is
   // unreachable — a fake "CREATED" response would make the payer think the
-  // order exists when nothing was recorded in Appwrite.
+  // order exists when nothing was recorded in PostgreSQL.
   const backendBase = backendBaseUrl()
 
   try {

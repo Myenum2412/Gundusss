@@ -1,17 +1,17 @@
 import type { FastifyInstance } from 'fastify';
 import {
-  APPWRITE_COLLECTIONS,
+  DB_TABLES,
   listScopedRecords,
   putRecord,
   getRecord,
-} from './appwrite.js';
+} from './db.js';
 import { resolveProfileId } from './profiles.js';
 import type { Fee } from './schemas.js';
 import { scopedEntityId } from './tenant.js';
 
-const FEES = APPWRITE_COLLECTIONS.fees;
+const FEES = DB_TABLES.fees;
 
-// Appwrite has no transactions. Serializing fee creation in one shared queue
+// Serializing fee creation in one shared queue
 // keeps simultaneous creates (REST + auto-generation) from reading the same
 // max id and overwriting each other.
 let createQueue: Promise<unknown> = Promise.resolve();
@@ -136,7 +136,7 @@ export async function generateNextMonthBillsForProfile(
   profileId: string
 ): Promise<Fee[]> {
   const studentRecords = await listScopedRecords<{ studentName: string; status?: string }>(
-    APPWRITE_COLLECTIONS.students,
+    DB_TABLES.students,
     profileId
   );
   const activeStudents = studentRecords
