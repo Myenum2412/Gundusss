@@ -80,6 +80,7 @@ export default function AttendancePage() {
   const [selectedGroup, setSelectedGroup] = useState("all")
   const [query, setQuery] = useState("")
   const [hydrated, setHydrated] = useState(false)
+  const [dirty, setDirty] = useState(false)
 
   const reload = useCallback(() => {
     if (isSyncing() || isAttendanceSavePending()) return
@@ -101,8 +102,9 @@ export default function AttendancePage() {
   useLiveReload(reload)
 
   useEffect(() => {
-    if (hydrated) void saveAttendance(days)
-  }, [days, hydrated])
+    if (!hydrated || !dirty) return
+    void saveAttendance(days).finally(() => setDirty(false))
+  }, [days, hydrated, dirty])
 
   const activeStudents = useMemo(
     () => students.filter((student) => student.status !== "Inactive"),
@@ -196,16 +198,15 @@ export default function AttendancePage() {
     setDays((prev) =>
       markStudents(prev, selectedDate, [student], status, current === status)
     )
+    setDirty(true)
   }
 
   function markVisible(status: AttendanceStatus) {
     if (!canWrite || visibleStudents.length === 0) return
-    const allSame = visibleStudents.every(
-      (student) => entryMap.get(student.studentId)?.status === status
-    )
     setDays((prev) =>
-      markStudents(prev, selectedDate, visibleStudents, status, allSame)
+      markStudents(prev, selectedDate, visibleStudents, status)
     )
+    setDirty(true)
   }
 
   return (
