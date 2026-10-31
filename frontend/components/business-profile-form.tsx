@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { cn } from "cn"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
@@ -174,17 +173,6 @@ function formatTimestamp(value: string) {
     dateStyle: "medium",
     timeStyle: "short",
   })
-}
-
-function initials(name?: string, email?: string) {
-  if (!name && !email) return "CO"
-  const cleanName = (name || "").trim()
-  const cleanEmail = (email || "").trim()
-  const parts = cleanName.split(/\s+/).filter(Boolean)
-  if (parts.length > 1 && parts[0][0] && parts[parts.length - 1][0])
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-  if (cleanName) return cleanName.slice(0, 2).toUpperCase()
-  return cleanEmail.slice(0, 2).toUpperCase()
 }
 
 async function processImageFile(
@@ -697,7 +685,6 @@ export default function BusinessProfileForm({
   const [online, setOnline] = useState(true)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [processingImage, setProcessingImage] = useState(false)
   const [notice, setNotice] = useState<{
     tone: "success" | "warning" | "error"
     text: string
@@ -714,7 +701,6 @@ export default function BusinessProfileForm({
       })
       return
     }
-    setProcessingImage(true)
     try {
       const dataUrl = await processImageFile(file, 512, 512, 0.88)
       patchSection("media", { logoUrl: dataUrl })
@@ -727,8 +713,6 @@ export default function BusinessProfileForm({
         tone: "error",
         text: "Could not process that image file. Please try another.",
       })
-    } finally {
-      setProcessingImage(false)
     }
   }
 
@@ -740,7 +724,6 @@ export default function BusinessProfileForm({
       })
       return
     }
-    setProcessingImage(true)
     try {
       const dataUrl = await processImageFile(file, 1400, 600, 0.85)
       patchSection("media", { coverUrl: dataUrl })
@@ -753,8 +736,6 @@ export default function BusinessProfileForm({
         tone: "error",
         text: "Could not process that image file. Please try another.",
       })
-    } finally {
-      setProcessingImage(false)
     }
   }
 
@@ -1044,54 +1025,17 @@ export default function BusinessProfileForm({
         <div className="px-6 pb-6 sm:px-8">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div className="flex items-end gap-4">
-              <div className="relative group -mt-12 shrink-0">
-                <input
-                  type="file"
-                  ref={logoInputRef}
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0]
-                    if (f) handleLogoUpload(f)
-                    e.target.value = ""
-                  }}
-                />
-                <Avatar className="size-20 border-4 border-card shadow-md sm:size-24 ring-2 ring-primary/20 transition-transform group-hover:scale-[1.02]">
-                  {profile.media.logoUrl ? (
-                    <AvatarImage
-                      src={profile.media.logoUrl}
-                      alt={profile.name || user?.name || "Logo"}
-                      className="object-cover"
-                    />
-                  ) : null}
-                  <AvatarFallback className="bg-primary/10 text-lg font-semibold text-primary">
-                    {initials(profile.name || user?.name, user?.email || profile.email)}
-                  </AvatarFallback>
-                </Avatar>
-
-                {/* Hover overlay on avatar */}
-                <button
-                  type="button"
-                  title="Change profile image"
-                  onClick={() => logoInputRef.current?.click()}
-                  className="absolute inset-0 flex flex-col items-center justify-center rounded-full bg-black/55 text-white opacity-0 backdrop-blur-[2px] transition-opacity group-hover:opacity-100 cursor-pointer"
-                >
-                  <Camera className="size-5" />
-                  <span className="text-[10px] font-medium tracking-tight mt-0.5">
-                    {processingImage ? "Updating…" : "Change"}
-                  </span>
-                </button>
-
-                {/* Camera badge on corner */}
-                <button
-                  type="button"
-                  title="Upload profile image"
-                  onClick={() => logoInputRef.current?.click()}
-                  className="absolute -bottom-1 -right-1 flex size-7 items-center justify-center rounded-full border-2 border-card bg-primary text-primary-foreground shadow-md transition-transform hover:scale-110 active:scale-95 cursor-pointer"
-                >
-                  <Camera className="size-3.5" />
-                </button>
-              </div>
+              <input
+                type="file"
+                ref={logoInputRef}
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) handleLogoUpload(f)
+                  e.target.value = ""
+                }}
+              />
 
               <div className="pb-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -1267,62 +1211,6 @@ export default function BusinessProfileForm({
                 title="Business identity"
                 description="The core details Google uses to match your listing to searches."
               >
-                {/* Profile Picture / Logo quick upload banner */}
-                <div className="mb-5 flex flex-wrap items-center gap-4 rounded-xl border bg-muted/20 p-3.5">
-                  <div className="relative group shrink-0">
-                    <Avatar className="size-16 border-2 border-card shadow-sm">
-                      {profile.media.logoUrl ? (
-                        <AvatarImage
-                          src={profile.media.logoUrl}
-                          alt="Profile image preview"
-                          className="object-cover"
-                        />
-                      ) : null}
-                      <AvatarFallback className="bg-primary/10 text-base font-semibold text-primary">
-                        {initials(profile.name || user?.name, user?.email || profile.email)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <button
-                      type="button"
-                      title="Upload profile image"
-                      onClick={() => logoInputRef.current?.click()}
-                      className="absolute -bottom-1 -right-1 flex size-6 items-center justify-center rounded-full border-2 border-card bg-primary text-primary-foreground shadow-sm hover:scale-110 cursor-pointer"
-                    >
-                      <Camera className="size-3" />
-                    </button>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">Profile Image & Logo</p>
-                    <p className="text-xs text-muted-foreground">
-                      Upload a photo or logo from your device (PNG, JPG, WebP). It updates your profile avatar and Google Business logo.
-                    </p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => logoInputRef.current?.click()}
-                        className="gap-1.5 text-xs h-7.5"
-                      >
-                        <Upload className="size-3.5" />
-                        {profile.media.logoUrl ? "Change image" : "Upload image"}
-                      </Button>
-                      {profile.media.logoUrl && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => patchSection("media", { logoUrl: "" })}
-                          className="gap-1 text-xs h-7.5 text-muted-foreground hover:text-destructive"
-                        >
-                          <Trash2Icon className="size-3.5" />
-                          Remove
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
                 <div className="grid gap-4 sm:grid-cols-2">
                   <TextField
                     id="bp-name"
