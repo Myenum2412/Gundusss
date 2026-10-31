@@ -9,7 +9,13 @@ import {
 } from '../appwrite.js';
 import { getProfile, listProfiles, resolveProfileId } from '../profiles.js';
 import { scopedEntityId } from '../tenant.js';
-import { getWaState, sendWaMessage, waSessionKeyFor } from '../whatsapp.js';
+import {
+  getWaState,
+  hasWaCredentials,
+  sendWaMessage,
+  startWa,
+  waSessionKeyFor,
+} from '../whatsapp.js';
 import { enqueueReminderJob, workerSecret, type QueueItem } from '../queue.js';
 import {
   TERMINAL_STATUSES,
@@ -117,16 +123,124 @@ interface FeeBill {
 }
 
 /** The student's nearest unpaid bill (pending/overdue), if one exists. */
-function findStudentUnpaidFee(studentName: string, bills: FeeBill[]): FeeBill | null {
+function findStudentUnpaidFee(
+  studentName: string,
+  bills: FeeBill[],
+  throughMonth?: string
+): FeeBill | null {
   return (
     bills
       .filter(
         (fee) =>
           fee.status !== 'paid' &&
-          fee.student_name.toLowerCase() === studentName.toLowerCase()
+          fee.student_name.toLowerCase() === studentName.toLowerCase() &&
+          // A next-month bill that was created right after a settlement must
+          // not make this month's reminder fire again.
+          (!throughMonth || String(fee.due_date).slice(0, 7) <= throughMonth)
       )
       .sort((a, b) => a.due_date.localeCompare(b.due_date))[0] ?? null
   );
+}
+
+/** Current billing month (YYYY-MM) in IST, matching the cron timezone. */
+function currentCycleMonth(): string {
+  return new Date(Date.now() + 330 * 60 * 1000).toISOString().slice(0, 7);
+}
+
+/** Normalize a receipt date (ISO or any Date-parsable value) to YYYY-MM. */
+function monthKey(value?: string): string {
+  const raw = String(value ?? '').trim();
+  const iso = /^(\d{4})-(\d{2})/.exec(raw);
+  if (iso) return `${iso[1]}-${iso[2]}`;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 7);
+}
+
+interface ReceiptRow {
+  studentId?: string;
+  studentName?: string;
+  amount?: string | number;
+  paymentDate?: string;
+  status?: string;
+}
+
+/** True when this student has already settled the current month. */
+function hasPaidThisCycle(
+  student: { studentId?: string; studentName?: string },
+  receipts: ReceiptRow[],
+  bills: FeeBill[],
+  cycleMonth: string
+): boolean {
+  const studentId = String(student.studentId ?? '').trim().toLowerCase();
+  const studentName = String(student.studentName ?? '').trim().toLowerCase();
+
+  const paidBill = bills.some(
+    (fee) =>
+      fee.status === 'paid' &&
+      String(fee.due_date).slice(0, 7) === cycleMonth &&
+      fee.student_name.trim().toLowerCase() === studentName
+  );
+  if (paidBill) return true;
+
+  return receipts.some((receipt) => {
+    const status = String(receipt.status ?? '').trim().toLowerCase();
+    // Ignore receipts that do not represent settled money.
+    if (
+      status === 'cancelled' ||
+      status === 'canceled' ||
+      status === 'failed' ||
+      status === 'pending'
+    ) {
+      return false;
+    }
+    const sameStudent =
+      (!!studentId &&
+        String(receipt.studentId ?? '').trim().toLowerCase() === studentId) ||
+      (!!studentName &&
+        String(receipt.studentName ?? '').trim().toLowerCase() === studentName);
+    return sameStudent && monthKey(receipt.paymentDate) === cycleMonth;
+  });
+}
+
+/** True when an older, still-unpaid bill exists (fee arrears). */
+function hasArrears(
+  studentName: string,
+  bills: FeeBill[],
+  cycleMonth: string
+): boolean {
+  const name = studentName.trim().toLowerCase();
+  return bills.some(
+    (fee) =>
+      fee.status !== 'paid' &&
+      fee.student_name.trim().toLowerCase() === name &&
+      String(fee.due_date).slice(0, 7) < cycleMonth
+  );
+}
+
+/**
+ * Bring the owner's paired WhatsApp session online for the automated cron.
+ * A backend restart leaves Baileys idle until someone opens the settings page;
+ * starting the saved session here keeps monthly reminders fully automatic.
+ */
+async function ensureWhatsAppReady(sessionKey: string, timeoutMs = 20_000) {
+  let state = getWaState(sessionKey);
+  if (state.status === 'ready') return state;
+  // Never generate a QR loop for an account that has not paired yet.
+  if (!hasWaCredentials(sessionKey)) return state;
+  if (
+    state.status === 'idle' ||
+    state.status === 'disconnected' ||
+    state.status === 'error'
+  ) {
+    void startWa(sessionKey);
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    state = getWaState(sessionKey);
+    if (state.status === 'ready' || state.status === 'qr') return state;
+  }
+  return state;
 }
 
 /**
@@ -250,6 +364,8 @@ export interface ReminderRunLog {
   overdueMarked?: number;
   /** Next-month bills auto-created during the run. */
   billsGenerated?: number;
+  /** Active students skipped because they already paid this month. */
+  skippedPaid?: number;
   recipients: Array<{
     studentId: string;
     studentName: string;
@@ -408,7 +524,9 @@ async function executeMonthlyReminders(
     APPWRITE_COLLECTIONS.students,
     profileId
   );
-  const students = studentRecords.map((r) => r.data).filter((s) => s.status !== 'Inactive');
+  const activeStudents = studentRecords
+    .map((r) => r.data)
+    .filter((s) => s.status !== 'Inactive');
 
   // 2. Load fee structures & student groups to determine standard fee
   const feeRecords = await listScopedRecords<any>(
@@ -426,13 +544,10 @@ async function executeMonthlyReminders(
     }
   }
 
-  const waState = getWaState(senderKey);
-  const isWaReady = waState.status === 'ready';
   // Queue mode: when the independent Python worker is configured (and the bot
   // is connected) reminder sends belong to the worker, which paces them with
   // randomized spacing instead of blasting them inline.
   const workerMode = Boolean(workerSecret());
-
   // Bill hygiene before a single reminder goes out: past-due bills are marked
   // overdue so the reminder text never lies, and students with a settled bill
   // get their next month's pending bill generated automatically.
@@ -444,6 +559,29 @@ async function executeMonthlyReminders(
   const feeBills: FeeBill[] = (
     await listScopedRecords<FeeBill>(APPWRITE_COLLECTIONS.fees, profileId)
   ).map((r) => r.data);
+
+  // Only unpaid students should receive a reminder. A receipt in the current
+  // month (or a bill marked paid for this month) means the fee is settled;
+  // students with older arrears still get reminded.
+  const receiptRecords = await listScopedRecords<ReceiptRow>(
+    APPWRITE_COLLECTIONS.receipts,
+    profileId
+  );
+  const receipts = receiptRecords.map((record) => record.data);
+  const cycleMonth = currentCycleMonth();
+  const students = activeStudents.filter((student) => {
+    const paid = hasPaidThisCycle(student, receipts, feeBills, cycleMonth);
+    const arrears = hasArrears(student.studentName, feeBills, cycleMonth);
+    return arrears || !paid;
+  });
+  const skippedPaid = activeStudents.length - students.length;
+
+  // Start the owner's paired WhatsApp session if a past restart left it idle,
+  // so the cron needs no manual visit to the settings page.
+  const waState = students.length > 0
+    ? await ensureWhatsAppReady(senderKey)
+    : getWaState(senderKey);
+  const isWaReady = waState.status === 'ready';
 
   // Fallback due day: the workspace's configured schedule (no more hardcoded
   // "5th" when the fee structure says otherwise).
@@ -466,7 +604,11 @@ async function executeMonthlyReminders(
     const studentFee = resolveStudentFeeAmount(student, feeRecords, feeMap);
     const amountStr = `₹${parseFloat(studentFee).toLocaleString('en-IN')}`;
     const studentPhone = (student.phone || '').replace(/\D/g, '');
-    const unpaidFee = findStudentUnpaidFee(student.studentName, feeBills);
+    const unpaidFee = findStudentUnpaidFee(
+      student.studentName,
+      feeBills,
+      cycleMonth
+    );
 
     // Due date: the student's real bill due date when one exists, otherwise
     // the workspace schedule day. Always concrete — never a hardcoded "5th".
@@ -603,21 +745,28 @@ async function executeMonthlyReminders(
 
   let status: ReminderRunLog['status'] = 'SUCCESS';
   let details = '';
+  const skipNote =
+    skippedPaid > 0
+      ? ` ${skippedPaid} student(s) skipped because they already paid for ${cycleMonth}.`
+      : '';
 
   if (students.length === 0) {
     status = 'SKIPPED';
-    details = 'No active students found for monthly fee reminders.';
+    details =
+      activeStudents.length === 0
+        ? 'No active students found for monthly fee reminders.'
+        : `All ${activeStudents.length} active student(s) have already paid for ${cycleMonth}; no reminders sent.`;
   } else if (workerMode && isWaReady && jobItems.length > 0) {
     // Nothing has been sent here — the Python queue worker owns delivery now.
     status = 'QUEUED';
-    details = `${jobItems.length} reminder(s) queued; the queue worker delivers them one by one with randomized spacing (anti-ban).`;
+    details = `${jobItems.length} reminder(s) queued; the queue worker delivers them one by one with randomized spacing (anti-ban).${skipNote}`;
   } else if (isWaReady) {
     if (sentCount === students.length) {
       status = 'SUCCESS';
-      details = `Delivered monthly fee reminders to all ${sentCount} student(s) via WhatsApp.`;
+      details = `Delivered monthly fee reminders to all ${sentCount} unpaid student(s) via WhatsApp.${skipNote}`;
     } else if (sentCount > 0) {
       status = 'PARTIAL';
-      details = `Delivered to ${sentCount}/${students.length} student(s) via WhatsApp.`;
+      details = `Delivered to ${sentCount}/${students.length} unpaid student(s) via WhatsApp.${skipNote}`;
     } else {
       // Bot is connected but not a single send succeeded — this is a real
       // failure (bad numbers, protocol errors), not a success.
@@ -626,12 +775,12 @@ async function executeMonthlyReminders(
         recipientResults.find((r) => !r.delivered && r.error)?.error ?? undefined;
       details = `No messages delivered. WhatsApp bot is connected but every send failed${
         firstError ? `: ${firstError}` : '.'
-      }`;
+      }${skipNote}`;
     }
   } else {
     // WhatsApp client is offline / waiting for QR: nothing was delivered.
     status = 'FAILED';
-    details = `WhatsApp bot is offline — no messages delivered. Reminders were generated for ${students.length} student(s); connect the bot on the Settings page and re-run.`;
+    details = `WhatsApp bot is offline — no messages delivered. Reminders were generated for ${students.length} unpaid student(s); connect the bot on the Settings page and re-run.${skipNote}`;
   }
 
   const runLog: ReminderRunLog = {
@@ -644,6 +793,7 @@ async function executeMonthlyReminders(
     details,
     overdueMarked,
     billsGenerated: generatedBills.length,
+    skippedPaid,
     recipients: recipientResults,
   };
 
