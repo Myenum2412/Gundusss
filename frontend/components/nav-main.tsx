@@ -55,7 +55,10 @@ export function NavMain({
       )}
       <SidebarMenu className="gap-0.5">
         {items.map((item) => {
-          const active = item.isActive ?? isActiveUrl(item.url) ?? item.items?.some((s) => isActiveUrl(s.url))
+          const active =
+            item.isActive ??
+            (isActiveUrl(item.url) ||
+              Boolean(item.items?.some((s) => isActiveUrl(s.url))))
           return item.items?.length ? (
             <Collapsible
               key={item.title}

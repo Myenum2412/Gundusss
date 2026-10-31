@@ -30,6 +30,7 @@ import {
   GitBranchIcon,
   BellRingIcon,
   CircleUserRoundIcon,
+  CalendarCheckIcon,
 } from "lucide-react"
 import type { Permission } from "@/lib/session"
 
@@ -72,6 +73,22 @@ const navigation: { navMain: NavItem[]; navBottom: NavItem[] } = {
         {
           title: "Student Groups",
           url: "/dashboard/students/groups",
+        },
+      ],
+    },
+    {
+      title: "Attendance",
+      url: "#",
+      icon: <CalendarCheckIcon />,
+      permission: "data:read",
+      items: [
+        {
+          title: "Students",
+          url: "/dashboard/attendance",
+        },
+        {
+          title: "Groups",
+          url: "/dashboard/attendance/groups",
         },
       ],
     },

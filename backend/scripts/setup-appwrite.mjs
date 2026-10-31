@@ -59,6 +59,7 @@ const tables = [
   { tableId: 'payment_settings', name: 'Payment Settings' },
   { tableId: 'business_profiles', name: 'Business Profiles' },
   { tableId: 'branches', name: 'Branches' },
+  { tableId: 'attendance', name: 'Attendance' },
 ];
 
 const columns = [

@@ -31,6 +31,7 @@ export const APPWRITE_COLLECTIONS = {
   paymentSettings: 'payment_settings',
   businessProfiles: 'business_profiles',
   branches: 'branches',
+  attendance: 'attendance',
 } as const;
 
 export type AppwriteCollection =

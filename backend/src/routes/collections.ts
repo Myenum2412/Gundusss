@@ -106,12 +106,27 @@ const BranchSchema = z.object({
   capacity: str(20).default(""),
 });
 
+const AttendanceEntrySchema = z.object({
+  studentId: z.string().min(1).max(30),
+  studentName: str(200),
+  group: str(100),
+  status: z.enum(['Present', 'Absent', 'Late']),
+  note: str(500),
+});
+
+const AttendanceDaySchema = z.object({
+  date: z.string().min(1).max(20),
+  entries: z.array(AttendanceEntrySchema).max(5000).default([]),
+  updatedAt: str(40),
+});
+
 type Student = z.infer<typeof StudentSchema>;
 type Group = z.infer<typeof GroupSchema>;
 type FeeStructure = z.infer<typeof FeeStructureSchema>;
 type Receipt = z.infer<typeof ReceiptSchema>;
 type Announcement = z.infer<typeof AnnouncementSchema>;
 type Branch = z.infer<typeof BranchSchema>;
+type AttendanceDay = z.infer<typeof AttendanceDaySchema>;
 
 async function listData<T>(
   collection: (typeof APPWRITE_COLLECTIONS)[keyof typeof APPWRITE_COLLECTIONS],
@@ -651,6 +666,36 @@ export async function collectionsRoutes(app: FastifyInstance) {
       parsed.data.items.map((branch) => ({
         entityId: branch.branchId,
         data: branch,
+      }))
+    );
+    return { data: { count: parsed.data.items.length } };
+  });
+
+  // ---- Attendance (one row per calendar day) ----
+  app.get('/api/attendance', async (req) => {
+    const profileId = await resolveProfileId(req);
+    return {
+      data: await listData<AttendanceDay>(
+        APPWRITE_COLLECTIONS.attendance,
+        (day) => day.date,
+        profileId
+      ),
+    };
+  });
+
+  app.put('/api/attendance', async (req, reply) => {
+    const parsed = itemsSchema(AttendanceDaySchema).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
+    const profileId = await resolveProfileId(req);
+    await replaceScopedRecords(
+      APPWRITE_COLLECTIONS.attendance,
+      profileId,
+      parsed.data.items.map((day) => ({
+        entityId: day.date,
+        data: {
+          ...day,
+          updatedAt: day.updatedAt || new Date().toISOString(),
+        },
       }))
     );
     return { data: { count: parsed.data.items.length } };
