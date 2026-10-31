@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { claimJob, finishJob, queueDepth, workerSecret } from '../queue.js';
-import { DB_TABLES, getRecord, putRecord } from '../db.js';
+import { APPWRITE_COLLECTIONS, getRecord, putRecord } from '../appwrite.js';
 import { scopedEntityId } from '../tenant.js';
 import { sendWaMessage, waSessionKeyFor } from '../whatsapp.js';
 import type { ReminderRunLog } from './reminders.js';
@@ -154,7 +154,7 @@ async function mergeResultsIntoLog(
     lastRun: string | null;
     lastStatus: string | null;
     logs: ReminderRunLog[];
-  }>(DB_TABLES.paymentSettings, scopedEntityId(profileId, 'cron_reminders'));
+  }>(APPWRITE_COLLECTIONS.paymentSettings, scopedEntityId(profileId, 'cron_reminders'));
   if (!record?.data) return false;
   const settings = record.data;
   const log = (settings.logs || []).find((l) => l.id === jobId);
@@ -198,7 +198,7 @@ async function mergeResultsIntoLog(
 
   settings.lastStatus = log.status;
   await putRecord(
-    DB_TABLES.paymentSettings,
+    APPWRITE_COLLECTIONS.paymentSettings,
     scopedEntityId(profileId, 'cron_reminders'),
     settings
   );

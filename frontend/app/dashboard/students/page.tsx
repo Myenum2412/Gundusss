@@ -145,7 +145,7 @@ export default function StudentsPage() {
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // Persisted to PostgreSQL via the save effect.
+    // Persisted to Appwrite via the save effect.
     // Student ID is auto-generated (STU-001, STU-002, ...).
     let assignedId = ""
     if (editingIndex !== null) {

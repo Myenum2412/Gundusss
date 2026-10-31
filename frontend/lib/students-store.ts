@@ -17,7 +17,7 @@ export interface StoredStudent {
   status: string;
 }
 
-// PostgreSQL (through the API) is the only source of truth. Nothing is cached in
+// Appwrite (through the API) is the only source of truth. Nothing is cached in
 // the browser, so a signed-in account can never read another account's copy.
 export function loadStudents(): Promise<StoredStudent[]> {
   return getCollection<StoredStudent>("students");

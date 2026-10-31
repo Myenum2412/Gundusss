@@ -148,7 +148,7 @@ export default function ProfileBlock({
             {user.workspace} ·{" "}
             <span className="font-mono text-[12px]">{user.profileId}</span> ·
             Fees Manager — enrolments, groups, fee structures, receipts, and
-            announcements, stored in PostgreSQL and synced live across every page.
+            announcements, stored in Appwrite and synced live across every page.
           </p>
 
           <div className="mt-4 flex flex-wrap gap-x-8 gap-y-2 text-sm">

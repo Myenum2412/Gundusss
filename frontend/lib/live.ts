@@ -1,5 +1,5 @@
 // Tiny live-sync engine: tracks in-flight saves so background refetches
-// never overwrite a local mutation that hasn't reached PostgreSQL yet.
+// never overwrite a local mutation that hasn't reached Appwrite yet.
 
 let inFlight = 0;
 

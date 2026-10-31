@@ -216,7 +216,7 @@ async function main() {
     shutdown(1);
     return;
   } else {
-    console.log(`${tag("backend", "36")} starting API (PostgreSQL) at ${BACKEND_URL} ...`);
+    console.log(`${tag("backend", "36")} starting API (Appwrite) at ${BACKEND_URL} ...`);
     startTask("backend", "36", "npm", ["run", "dev", "--workspace=backend"]);
 
     const ready = await waitForBackend(BACKEND_READY_TIMEOUT_MS);
@@ -227,12 +227,12 @@ async function main() {
         )}s.`
       );
       console.error(
-        `${tag("backend", "31")} check backend/.env (DATABASE_URL) and the error log above.`
+        `${tag("backend", "31")} check backend/.env (APPWRITE_API_KEY) and the error log above.`
       );
       shutdown(1);
       return;
     }
-    console.log(`${tag("backend", "36")} ready - database: PostgreSQL`);
+    console.log(`${tag("backend", "36")} ready - database: Appwrite`);
   }
 
   const frontendPort = await findAvailablePort(FRONTEND_PORT);
@@ -280,7 +280,7 @@ async function main() {
   console.log(paint("90", "  ------------------------------------------------------------"));
   console.log(`  Frontend    ${paint("36", `http://localhost:${frontendPort}`)}`);
   console.log(`  Backend     ${paint("36", `${BACKEND_URL}/api/health`)}`);
-  console.log(`  Database    ${paint("36", "PostgreSQL (database: fees)")}`);
+  console.log(`  Database    ${paint("36", "Appwrite (database: fees)")}`);
   if (!gatewayDisabled && gatewayInstalled) {
     console.log(`  Gateway     ${paint("36", "http://localhost:6100")}`);
   }

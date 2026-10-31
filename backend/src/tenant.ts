@@ -2,7 +2,7 @@
  * Multi-tenant identifiers.
  *
  * Every app record belongs to exactly one workspace ("profile"). The profile id
- * is embedded in the database entity id (`profileId:entityId`) so records from
+ * is embedded in the Appwrite entity id (`profileId:entityId`) so records from
  * two workspaces can never share a row, even if they use the same student or
  * receipt number.
  */
@@ -49,7 +49,7 @@ export function profilePrefix(profileId: string): string {
   return `${profileId}:`;
 }
 
-/** Entity id as stored in PostgreSQL for a profile-scoped record. */
+/** Entity id as stored in Appwrite for a profile-scoped record. */
 export function scopedEntityId(profileId: string, entityId: string): string {
   return `${profileId}:${entityId}`;
 }

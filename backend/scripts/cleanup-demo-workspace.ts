@@ -1,16 +1,16 @@
 import '../src/env.js';
 import {
-  DB_TABLES,
+  APPWRITE_COLLECTIONS,
   deleteRecord,
   listScopedRecords,
-} from '../src/db.js';
+} from '../src/appwrite.js';
 
 const DEMO_PROFILE_ID = 'ORG-2SXWUGA4';
 
 async function cleanup() {
   console.log(`Starting cleanup of fake demo workspace ${DEMO_PROFILE_ID}...`);
 
-  for (const [colName, colId] of Object.entries(DB_TABLES)) {
+  for (const [colName, colId] of Object.entries(APPWRITE_COLLECTIONS)) {
     try {
       const records = await listScopedRecords(colId, DEMO_PROFILE_ID);
       console.log(`Found ${records.length} records in ${colName} for ${DEMO_PROFILE_ID}`);
@@ -25,7 +25,7 @@ async function cleanup() {
 
   // Also delete the profile row from profiles table
   try {
-    await deleteRecord(DB_TABLES.profiles, DEMO_PROFILE_ID);
+    await deleteRecord(APPWRITE_COLLECTIONS.profiles, DEMO_PROFILE_ID);
     console.log(`Deleted profile row: ${DEMO_PROFILE_ID}`);
   } catch (err) {
     console.error(`Error deleting profile row:`, err);

@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "node -e \"import('node:fs').then(fs => fs.rmSync('dist', { recursive: true, force: true }))\" && tsc",
+    "build": "tsc",
     "prestart": "node scripts/prestart.mjs",
     "start": "node dist/server.js",
-    "db:setup": "tsx scripts/setup-db.ts"
+    "appwrite:setup": "node scripts/setup-appwrite.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
@@ -17,7 +17,6 @@
     "fastify": "^5.2.0",
     "node-cache": "^5.1.2",
     "pdfkit": "^0.20.2",
-    "pg": "^8.23.1",
     "qrcode": "^1.5.4",
     "sharp": "^0.35.5",
     "whatsapp-web.js": "^1.34.7",
@@ -27,7 +26,6 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.10.2",
     "@types/pdfkit": "^0.17.7",
-    "@types/pg": "^8.23.1",
     "@types/qrcode": "^1.5.6",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"

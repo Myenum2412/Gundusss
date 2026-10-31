@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
-  DB_TABLES,
+  APPWRITE_COLLECTIONS,
   getRecord,
   putRecord,
-} from '../db.js';
+} from '../appwrite.js';
 import { resolveProfileId } from '../profiles.js';
 import { scopedEntityId } from '../tenant.js';
 
@@ -119,7 +119,7 @@ interface StoredProfile {
   updatedAt: string;
 }
 
-const COLLECTION = DB_TABLES.businessProfiles;
+const COLLECTION = APPWRITE_COLLECTIONS.businessProfiles;
 
 export async function businessProfileRoutes(app: FastifyInstance) {
   app.get('/api/business-profile', async (req) => {

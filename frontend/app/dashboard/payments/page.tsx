@@ -811,7 +811,7 @@ function ConfirmPaymentDialog({
                 Confirm Payment &amp; Issue Receipt
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                Mark as PAID. Creates an official receipt and marks fee paid in database.
+                Mark as PAID. Creates an official receipt and marks fee paid in Appwrite.
               </DialogDescription>
             </div>
           </div>
@@ -1140,7 +1140,7 @@ export default function PaymentsPage() {
       })
     }
 
-    // 3. Add PostgreSQL receipts not already tied to an order
+    // 3. Add Appwrite receipts not already tied to an order
     for (const receipt of receipts) {
       const rcpId = receipt.receiptId.trim().toLowerCase()
       if (coveredReceiptIds.has(rcpId)) continue

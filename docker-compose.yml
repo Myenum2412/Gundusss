@@ -1,16 +1,4 @@
 services:
-  db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: fees
-      POSTGRES_PASSWORD: fees
-      POSTGRES_DB: fees
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-
   backend:
     build: ./backend
     restart: unless-stopped
@@ -22,19 +10,20 @@ services:
       PORT: 4000
       HOST: 0.0.0.0
       FRONTEND_URL: http://localhost:3000
-      DATABASE_URL: ${DATABASE_URL:-postgres://fees:fees@db:5432/fees}
+      APPWRITE_ENDPOINT: ${APPWRITE_ENDPOINT:-https://nyc.cloud.appwrite.io/v1}
+      APPWRITE_PROJECT_ID: ${APPWRITE_PROJECT_ID:-6adaf4be003ae5c9e622}
+      APPWRITE_API_KEY: ${APPWRITE_API_KEY:?Set APPWRITE_API_KEY before starting Compose}
+      APPWRITE_DATABASE_ID: ${APPWRITE_DATABASE_ID:-fees}
       AUTH_SECRET: ${AUTH_SECRET:-}
       AUTH_TOKEN_TTL_HOURS: ${AUTH_TOKEN_TTL_HOURS:-12}
       # cron-job.org REST API key for the monthly reminder cron
-      CRONJOB_API_KEY: ${CRONJOB_API_KEY:-}
+      CRONJOB_API_KEY: ${CRONJOB_API_KEY:?Set CRONJOB_API_KEY before starting Compose}
       # YOUPI PG runs on the host in the default local setup.
       YOUPI_PAYMENT_API_URL: ${YOUPI_PAYMENT_API_URL:-http://host.docker.internal:6100}
       # Public checkout portal origin (for example https://pay.myenum.in).
       YOUPI_PUBLIC_CHECKOUT_URL: ${YOUPI_PUBLIC_CHECKOUT_URL:-}
       YOUPI_WEBHOOK_SECRET: ${YOUPI_WEBHOOK_SECRET:-}
       YOUPI_ADMIN_TOKEN: ${YOUPI_ADMIN_TOKEN:-}
-    depends_on:
-      - db
 
   frontend:
     build: ./frontend
@@ -45,6 +34,3 @@ services:
       NEXT_PUBLIC_API_URL: http://localhost:4000
     depends_on:
       - backend
-
-volumes:
-  pgdata:

@@ -2,13 +2,13 @@ import { randomBytes } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 
 import {
-  DB_TABLES,
+  APPWRITE_COLLECTIONS,
   deleteRecord,
   getRecord,
   listRecords,
   listScopedRecords,
   putRecord,
-} from './db.js';
+} from './appwrite.js';
 import {
   SUPER_ADMIN_EMAIL,
   SUPER_ADMIN_NAME,
@@ -35,7 +35,7 @@ import {
 } from './users.js';
 
 /**
- * A workspace ("profile"). The profile id is both the PostgreSQL row id and the
+ * A workspace ("profile"). The profile id is both the Appwrite row id and the
  * path segment used for the public payment link.
  */
 export interface ProfileRecord {
@@ -48,7 +48,7 @@ export interface ProfileRecord {
   updatedAt: string;
 }
 
-const PROFILES = DB_TABLES.profiles;
+const PROFILES = APPWRITE_COLLECTIONS.profiles;
 
 export const DEFAULT_DROPDOWNS: Record<string, string[]> = {
   gender: ['Male', 'Female', 'Other'],
@@ -70,17 +70,17 @@ export const DEFAULT_DROPDOWNS: Record<string, string[]> = {
 };
 
 const SCOPED_TABLES = [
-  DB_TABLES.fees,
-  DB_TABLES.students,
-  DB_TABLES.studentGroups,
-  DB_TABLES.feeStructures,
-  DB_TABLES.receipts,
-  DB_TABLES.announcements,
-  DB_TABLES.dropdownOptions,
-  DB_TABLES.paymentOrders,
-  DB_TABLES.paymentEvents,
-  DB_TABLES.paymentSettings,
-  DB_TABLES.businessProfiles,
+  APPWRITE_COLLECTIONS.fees,
+  APPWRITE_COLLECTIONS.students,
+  APPWRITE_COLLECTIONS.studentGroups,
+  APPWRITE_COLLECTIONS.feeStructures,
+  APPWRITE_COLLECTIONS.receipts,
+  APPWRITE_COLLECTIONS.announcements,
+  APPWRITE_COLLECTIONS.dropdownOptions,
+  APPWRITE_COLLECTIONS.paymentOrders,
+  APPWRITE_COLLECTIONS.paymentEvents,
+  APPWRITE_COLLECTIONS.paymentSettings,
+  APPWRITE_COLLECTIONS.businessProfiles,
 ] as const;
 
 const ID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -460,10 +460,10 @@ export async function migrateLegacyData(profileId: string): Promise<void> {
       }
 
       const data = { ...row.data };
-      if (collection === DB_TABLES.paymentOrders) {
+      if (collection === APPWRITE_COLLECTIONS.paymentOrders) {
         if (!data.profileId) data.profileId = profileId;
       }
-      if (collection === DB_TABLES.paymentEvents) {
+      if (collection === APPWRITE_COLLECTIONS.paymentEvents) {
         if (!data.profileId) data.profileId = profileId;
       }
 
@@ -487,7 +487,7 @@ export async function migrateLegacyData(profileId: string): Promise<void> {
 /** Seed the dropdown lists that previously lived in one global table. */
 export async function seedProfileDefaults(profileId: string): Promise<void> {
   const existing = await listScopedRecords<string[]>(
-    DB_TABLES.dropdownOptions,
+    APPWRITE_COLLECTIONS.dropdownOptions,
     profileId
   );
   const present = new Set(existing.map((record) => record.entityId));
@@ -495,7 +495,7 @@ export async function seedProfileDefaults(profileId: string): Promise<void> {
   for (const [key, options] of Object.entries(DEFAULT_DROPDOWNS)) {
     if (present.has(key)) continue;
     await putRecord(
-      DB_TABLES.dropdownOptions,
+      APPWRITE_COLLECTIONS.dropdownOptions,
       scopedEntityId(profileId, key),
       options
     );
@@ -633,46 +633,3 @@ export async function getSessionProfiles(
 
   return { profile: home, activeProfile: active };
 }
-
-export async function ensureDefaultAccounts(): Promise<void> {
-  const amarnathEmail = normalizeEmail('testuser2412@gmail.com');
-  const existingAmarnath = await findUserByEmail(amarnathEmail);
-  if (!existingAmarnath) {
-    const profileId = 'ORG-XD3SLDDC';
-    await createUser({
-      name: 'Amarnath',
-      email: amarnathEmail,
-      password: 'Password@123',
-      role: 'admin',
-      profileId,
-      super: false,
-    });
-    await ensureProfileRecord(profileId, {
-      name: 'Amarnath',
-      ownerName: 'Amarnath',
-      ownerEmail: amarnathEmail,
-    });
-    await seedProfileDefaults(profileId);
-  }
-
-  const myenumEmail = normalizeEmail('myenumam@gmail.com');
-  const existingMyenum = await findUserByEmail(myenumEmail);
-  if (!existingMyenum) {
-    const profileId = 'ORG-MYENUM';
-    await createUser({
-      name: 'Myenum',
-      email: myenumEmail,
-      password: 'Password@123',
-      role: 'admin',
-      profileId,
-      super: false,
-    });
-    await ensureProfileRecord(profileId, {
-      name: 'Myenum',
-      ownerName: 'Myenum',
-      ownerEmail: myenumEmail,
-    });
-    await seedProfileDefaults(profileId);
-  }
-}
-

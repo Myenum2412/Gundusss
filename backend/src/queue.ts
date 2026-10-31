@@ -7,16 +7,16 @@
  * randomized spacing (anti-ban), and reports results back, including a
  * release back to pending when WhatsApp was offline.
  *
- * Jobs live in PostgreSQL (`payment_settings`, one `<profileId>:reminder_queue`
+ * Jobs live in Appwrite (`payment_settings`, one `<profileId>:reminder_queue`
  * row per workspace). Nothing is written to the local filesystem, so a backend
  * restart, redeploy, or server rebuild never loses or leaks queued messages.
  */
 import {
-  DB_TABLES,
+  APPWRITE_COLLECTIONS,
   deleteRecord,
   listRecords,
   putRecord,
-} from './db.js';
+} from './appwrite.js';
 import { scopedEntityId } from './tenant.js';
 
 export interface QueueItem {
@@ -46,14 +46,14 @@ interface QueueRow {
   jobs: ReminderQueueJob[];
 }
 
-const COLLECTION = DB_TABLES.paymentSettings;
-/** Local part of the database entity id: `<profileId>:reminder_queue`. */
+const COLLECTION = APPWRITE_COLLECTIONS.paymentSettings;
+/** Local part of the Appwrite entity id: `<profileId>:reminder_queue`. */
 const QUEUE_ENTITY = 'reminder_queue';
 const MAX_JOBS = 50;
 /** A claimed job older than this is considered abandoned and re-claimable. */
 const CLAIM_TIMEOUT_MS = 30 * 60 * 1000;
 
-/** In-memory mirror, hydrated from database once per process. */
+/** In-memory mirror, hydrated from Appwrite once per process. */
 let jobs: ReminderQueueJob[] = [];
 let hydration: Promise<void> | null = null;
 
@@ -61,7 +61,7 @@ function isQueueRecord(entityId: string): boolean {
   return entityId.endsWith(`:${QUEUE_ENTITY}`);
 }
 
-async function loadJobsFromDatabase(): Promise<ReminderQueueJob[]> {
+async function loadJobsFromAppwrite(): Promise<ReminderQueueJob[]> {
   const records = await listRecords<Partial<QueueRow>>(COLLECTION);
   const loaded: ReminderQueueJob[] = [];
 
@@ -82,21 +82,21 @@ async function loadJobsFromDatabase(): Promise<ReminderQueueJob[]> {
 }
 
 /**
- * Restore pending jobs from database. Safe to call repeatedly: the load runs
- * once and the same promise is returned. If database is unreachable the queue
+ * Restore pending jobs from Appwrite. Safe to call repeatedly: the load runs
+ * once and the same promise is returned. If Appwrite is unreachable the queue
  * stays in memory and the next call retries.
  */
 export function hydrateQueue(): Promise<void> {
   if (!hydration) {
-    hydration = loadJobsFromDatabase()
+    hydration = loadJobsFromAppwrite()
       .then((loaded) => {
         jobs = loaded;
-        console.log(`[queue] restored ${jobs.length} job(s) from database`);
+        console.log(`[queue] restored ${jobs.length} job(s) from Appwrite`);
       })
       .catch((err: any) => {
         hydration = null;
         console.error(
-          `[queue] could not restore queue from database: ${err?.message ?? err}`
+          `[queue] could not restore queue from Appwrite: ${err?.message ?? err}`
         );
       });
   }
@@ -121,7 +121,7 @@ async function writeProfileSnapshot(profileId: string): Promise<void> {
   }
 }
 
-// Database writes for one workspace are serialised so an older snapshot can
+// Appwrite writes for one workspace are serialised so an older snapshot can
 // never overwrite a newer claim/finish result.
 const writeChains = new Map<string, Promise<void>>();
 

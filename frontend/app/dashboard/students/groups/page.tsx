@@ -147,7 +147,7 @@ export default function StudentGroupsPage() {
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // Persisted to PostgreSQL via the save effect.
+    // Persisted to Appwrite via the save effect.
     if (editingIndex !== null) {
       const id = groups[editingIndex]?.groupId ?? nextGroupId(nextId)
       const updated: StudentGroup = { ...form, groupId: id }

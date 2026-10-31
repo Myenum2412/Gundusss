@@ -33,7 +33,7 @@ if echo "$CHANGED" | grep -qE '^backend/(src/|package(-lock)?\.json|tsconfig)'; 
     echo "   installing backend deps..."
     (cd backend && npm ci --no-audit --no-fund >/dev/null 2>&1) || (cd backend && npm install --no-audit --no-fund)
   fi
-  (cd backend && npm run build) || { echo "!! backend build FAILED - keeping old dist"; exit 1; }
+  (cd backend && npx tsc) || { echo "!! backend build FAILED - keeping old dist"; exit 1; }
   systemctl restart fees-backend
   for i in $(seq 1 20); do
     if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/api/health | grep -q '^200$'; then
