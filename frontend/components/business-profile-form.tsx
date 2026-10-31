@@ -28,7 +28,6 @@ import {
   CheckCircle2Icon,
   ClockIcon,
   Database,
-  ExternalLinkIcon,
   FileTextIcon,
   GlobeIcon,
   Hash,
@@ -1133,20 +1132,6 @@ export default function BusinessProfileForm({
             </div>
 
             <div className="flex flex-wrap items-center gap-2 pb-1">
-              <Button
-                variant="outline"
-                size="sm"
-                render={
-                  <a
-                    href="https://business.google.com"
-                    target="_blank"
-                    rel="noreferrer"
-                  />
-                }
-              >
-                <ExternalLinkIcon className="size-3.5" />
-                Google Business
-              </Button>
               {canManageSettings && (
                 <Button variant="outline" size="sm" render={<Link href="/dashboard/settings" />}>
                   <Settings className="size-3.5" />
