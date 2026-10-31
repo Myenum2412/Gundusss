@@ -94,12 +94,6 @@ const navigation: { navMain: NavItem[]; navBottom: NavItem[] } = {
       ],
     },
     {
-      title: "Report",
-      url: "/dashboard/reports",
-      icon: <BarChart3Icon />,
-      permission: "data:read",
-    },
-    {
       title: "Fee Structure",
       url: "/dashboard/fee-structure",
       icon: <ClipboardListIcon />,
@@ -155,6 +149,12 @@ const navigation: { navMain: NavItem[]; navBottom: NavItem[] } = {
       icon: <Building2Icon />,
       permission: "data:read",
       superOnly: true,
+    },
+    {
+      title: "Report",
+      url: "/dashboard/reports",
+      icon: <BarChart3Icon />,
+      permission: "data:read",
     },
   ],
 }
