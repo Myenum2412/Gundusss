@@ -1,4 +1,4 @@
-﻿import './env.js';
+import './env.js';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { Readable } from 'node:stream';
@@ -196,13 +196,18 @@ try {
       'APPWRITE_API_KEY is required. Add it to backend/.env and restart the backend.'
     );
   }
-  await ensureAppwriteSeed();
-  await hydrateQueue();
   await app.listen({ port, host });
   console.log(`Backend listening on http://${host}:${port}`);
-  console.log(
-    `Appwrite store connected: ${getAppwriteStatus().endpoint} | database ${getAppwriteStatus().databaseId}`
-  );
+
+  try {
+    await ensureAppwriteSeed();
+    await hydrateQueue();
+    console.log(
+      `Appwrite store connected: ${getAppwriteStatus().endpoint} | database ${getAppwriteStatus().databaseId}`
+    );
+  } catch (seedErr) {
+    app.log.error(seedErr, 'Appwrite seed/hydration deferred due to initialization error');
+  }
 
   // Warm the WhatsApp engine at boot: inside startWa the Baileys WebSocket is
   // live ~8s later, so a QR is already waiting in the dashboard right after a
