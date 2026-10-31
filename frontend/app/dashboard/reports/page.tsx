@@ -229,7 +229,7 @@ export default function ReportsPage() {
     >
       <PageHeader
         title="Student Performance"
-        description="Attendance and fee performance for every student. Attendance counts Present and Late as attended; fees compare recorded receipts with the student's resolved fee."
+        description="All students' attendance and fee performance at a glance."
         meta={
           <span className="inline-flex h-6 items-center rounded-full border bg-card px-2.5 text-xs font-medium text-muted-foreground">
             {students.length} students
