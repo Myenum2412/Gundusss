@@ -119,6 +119,8 @@ app.setErrorHandler((error, _request, reply) => {
   const status =
     typeof (error as { statusCode?: unknown }).statusCode === 'number'
       ? (error as { statusCode: number }).statusCode
+      : error instanceof Error && error.message.includes('HTTP 402')
+      ? 402
       : 500;
   const message = error instanceof Error ? error.message : 'Internal Server Error';
   reply.code(status).send({ error: message });

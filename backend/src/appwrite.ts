@@ -116,7 +116,16 @@ async function responseDetail(res: Response): Promise<string> {
 async function assertOk(res: Response, action: string): Promise<void> {
   if (res.ok) return;
   const detail = await responseDetail(res);
-  lastError = `${action} failed (HTTP ${res.status}): ${detail}`;
+  let message = detail;
+  try {
+    const parsed = JSON.parse(detail) as { message?: string };
+    if (parsed.message) {
+      message = parsed.message;
+    }
+  } catch {
+    // Keep raw detail string if not JSON
+  }
+  lastError = `${action} failed (HTTP ${res.status}): ${message}`;
   throw new Error(lastError);
 }
 
