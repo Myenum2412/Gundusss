@@ -219,7 +219,7 @@ export default function AttendancePage() {
     >
       <PageHeader
         title="Student Attendance"
-        description="Mark each student present, absent, or late. Checking the active status again clears it."
+        description="Mark each student present, absent, or late. Marking Absent sends a WhatsApp notice to their saved phone number when your WhatsApp session is connected; checking the active status again clears it."
         meta={
           <span className="flex items-center gap-2">
             <span className="inline-flex h-6 items-center rounded-full border bg-card px-2.5 text-xs font-medium text-muted-foreground">

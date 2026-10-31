@@ -9,7 +9,13 @@ import {
 } from '../appwrite.js';
 import { getProfile, resolveProfileId } from '../profiles.js';
 import { scopedEntityId } from '../tenant.js';
-import { sendWaMessage, waSessionKeyFor } from '../whatsapp.js';
+import {
+  getWaState,
+  hasWaCredentials,
+  sendWaMessage,
+  startWa,
+  waSessionKeyFor,
+} from '../whatsapp.js';
 import { generateReceiptPdf, type ReceiptPdfData } from '../receipt-pdf.js';
 
 const str = (max = 500) => z.string().max(max).default('');
@@ -126,6 +132,7 @@ type FeeStructure = z.infer<typeof FeeStructureSchema>;
 type Receipt = z.infer<typeof ReceiptSchema>;
 type Announcement = z.infer<typeof AnnouncementSchema>;
 type Branch = z.infer<typeof BranchSchema>;
+type AttendanceEntry = z.infer<typeof AttendanceEntrySchema>;
 type AttendanceDay = z.infer<typeof AttendanceDaySchema>;
 
 async function listData<T>(
@@ -137,6 +144,156 @@ async function listData<T>(
   return records
     .map((record) => record.data)
     .sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+}
+
+type AttendanceAbsence = { date: string; entry: AttendanceEntry };
+
+const ATTENDANCE_MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+function formatAttendanceDate(value: string): string {
+  const [year, month, day] = value.split('-').map((part) => Number(part));
+  if (!year || !month || !day || month < 1 || month > 12) return value;
+  return `${String(day).padStart(2, '0')} ${ATTENDANCE_MONTHS[month - 1]} ${year}`;
+}
+
+// Attendance saves replace the whole day. Serialize the read/replace cycle per
+// workspace so two tabs cannot both see the old status and send duplicate
+// absence notices.
+const attendanceWriteQueues = new Map<string, Promise<unknown>>();
+
+function withAttendanceWriteLock<T>(
+  profileId: string,
+  task: () => Promise<T>
+): Promise<T> {
+  const previous = attendanceWriteQueues.get(profileId) ?? Promise.resolve();
+  const run = previous.then(task, task);
+  const guard = run.then(
+    () => undefined,
+    () => undefined
+  );
+  attendanceWriteQueues.set(profileId, guard);
+  void guard.finally(() => {
+    if (attendanceWriteQueues.get(profileId) === guard) {
+      attendanceWriteQueues.delete(profileId);
+    }
+  });
+  return run;
+}
+
+async function ensureWhatsAppReady(sessionKey: string, timeoutMs = 15_000) {
+  let state = getWaState(sessionKey);
+  if (state.status === 'ready') return state;
+  // Never generate a QR loop for an account that has not paired yet.
+  if (!hasWaCredentials(sessionKey)) return state;
+  if (
+    state.status === 'idle' ||
+    state.status === 'disconnected' ||
+    state.status === 'error'
+  ) {
+    void startWa(sessionKey);
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    state = getWaState(sessionKey);
+    if (state.status === 'ready' || state.status === 'qr') return state;
+  }
+  return state;
+}
+
+async function notifyAttendanceAbsences(
+  app: FastifyInstance,
+  profileId: string,
+  absences: AttendanceAbsence[]
+): Promise<void> {
+  if (absences.length === 0) return;
+
+  // Let a quick correction (Absent -> Present) land before messaging a parent,
+  // so an accidental tap does not send a notice.
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+  const latestRows = await listScopedRecords<AttendanceDay>(
+    APPWRITE_COLLECTIONS.attendance,
+    profileId
+  );
+  const latestByDate = new Map(
+    latestRows.map((row) => [row.data.date, row.data])
+  );
+  const stillAbsent = absences.filter(({ date, entry }) => {
+    const latest = latestByDate.get(date);
+    return latest?.entries.some(
+      (row) => row.studentId === entry.studentId && row.status === 'Absent'
+    );
+  });
+  if (stillAbsent.length === 0) return;
+
+  const profile = await getProfile(profileId);
+  const waKey = waSessionKeyFor(profile?.ownerEmail ?? '');
+  const wa = await ensureWhatsAppReady(waKey);
+  if (wa.status !== 'ready') {
+    app.log.warn(
+      { profileId, status: wa.status, count: stillAbsent.length },
+      'Attendance absence WhatsApp notices skipped: session not ready'
+    );
+    return;
+  }
+
+  const studentRows = await listScopedRecords<Student>(
+    APPWRITE_COLLECTIONS.students,
+    profileId
+  );
+  const studentsById = new Map(
+    studentRows.map((row) => [row.data.studentId, row.data])
+  );
+  const schoolName = (profile?.name ?? '').trim() || 'School';
+
+  for (const { date, entry } of stillAbsent) {
+    const student = studentsById.get(entry.studentId);
+    const phone = (student?.phone ?? '').replace(/\D/g, '');
+    if (phone.length < 10) {
+      app.log.warn(
+        { profileId, studentId: entry.studentId },
+        'Attendance absence WhatsApp notice skipped: no phone number'
+      );
+      continue;
+    }
+
+    const name =
+      (entry.studentName || student?.studentName || 'your child').trim();
+    const message = [
+      '*Attendance Notice*',
+      '',
+      'Dear Parent/Guardian,',
+      '',
+      `This is to inform you that *${name}* was marked *Absent* on *${formatAttendanceDate(date)}*.`,
+      '',
+      'If this is unexpected, please contact us.',
+      '',
+      `- ${schoolName}`,
+    ].join('\n');
+
+    try {
+      await sendWaMessage(phone, message, [], undefined, waKey);
+    } catch (error) {
+      app.log.warn(
+        { err: error, profileId, studentId: entry.studentId },
+        'Could not send attendance absence WhatsApp notice'
+      );
+    }
+  }
 }
 
 export async function buildReceiptPdfData(
@@ -687,17 +844,61 @@ export async function collectionsRoutes(app: FastifyInstance) {
     const parsed = itemsSchema(AttendanceDaySchema).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
     const profileId = await resolveProfileId(req);
-    await replaceScopedRecords(
-      APPWRITE_COLLECTIONS.attendance,
-      profileId,
-      parsed.data.items.map((day) => ({
-        entityId: day.date,
-        data: {
-          ...day,
-          updatedAt: day.updatedAt || new Date().toISOString(),
-        },
-      }))
-    );
-    return { data: { count: parsed.data.items.length } };
+
+    const result = await withAttendanceWriteLock(profileId, async () => {
+      const previousRows = await listScopedRecords<AttendanceDay>(
+        APPWRITE_COLLECTIONS.attendance,
+        profileId
+      );
+      const previousByDate = new Map(
+        previousRows.map((row) => [row.data.date, row.data])
+      );
+
+      const absences: AttendanceAbsence[] = [];
+      const seen = new Set<string>();
+      for (const day of parsed.data.items) {
+        const previousStatuses = new Map(
+          (previousByDate.get(day.date)?.entries ?? []).map((entry) => [
+            entry.studentId,
+            entry.status,
+          ])
+        );
+        for (const entry of day.entries) {
+          if (entry.status !== 'Absent') continue;
+          if (previousStatuses.get(entry.studentId) === 'Absent') continue;
+          const key = `${day.date}:${entry.studentId}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          absences.push({ date: day.date, entry });
+        }
+      }
+
+      await replaceScopedRecords(
+        APPWRITE_COLLECTIONS.attendance,
+        profileId,
+        parsed.data.items.map((day) => ({
+          entityId: day.date,
+          data: {
+            ...day,
+            updatedAt: day.updatedAt || new Date().toISOString(),
+          },
+        }))
+      );
+
+      return { count: parsed.data.items.length, absences };
+    });
+
+    if (result.absences.length > 0) {
+      void notifyAttendanceAbsences(app, profileId, result.absences).catch(
+        (error) => {
+          app.log.warn(
+            { err: error, profileId },
+            'Attendance absence notification failed'
+          );
+        }
+      );
+    }
+
+    return { data: { count: result.count } };
   });
 }

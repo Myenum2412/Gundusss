@@ -211,7 +211,7 @@ export default function GroupAttendancePage() {
     >
       <PageHeader
         title="Group Attendance"
-        description="Mark an entire class at once. Each checkbox updates every student in that group for the selected date."
+        description="Mark an entire class at once. Each checkbox updates every student in that group; Absent sends a WhatsApp notice to every member with a phone number when your WhatsApp session is connected."
         meta={
           <span className="flex items-center gap-2">
             <span className="inline-flex h-6 items-center rounded-full border bg-card px-2.5 text-xs font-medium text-muted-foreground">
