@@ -31,6 +31,7 @@ import {
   BellRingIcon,
   CircleUserRoundIcon,
   CalendarCheckIcon,
+  BarChart3Icon,
 } from "lucide-react"
 import type { Permission } from "@/lib/session"
 
@@ -91,6 +92,12 @@ const navigation: { navMain: NavItem[]; navBottom: NavItem[] } = {
           url: "/dashboard/attendance/groups",
         },
       ],
+    },
+    {
+      title: "Report",
+      url: "/dashboard/reports",
+      icon: <BarChart3Icon />,
+      permission: "data:read",
     },
     {
       title: "Fee Structure",
