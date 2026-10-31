@@ -266,13 +266,13 @@ the signed-in account is kept in memory, and every page loads its data from
 Appwrite through the API. Old browser caches are cleared when the app starts.
 
 1. In the Appwrite console, create a server API key for project
-   `6adaf4be003ae5c9e622` with these scopes:
+   `6ae5c669000e75f3ad50` with these scopes:
    `databases.read`, `databases.write`, `tables.read`, `tables.write`,
    `columns.read`, `columns.write`, `rows.read`, `rows.write`.
 2. Add the key to `backend/.env`:
    ```bash
-   APPWRITE_ENDPOINT=https://nyc.cloud.appwrite.io/v1
-   APPWRITE_PROJECT_ID=6adaf4be003ae5c9e622
+   APPWRITE_ENDPOINT=https://fra.cloud.appwrite.io/v1
+   APPWRITE_PROJECT_ID=6ae5c669000e75f3ad50
    APPWRITE_API_KEY=<server API key>
    APPWRITE_DATABASE_ID=fees
    ```

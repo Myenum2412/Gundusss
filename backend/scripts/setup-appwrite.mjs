@@ -35,10 +35,10 @@ if (existsSync(envPath)) {
 }
 
 const endpoint = (
-  process.env.APPWRITE_ENDPOINT ?? 'https://nyc.cloud.appwrite.io/v1'
+  process.env.APPWRITE_ENDPOINT ?? 'https://fra.cloud.appwrite.io/v1'
 ).replace(/\/+$/, '');
 const projectId = (
-  process.env.APPWRITE_PROJECT_ID ?? '6adaf4be003ae5c9e622'
+  process.env.APPWRITE_PROJECT_ID ?? '6ae5c669000e75f3ad50'
 ).trim();
 const apiKey = (process.env.APPWRITE_API_KEY ?? '').trim();
 const databaseId = (process.env.APPWRITE_DATABASE_ID ?? 'fees').trim();

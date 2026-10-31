@@ -10,9 +10,9 @@ import { createHash } from 'node:crypto';
  */
 
 const ENDPOINT = (
-  process.env.APPWRITE_ENDPOINT ?? 'https://nyc.cloud.appwrite.io/v1'
+  process.env.APPWRITE_ENDPOINT ?? 'https://fra.cloud.appwrite.io/v1'
 ).replace(/\/+$/, '');
-const PROJECT_ID = (process.env.APPWRITE_PROJECT_ID ?? '6adaf4be003ae5c9e622').trim();
+const PROJECT_ID = (process.env.APPWRITE_PROJECT_ID ?? '6ae5c669000e75f3ad50').trim();
 const API_KEY = (process.env.APPWRITE_API_KEY ?? '').trim();
 const DATABASE_ID = (process.env.APPWRITE_DATABASE_ID ?? 'fees').trim();
 
