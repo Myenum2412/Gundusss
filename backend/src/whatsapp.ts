@@ -198,7 +198,8 @@ function hasActualContent(msg: any): boolean {
     msg.videoMessage ||
     msg.audioMessage ||
     msg.interactiveMessage ||
-    msg.viewOnceMessage?.message?.interactiveMessage
+    msg.viewOnceMessage?.message?.interactiveMessage ||
+    msg.viewOnceMessage?.message
   );
 }
 
@@ -376,6 +377,28 @@ export async function startWa(userKey?: string | null) {
         keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
       browser: Browsers.ubuntu('Chrome'),
+      patchMessageBeforeSending: (message: any) => {
+        const requiresPatch = !!(
+          message.buttonsMessage ||
+          message.templateMessage ||
+          message.listMessage ||
+          message.interactiveMessage
+        );
+        if (requiresPatch) {
+          message = {
+            viewOnceMessage: {
+              message: {
+                messageContextInfo: {
+                  deviceListMetadataVersion: 2,
+                  deviceListMetadata: {},
+                },
+                ...message,
+              },
+            },
+          };
+        }
+        return message;
+      },
       // We render the QR in the web UI ourselves.
       printQRInTerminal: false,
       logger,
@@ -545,12 +568,15 @@ function buildCtaUrlMessage(jid: string, body: string, footer: string, cta: WaCt
     body: proto.Message.InteractiveMessage.Body.create({
       text: body,
     }),
+    footer: proto.Message.InteractiveMessage.Footer.create({
+      text: footer || '— Accounts Desk · Secured Payment',
+    }),
     nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
       buttons: [
         {
           name: 'cta_url',
           buttonParamsJson: JSON.stringify({
-            display_text: cta.displayText,
+            display_text: cta.displayText || 'Pay Now',
             url: cta.url,
             merchant_url: cta.url,
           }),
@@ -558,12 +584,6 @@ function buildCtaUrlMessage(jid: string, body: string, footer: string, cta: WaCt
       ],
     }),
   };
-
-  if (footer) {
-    interactive.footer = proto.Message.InteractiveMessage.Footer.create({
-      text: footer,
-    });
-  }
 
   if (cta.headerTitle) {
     interactive.header = proto.Message.InteractiveMessage.Header.create({
@@ -576,7 +596,15 @@ function buildCtaUrlMessage(jid: string, body: string, footer: string, cta: WaCt
   return generateWAMessageFromContent(
     jid,
     {
-      interactiveMessage: proto.Message.InteractiveMessage.create(interactive),
+      viewOnceMessage: {
+        message: {
+          messageContextInfo: {
+            deviceListMetadata: {},
+            deviceListMetadataVersion: 2,
+          },
+          interactiveMessage: proto.Message.InteractiveMessage.create(interactive),
+        },
+      },
     },
     { userJid: userJid || jid }
   );
@@ -594,36 +622,51 @@ async function performSend(
 
   const plainText = message.trim();
 
-  // When CTA (Pay Now / Open link) is provided:
-  // Note: Meta WhatsApp strictly restricts interactive nativeFlowMessage / interactiveMessage
-  // buttons to verified WhatsApp Business Cloud API accounts (via Meta Graph API).
-  // When sent from an unofficial Web Companion device (Baileys/QR), the recipient's WhatsApp
-  // client (especially Android and iOS) refuses to decrypt the custom button flow and displays
-  // "Waiting for this message. This may take a while. Learn more", causing Signal ratchet failure.
-  // Standard formatted WhatsApp text with bold styling, emojis, and checkout link delivers
-  // instantly and decrypts reliably on 100% of devices.
+  // Pure text + CTA: send as WhatsApp native interactive CTA-URL button bubble.
   if (cta && cta.url) {
-    let fullText = plainText;
-    const btnLabel = cta.displayText?.trim() || 'Pay Now';
-    const ctaSection = `\n\n💳 *${btnLabel}:*\n👉 ${cta.url}`;
-    if (!fullText) {
-      fullText = `💳 *${btnLabel}:*\n👉 ${cta.url}`;
-    } else if (!fullText.includes(cta.url)) {
-      fullText = `${fullText}${ctaSection}`;
-    }
-    if (cta.footer && !fullText.includes(cta.footer)) {
-      fullText = `${fullText}\n\n_${cta.footer}_`;
+    let sentInteractive = false;
+    try {
+      const footer = cta.footer || '— Accounts Desk · Secured Payment';
+      const waMsg = buildCtaUrlMessage(
+        jid,
+        plainText || 'Please tap the button below to continue:',
+        footer,
+        cta,
+        sock?.user?.id
+      );
+      const msgId = waMsg.key?.id || ('3EB0' + randomBytes(8).toString('hex').toUpperCase());
+      await sock.relayMessage(jid, waMsg.message, { messageId: msgId });
+      firstId = msgId;
+      sentInteractive = true;
+      if (waMsg.message) {
+        persistMessage(msgId, jid, waMsg.message);
+      }
+      console.log(`[wa] Sent interactive CTA URL button message to ${jid} (id: ${msgId})`);
+    } catch (err: any) {
+      console.warn(`[wa] Interactive CTA send failed, falling back to standard text: ${err?.message ?? err}`);
     }
 
-    const sent = await sock.sendMessage(jid, { text: fullText });
-    firstId = sent?.key?.id ?? null;
-    if (firstId) {
-      persistMessage(firstId, jid, {
-        conversation: fullText,
-        extendedTextMessage: { text: fullText },
-      });
+    if (!sentInteractive) {
+      let fallbackText = plainText;
+      const ctaSection = `\n\n💳 *${cta.displayText || 'Pay Now'}:*\n👉 ${cta.url}`;
+      if (!fallbackText) {
+        fallbackText = `💳 *${cta.displayText || 'Pay Now'}:*\n👉 ${cta.url}`;
+      } else if (!fallbackText.includes(cta.url)) {
+        fallbackText = `${fallbackText}${ctaSection}`;
+      }
+      if (cta.footer && !fallbackText.includes(cta.footer)) {
+        fallbackText = `${fallbackText}\n\n_${cta.footer}_`;
+      }
+      const sent = await sock.sendMessage(jid, { text: fallbackText });
+      firstId = sent?.key?.id ?? null;
+      if (firstId) {
+        persistMessage(firstId, jid, {
+          conversation: fallbackText,
+          extendedTextMessage: { text: fallbackText },
+        });
+      }
+      console.log(`[wa] Sent fallback text message to ${jid} (id: ${firstId})`);
     }
-    console.log(`[wa] Sent message to ${jid} (id: ${firstId})`);
   } else if (plainText) {
     const protoPayload = {
       conversation: plainText,
