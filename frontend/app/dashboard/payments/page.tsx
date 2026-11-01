@@ -343,6 +343,7 @@ function FeeReminderDialog({
           ? {
               displayText: "Pay Now",
               url: paymentLink,
+              footer: `${companyName || "Institute Office"} · Secured UPI / Card payment`,
             }
           : undefined,
       })

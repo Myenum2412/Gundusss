@@ -27,6 +27,7 @@ import {
 } from "@/lib/attendance-store"
 import {
   ATTENDANCE_STATUSES,
+  calculateMonthlyAttendance,
   entriesForDay,
   markStudents,
   todayIso,
@@ -79,6 +80,7 @@ export default function AttendancePage() {
   const [selectedDate, setSelectedDate] = useState(todayIso)
   const [selectedGroup, setSelectedGroup] = useState("all")
   const [query, setQuery] = useState("")
+  const [sortBy, setSortBy] = useState<"name" | "absent-desc" | "present-desc" | "id">("name")
   const [hydrated, setHydrated] = useState(false)
   const [dirty, setDirty] = useState(false)
 
@@ -139,6 +141,70 @@ export default function AttendancePage() {
     })
   }, [activeStudents, query, selectedGroup])
 
+  const selectedMonth = useMemo(() => {
+    if (selectedDate && /^\d{4}-\d{2}/.test(selectedDate)) {
+      return selectedDate.slice(0, 7)
+    }
+    return todayIso().slice(0, 7)
+  }, [selectedDate])
+
+  const { monthLabel, monthShort } = useMemo(() => {
+    try {
+      const [y, m] = selectedMonth.split("-").map(Number)
+      if (y && m) {
+        const d = new Date(y, m - 1, 1)
+        return {
+          monthLabel: d.toLocaleString("en-US", { month: "long", year: "numeric" }),
+          monthShort: d.toLocaleString("en-US", { month: "short" }),
+        }
+      }
+    } catch {}
+    return { monthLabel: selectedMonth, monthShort: selectedMonth }
+  }, [selectedMonth])
+
+  const visibleStudentIds = useMemo(
+    () => new Set(visibleStudents.map((s) => s.studentId)),
+    [visibleStudents]
+  )
+
+  const monthlySummary = useMemo(
+    () => calculateMonthlyAttendance(days, selectedMonth, visibleStudentIds),
+    [days, selectedMonth, visibleStudentIds]
+  )
+
+  const monthlyStudentsWithAbsence = useMemo(() => {
+    let count = 0
+    for (const student of visibleStudents) {
+      const tally = monthlySummary.studentTallies.get(student.studentId)
+      if (tally && tally.absent > 0) count += 1
+    }
+    return count
+  }, [visibleStudents, monthlySummary])
+
+  const sortedStudents = useMemo(() => {
+    const list = [...visibleStudents]
+    if (sortBy === "absent-desc") {
+      return list.sort((a, b) => {
+        const aAbsent = monthlySummary.studentTallies.get(a.studentId)?.absent ?? 0
+        const bAbsent = monthlySummary.studentTallies.get(b.studentId)?.absent ?? 0
+        if (bAbsent !== aAbsent) return bAbsent - aAbsent
+        return a.studentName.localeCompare(b.studentName)
+      })
+    }
+    if (sortBy === "present-desc") {
+      return list.sort((a, b) => {
+        const aPresent = monthlySummary.studentTallies.get(a.studentId)?.present ?? 0
+        const bPresent = monthlySummary.studentTallies.get(b.studentId)?.present ?? 0
+        if (bPresent !== aPresent) return bPresent - aPresent
+        return a.studentName.localeCompare(b.studentName)
+      })
+    }
+    if (sortBy === "id") {
+      return list.sort((a, b) => a.studentId.localeCompare(b.studentId))
+    }
+    return list.sort((a, b) => a.studentName.localeCompare(b.studentName))
+  }, [visibleStudents, sortBy, monthlySummary.studentTallies])
+
   const entryMap = useMemo(
     () => entriesForDay(days, selectedDate),
     [days, selectedDate]
@@ -167,21 +233,41 @@ export default function AttendancePage() {
 
   const stats = [
     {
-      name: "Present",
+      name: `Present (${selectedDate === todayIso() ? "Today" : selectedDate})`,
       value: String(counts.present),
       change: `${counts.rate}% attendance`,
       changeType: "positive" as const,
     },
     {
-      name: "Absent",
+      name: `Absent (${selectedDate === todayIso() ? "Today" : selectedDate})`,
       value: String(counts.absent),
-      change: counts.total ? `${Math.round((counts.absent / counts.total) * 100)}% of ${counts.total}` : "No students",
+      change: counts.total
+        ? `${Math.round((counts.absent / counts.total) * 100)}% of ${counts.total}`
+        : "No students",
       changeType: "negative" as const,
+    },
+    {
+      name: `Monthly Present (${monthShort})`,
+      value: String(monthlySummary.totalPresent),
+      change: `${monthlySummary.attendanceRate}% in ${monthShort}`,
+      changeType: "positive" as const,
+    },
+    {
+      name: `Monthly Absent (${monthShort})`,
+      value: String(monthlySummary.totalAbsent),
+      change:
+        monthlyStudentsWithAbsence > 0
+          ? `${monthlyStudentsWithAbsence} student${monthlyStudentsWithAbsence === 1 ? "" : "s"} absent`
+          : "No absents",
+      changeType:
+        monthlySummary.totalAbsent > 0 ? ("negative" as const) : ("neutral" as const),
     },
     {
       name: "Late",
       value: String(counts.late),
-      change: counts.total ? `${Math.round((counts.late / counts.total) * 100)}% of ${counts.total}` : "No students",
+      change: counts.total
+        ? `${Math.round((counts.late / counts.total) * 100)}% of ${counts.total}`
+        : "No students",
       changeType: "neutral" as const,
     },
     {
@@ -223,7 +309,7 @@ export default function AttendancePage() {
         meta={
           <span className="flex items-center gap-2">
             <span className="inline-flex h-6 items-center rounded-full border bg-card px-2.5 text-xs font-medium text-muted-foreground">
-              {counts.total} shown
+              {counts.total} shown · {monthLabel}
             </span>
             <LiveBadge />
           </span>
@@ -246,7 +332,7 @@ export default function AttendancePage() {
         }
       />
 
-      <Stats01 stats={stats} />
+      <Stats01 stats={stats} className="sm:grid-cols-3 lg:grid-cols-6" />
 
       <div className="flex flex-col gap-3 rounded-xl border bg-card p-3 shadow-sm md:flex-row md:items-center">
         <div className="flex items-center gap-2">
@@ -265,10 +351,14 @@ export default function AttendancePage() {
           >
             Today
           </Button>
+          <span className="hidden sm:inline-flex items-center gap-1.5 rounded-[10px] border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+            <CalendarCheckIcon className="size-3.5 text-foreground/70" />
+            {monthLabel}
+          </span>
         </div>
         <select
           aria-label="Filter by group"
-          className={cn(selectClassName, "md:w-56")}
+          className={cn(selectClassName, "md:w-52")}
           value={selectedGroup}
           onChange={(event) => setSelectedGroup(event.target.value)}
         >
@@ -282,7 +372,18 @@ export default function AttendancePage() {
             <option value="__ungrouped">Ungrouped</option>
           )}
         </select>
-        <div className="relative md:ml-auto md:w-72">
+        <select
+          aria-label="Sort students"
+          className={cn(selectClassName, "md:w-52")}
+          value={sortBy}
+          onChange={(event) => setSortBy(event.target.value as any)}
+        >
+          <option value="name">Sort: Name (A-Z)</option>
+          <option value="absent-desc">Sort: Most absent ({monthShort})</option>
+          <option value="present-desc">Sort: Most present ({monthShort})</option>
+          <option value="id">Sort: Student ID</option>
+        </select>
+        <div className="relative md:ml-auto md:w-64">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search student or group"
@@ -301,13 +402,19 @@ export default function AttendancePage() {
                 <TableHead>Student</TableHead>
                 <TableHead>Group</TableHead>
                 <TableHead>Course</TableHead>
+                <TableHead className="text-center whitespace-nowrap">
+                  Present ({monthShort})
+                </TableHead>
+                <TableHead className="text-center whitespace-nowrap">
+                  Absent ({monthShort})
+                </TableHead>
                 <TableHead className="text-right">Attendance</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {visibleStudents.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={4} className="p-0">
+                  <TableCell colSpan={6} className="p-0">
                     <EmptyState
                       icon={activeStudents.length === 0 ? UsersIcon : SearchIcon}
                       title={
@@ -324,8 +431,15 @@ export default function AttendancePage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                visibleStudents.map((student) => {
+                sortedStudents.map((student) => {
                   const current = entryMap.get(student.studentId)?.status
+                  const studentMonthly = monthlySummary.studentTallies.get(student.studentId) ?? {
+                    present: 0,
+                    absent: 0,
+                    late: 0,
+                    total: 0,
+                    rate: 0,
+                  }
                   return (
                     <TableRow key={student.studentId}>
                       <TableCell>
@@ -337,8 +451,12 @@ export default function AttendancePage() {
                             <div className="truncate font-medium text-foreground">
                               {student.studentName}
                             </div>
-                            <div className="font-mono text-[11px] text-muted-foreground">
-                              {student.studentId}
+                            <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
+                              <span>{student.studentId}</span>
+                              <span className="inline-flex sm:hidden items-center gap-1 font-sans text-[10px]">
+                                · <span className="font-medium text-emerald-600 dark:text-emerald-400">{studentMonthly.present}P</span>
+                                · <span className={cn("font-medium", studentMonthly.absent > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>{studentMonthly.absent}A</span>
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -351,6 +469,32 @@ export default function AttendancePage() {
                       <TableCell>
                         <span className="text-sm text-muted-foreground">
                           {student.course || "—"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span
+                          className={cn(
+                            "inline-flex min-w-8 items-center justify-center rounded-md px-2 py-0.5 text-xs font-semibold tabular-nums",
+                            studentMonthly.present > 0
+                              ? "border border-emerald-600/20 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
+                              : "text-muted-foreground"
+                          )}
+                          title={`${student.studentName}: ${studentMonthly.present} present in ${monthLabel}`}
+                        >
+                          {studentMonthly.present}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span
+                          className={cn(
+                            "inline-flex min-w-8 items-center justify-center rounded-md px-2 py-0.5 text-xs font-semibold tabular-nums",
+                            studentMonthly.absent > 0
+                              ? "border border-rose-600/20 bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400"
+                              : "text-muted-foreground"
+                          )}
+                          title={`${student.studentName}: ${studentMonthly.absent} absent in ${monthLabel}`}
+                        >
+                          {studentMonthly.absent}
                         </span>
                       </TableCell>
                       <TableCell>
@@ -396,7 +540,7 @@ export default function AttendancePage() {
 
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <CalendarCheckIcon className="size-3.5" />
-        Showing attendance for {selectedDate}
+        Showing attendance for {selectedDate} · Monthly counts for {monthLabel}
         {selectedGroup !== "all" ? ` · ${selectedGroup}` : ""}
       </p>
     </DashboardShell>

@@ -358,6 +358,7 @@ export default function RemindersPage() {
           cta: {
             displayText: "Pay Now",
             url: stuPayUrl,
+            footer: `${activeProfile?.name || "Institute Office"} · Secured UPI / Card payment`,
           },
         })
         for (const att of attachmentsForSend) {
@@ -434,7 +435,7 @@ export default function RemindersPage() {
       return
     }
 
-    const bodyText = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${stu.studentName}*,\n\nThis is your monthly fee reminder for *${stu.course || "Course"}* (${stu.group || "Batch"}).\n\n• Student ID: *${stu.studentId}*\n• Monthly Fee: *₹${parseFloat(feeAmount).toLocaleString("en-IN")}*\n• Due Date: 5th of this month\n\nPlease tap the link below to pay directly via UPI / Card:\n\n— ${activeProfile?.name || "MyFees"} Accounts Desk`
+    const bodyText = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${stu.studentName}*,\n\nThis is your monthly fee reminder for *${stu.course || "Course"}* (${stu.group || "Batch"}).\n\n• Student ID: *${stu.studentId}*\n• Monthly Fee: *₹${parseFloat(feeAmount).toLocaleString("en-IN")}*\n• Due Date: 5th of this month\n\nPlease tap the button below to pay directly via UPI / Card:\n\n— ${activeProfile?.name || "MyFees"} Accounts Desk`
 
     try {
       await sendWaMessage({
@@ -443,6 +444,7 @@ export default function RemindersPage() {
         cta: {
           displayText: "Pay Now",
           url: studentPaymentUrl,
+          footer: `${activeProfile?.name || "Institute Office"} · Secured UPI / Card payment`,
         },
       })
       alert(`WhatsApp reminder delivered to ${stu.studentName} (+91 ${phone})!`)

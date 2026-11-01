@@ -72,6 +72,8 @@ export function logoutWa(): Promise<WaState> {
 export interface WaCtaUrl {
   displayText: string;
   url: string;
+  footer?: string;
+  headerTitle?: string;
 }
 
 export async function sendWaMessage(input: {

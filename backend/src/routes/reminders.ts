@@ -617,7 +617,7 @@ async function executeMonthlyReminders(
       `${ordinal(scheduleDueDay)} of this month`;
     const overdueNote = unpaidFee?.status === 'overdue' ? '⚠️ *This bill is overdue!*\n\n' : '';
 
-    const message = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${student.studentName}*,\n\n${overdueNote}This is your monthly fee reminder for *${student.course || 'Course'}* (${student.group || 'Batch'}).\n\n• Student ID: *${student.studentId}*\n• Monthly Fee: *${amountStr}*\n• Due Date: *${dueDateLabel}*\n\nPlease tap the link below to pay directly via UPI / Card:\n\n— ${companyName} Accounts Desk`;
+    const message = `🔔 *Monthly Fee Payment Reminder*\n\nDear Parent / Student *${student.studentName}*,\n\n${overdueNote}This is your monthly fee reminder for *${student.course || 'Course'}* (${student.group || 'Batch'}).\n\n• Student ID: *${student.studentId}*\n• Monthly Fee: *${amountStr}*\n• Due Date: *${dueDateLabel}*\n\nPlease tap the button below to pay directly via UPI / Card:\n\n— ${companyName} Accounts Desk`;
 
     // Every reminder must carry a real, payable gateway checkout. Never fall
     // back to a hand-built workspace page URL: those links could not be
@@ -718,6 +718,7 @@ async function executeMonthlyReminders(
           {
             displayText: 'Pay Now',
             url: studentPaymentUrl,
+            footer: `${companyName} Accounts Desk`,
           },
           senderKey
         );

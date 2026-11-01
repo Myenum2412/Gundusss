@@ -16,6 +16,8 @@ const CtaSchema = z
   .object({
     displayText: z.string().min(1).max(100),
     url: z.string().url().max(1000),
+    footer: z.string().max(200).optional(),
+    headerTitle: z.string().max(200).optional(),
   })
   .strip();
 

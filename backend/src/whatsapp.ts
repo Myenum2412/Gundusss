@@ -196,7 +196,9 @@ function hasActualContent(msg: any): boolean {
     msg.imageMessage ||
     msg.documentMessage ||
     msg.videoMessage ||
-    msg.audioMessage
+    msg.audioMessage ||
+    msg.interactiveMessage ||
+    msg.viewOnceMessage?.message?.interactiveMessage
   );
 }
 
@@ -480,6 +482,8 @@ function jidToPhone(jid: string): string {
 export interface WaCtaUrl {
   displayText: string;
   url: string;
+  footer?: string;
+  headerTitle?: string;
 }
 
 export interface WaAttachment {
@@ -536,43 +540,45 @@ function enqueueSend<T>(key: string, fn: () => Promise<T>): Promise<T> {
  * native-flow encoder. Renders natively on current WhatsApp clients; older
  * clients simply show the body text.
  */
-function buildCtaUrlMessage(jid: string, body: string, footer: string, cta: WaCtaUrl) {
+function buildCtaUrlMessage(jid: string, body: string, footer: string, cta: WaCtaUrl, userJid?: string) {
+  const interactive: any = {
+    body: proto.Message.InteractiveMessage.Body.create({
+      text: body,
+    }),
+    nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
+      buttons: [
+        {
+          name: 'cta_url',
+          buttonParamsJson: JSON.stringify({
+            display_text: cta.displayText,
+            url: cta.url,
+            merchant_url: cta.url,
+          }),
+        },
+      ],
+    }),
+  };
+
+  if (footer) {
+    interactive.footer = proto.Message.InteractiveMessage.Footer.create({
+      text: footer,
+    });
+  }
+
+  if (cta.headerTitle) {
+    interactive.header = proto.Message.InteractiveMessage.Header.create({
+      title: cta.headerTitle,
+      subtitle: '',
+      hasMediaAttachment: false,
+    });
+  }
+
   return generateWAMessageFromContent(
     jid,
     {
-      viewOnceMessage: {
-        message: {
-          messageContextInfo: {
-            deviceListMetadata: {},
-            deviceListMetadataVersion: 2,
-          },
-          interactiveMessage: proto.Message.InteractiveMessage.create({
-            body: proto.Message.InteractiveMessage.Body.create({
-              text: body,
-            }),
-            footer: proto.Message.InteractiveMessage.Footer.create({
-              text: footer,
-            }),
-            header: proto.Message.InteractiveMessage.Header.create({
-              hasMediaAttachment: false,
-            }),
-            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
-              buttons: [
-                {
-                  name: 'cta_url',
-                  buttonParamsJson: JSON.stringify({
-                    display_text: cta.displayText,
-                    url: cta.url,
-                    merchant_url: cta.url,
-                  }),
-                },
-              ],
-            }),
-          }),
-        },
-      },
+      interactiveMessage: proto.Message.InteractiveMessage.create(interactive),
     },
-    { userJid: jid }
+    { userJid: userJid || jid }
   );
 }
 
@@ -588,26 +594,55 @@ async function performSend(
 
   const plainText = message.trim();
 
-  // Format message text, appending CTA link if present.
-  // We use standard WhatsApp text messages (sock.sendMessage) because interactive
-  // nativeFlowMessage buttons are silently dropped by Meta WhatsApp clients
-  // on iOS/Android when sent from non-business Web companion devices.
-  let textToSend = plainText;
+  // Pure text + CTA: send as official WhatsApp native interactive CTA-URL button bubble.
+  // Falls back gracefully to standard text with payment link if the interactive send fails.
   if (cta && cta.url) {
-    const ctaSection = `\n\n💳 *${cta.displayText || 'Pay Now'}:*\n👉 ${cta.url}`;
-    if (!textToSend) {
-      textToSend = `💳 *${cta.displayText || 'Pay Now'}:*\n👉 ${cta.url}`;
-    } else if (!textToSend.includes(cta.url)) {
-      textToSend = `${textToSend}${ctaSection}`;
+    let sentInteractive = false;
+    try {
+      const footer = cta.footer || '— Accounts Desk';
+      const waMsg = buildCtaUrlMessage(
+        jid,
+        plainText || 'Please tap the button below to continue:',
+        footer,
+        cta,
+        sock?.user?.id
+      );
+      const msgId = waMsg.key?.id || ('3EB0' + randomBytes(8).toString('hex').toUpperCase());
+      await sock.relayMessage(jid, waMsg.message, { messageId: msgId });
+      firstId = msgId;
+      sentInteractive = true;
+      if (waMsg.message) {
+        persistMessage(msgId, jid, waMsg.message);
+      }
+      console.log(`[wa] Sent interactive CTA URL button message to ${jid} (id: ${msgId})`);
+    } catch (err: any) {
+      console.warn(`[wa] Interactive CTA send failed, falling back to standard text: ${err?.message ?? err}`);
     }
-  }
 
-  if (textToSend) {
+    if (!sentInteractive) {
+      let fallbackText = plainText;
+      const ctaSection = `\n\n💳 *${cta.displayText || 'Pay Now'}:*\n👉 ${cta.url}`;
+      if (!fallbackText) {
+        fallbackText = `💳 *${cta.displayText || 'Pay Now'}:*\n👉 ${cta.url}`;
+      } else if (!fallbackText.includes(cta.url)) {
+        fallbackText = `${fallbackText}${ctaSection}`;
+      }
+      const sent = await sock.sendMessage(jid, { text: fallbackText });
+      firstId = sent?.key?.id ?? null;
+      if (firstId) {
+        persistMessage(firstId, jid, {
+          conversation: fallbackText,
+          extendedTextMessage: { text: fallbackText },
+        });
+      }
+      console.log(`[wa] Sent fallback text message to ${jid} (id: ${firstId})`);
+    }
+  } else if (plainText) {
     const protoPayload = {
-      conversation: textToSend,
-      extendedTextMessage: { text: textToSend },
+      conversation: plainText,
+      extendedTextMessage: { text: plainText },
     };
-    const sent = await sock.sendMessage(jid, { text: textToSend });
+    const sent = await sock.sendMessage(jid, { text: plainText });
     firstId = sent?.key?.id ?? null;
     if (firstId) {
       persistMessage(firstId, jid, protoPayload);

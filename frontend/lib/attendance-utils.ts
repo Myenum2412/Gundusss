@@ -1,5 +1,10 @@
 import type { StoredGroup } from "./groups-store";
 import type { StoredStudent } from "./students-store";
+export type {
+  AttendanceDay,
+  AttendanceEntry,
+  AttendanceStatus,
+} from "./attendance-store";
 import type {
   AttendanceDay,
   AttendanceEntry,
@@ -122,4 +127,105 @@ export function markStudents(
     ...rest,
     { date, entries, updatedAt: new Date().toISOString() },
   ].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export interface StudentMonthlyTally {
+  present: number;
+  absent: number;
+  late: number;
+  total: number;
+  rate: number;
+}
+
+export interface MonthlyAttendanceSummary {
+  studentTallies: Map<string, StudentMonthlyTally>;
+  totalPresent: number;
+  totalAbsent: number;
+  totalLate: number;
+  totalMarkedSessions: number;
+  markedDaysCount: number;
+  attendanceRate: number;
+}
+
+/**
+ * Computes monthly attendance tallies per student and aggregate totals for a given month prefix ("YYYY-MM").
+ * Optionally filters to a specific set of student IDs (e.g. visible students).
+ */
+export function calculateMonthlyAttendance(
+  days: AttendanceDay[],
+  monthIso: string,
+  filterStudentIds?: Set<string> | string[]
+): MonthlyAttendanceSummary {
+  const prefix = monthIso.slice(0, 7);
+  const targetFilter = filterStudentIds
+    ? filterStudentIds instanceof Set
+      ? filterStudentIds
+      : new Set(filterStudentIds)
+    : null;
+
+  const studentTallies = new Map<string, StudentMonthlyTally>();
+  const markedDaysSet = new Set<string>();
+
+  for (const day of days) {
+    if (!day.date || !day.date.startsWith(prefix)) continue;
+
+    let hasRelevantEntries = false;
+    for (const entry of day.entries ?? []) {
+      const studentId = entry.studentId?.trim();
+      if (!studentId) continue;
+      if (targetFilter && !targetFilter.has(studentId)) continue;
+
+      hasRelevantEntries = true;
+      let tally = studentTallies.get(studentId);
+      if (!tally) {
+        tally = { present: 0, absent: 0, late: 0, total: 0, rate: 0 };
+        studentTallies.set(studentId, tally);
+      }
+
+      if (entry.status === "Present") {
+        tally.present += 1;
+        tally.total += 1;
+      } else if (entry.status === "Absent") {
+        tally.absent += 1;
+        tally.total += 1;
+      } else if (entry.status === "Late") {
+        tally.late += 1;
+        tally.total += 1;
+      }
+      tally.rate =
+        tally.total > 0
+          ? Math.round(((tally.present + tally.late) / tally.total) * 100)
+          : 0;
+    }
+
+    if (hasRelevantEntries) {
+      markedDaysSet.add(day.date);
+    }
+  }
+
+  let totalPresent = 0;
+  let totalAbsent = 0;
+  let totalLate = 0;
+
+  for (const tally of studentTallies.values()) {
+    totalPresent += tally.present;
+    totalAbsent += tally.absent;
+    totalLate += tally.late;
+  }
+
+  const totalMarkedSessions = totalPresent + totalAbsent + totalLate;
+  const attendanceRate =
+    totalMarkedSessions > 0
+      ? Math.round(((totalPresent + totalLate) / totalMarkedSessions) * 100)
+      : 0;
+
+  return {
+    studentTallies,
+    totalPresent,
+    totalAbsent,
+    totalLate,
+    totalMarkedSessions,
+    markedDaysCount: markedDaysSet.size,
+    attendanceRate,
+  };
 }
