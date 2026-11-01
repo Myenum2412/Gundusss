@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
+    "test": "node --import tsx --test \"src/__tests__/**/*.test.ts\"",
     "prestart": "node scripts/prestart.mjs",
     "start": "node dist/server.js",
     "appwrite:setup": "node scripts/setup-appwrite.mjs"

@@ -274,19 +274,36 @@ export async function ensureDeveloperAccount(): Promise<void> {
   const now = nowIso();
 
   if (!existing) {
+    let initialPassword = SUPER_ADMIN_PASSWORD;
+    if (!initialPassword) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(
+          'FATAL: SUPER_ADMIN_PASSWORD environment variable is required to bootstrap the platform super administrator in production.'
+        );
+      }
+      initialPassword = randomBytes(16).toString('hex');
+      console.warn(
+        `[security] Initialized super-administrator account with generated password: ${initialPassword}`
+      );
+    }
     await createUser({
       name: SUPER_ADMIN_NAME,
       email: SUPER_ADMIN_EMAIL,
-      password: SUPER_ADMIN_PASSWORD,
+      password: initialPassword,
       role: 'admin',
       profileId: SUPER_PROFILE_ID,
       super: true,
     });
   } else {
-    const passwordOk = await verifyPassword(
-      SUPER_ADMIN_PASSWORD,
-      existing.password_hash
-    );
+    // Preserve the administrator's existing password hash across service restarts.
+    // Only force reset if explicitly instructed via SUPER_ADMIN_FORCE_RESET=true.
+    const forceReset =
+      process.env.SUPER_ADMIN_FORCE_RESET === 'true' &&
+      Boolean(SUPER_ADMIN_PASSWORD);
+    const passwordHash = forceReset
+      ? await hashPassword(SUPER_ADMIN_PASSWORD)
+      : existing.password_hash;
+
     await saveUser({
       ...existing,
       name: existing.name || SUPER_ADMIN_NAME,
@@ -294,9 +311,7 @@ export async function ensureDeveloperAccount(): Promise<void> {
       active: true,
       profile_id: SUPER_PROFILE_ID,
       super: true,
-      password_hash: passwordOk
-        ? existing.password_hash
-        : await hashPassword(SUPER_ADMIN_PASSWORD),
+      password_hash: passwordHash,
       updated_at: now,
     });
     invalidateUserCache(existing.email);
@@ -573,8 +588,15 @@ export async function createWorkspace(
 export async function resolveProfileId(
   req: FastifyRequest
 ): Promise<string> {
-  const own = (req.auth?.profile_id ?? '').trim() || SUPER_PROFILE_ID;
-  if (!req.auth?.super) return own;
+  const own = (req.auth?.profile_id ?? '').trim();
+  if (!req.auth?.super) {
+    if (!own) {
+      throw Object.assign(new Error('User is not assigned to a workspace profile.'), {
+        statusCode: 403,
+      });
+    }
+    return own;
+  }
 
   const header = req.headers['x-profile-id'];
   const requested =

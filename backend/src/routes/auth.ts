@@ -219,9 +219,14 @@ export async function authRoutes(app: FastifyInstance) {
       // its admin token to super sessions only; nginx auth_request ignores
       // extra body fields, so this does not affect page gating.
       if (user && user.active) {
+        if (user.super === true) {
+          return reply
+            .code(200)
+            .send({ ok: true, super: true });
+        }
         return reply
-          .code(200)
-          .send({ ok: true, super: user.super === true });
+          .code(403)
+          .send({ ok: false, error: 'Forbidden: Super-administrator privileges required.' });
       }
       break;
     }

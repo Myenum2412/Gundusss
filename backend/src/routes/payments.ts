@@ -1714,6 +1714,20 @@ export async function paymentRoutes(app: FastifyInstance) {
       return '5000';
     };
 
+    function maskPhone(phone?: string): string {
+      if (!phone) return '';
+      const digits = phone.replace(/\D/g, '');
+      if (digits.length <= 4) return '****';
+      return `${digits.slice(0, 2)}${'*'.repeat(Math.max(4, digits.length - 4))}${digits.slice(-2)}`;
+    }
+
+    function maskEmail(email?: string): string {
+      if (!email || !email.includes('@')) return '';
+      const [local, domain] = email.split('@');
+      if (local.length <= 2) return `*@${domain}`;
+      return `${local.slice(0, 2)}***@${domain}`;
+    }
+
     const students = studentRecords
       .map((r) => r.data)
       .filter((s) => (s.status ?? 'Active').toLowerCase() !== 'inactive')
@@ -1722,8 +1736,8 @@ export async function paymentRoutes(app: FastifyInstance) {
         studentName: s.studentName,
         group: s.group || '',
         course: s.course || '',
-        phone: s.phone || '',
-        email: s.email || '',
+        phone: maskPhone(s.phone),
+        email: maskEmail(s.email),
         feeAmount: getStudentFeeAmount(s),
       }));
 
@@ -1780,6 +1794,20 @@ export async function paymentRoutes(app: FastifyInstance) {
       status?: string;
     }>(APPWRITE_COLLECTIONS.students, profile.profileId);
 
+    function maskPhone(phone?: string): string {
+      if (!phone) return '';
+      const digits = phone.replace(/\D/g, '');
+      if (digits.length <= 4) return '****';
+      return `${digits.slice(0, 2)}${'*'.repeat(Math.max(4, digits.length - 4))}${digits.slice(-2)}`;
+    }
+
+    function maskEmail(email?: string): string {
+      if (!email || !email.includes('@')) return '';
+      const [local, domain] = email.split('@');
+      if (local.length <= 2) return `*@${domain}`;
+      return `${local.slice(0, 2)}***@${domain}`;
+    }
+
     const students = studentRecords
       .map((r) => r.data)
       .filter((s) => (s.status ?? 'Active').toLowerCase() !== 'inactive')
@@ -1788,8 +1816,8 @@ export async function paymentRoutes(app: FastifyInstance) {
         studentName: s.studentName,
         group: s.group || '',
         course: s.course || '',
-        phone: s.phone || '',
-        email: s.email || '',
+        phone: maskPhone(s.phone),
+        email: maskEmail(s.email),
       }));
 
     return { data: students };

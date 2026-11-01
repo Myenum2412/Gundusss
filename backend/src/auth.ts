@@ -58,27 +58,26 @@ interface TokenPayload {
 
 const TOKEN_VERSION = 'v1';
 
-const SECRET = (
-  process.env.AUTH_SECRET?.trim() ||
-  process.env.APPWRITE_API_KEY?.trim() ||
-  ''
-).trim();
+const rawAuthSecret = process.env.AUTH_SECRET?.trim() || '';
+let resolvedSecret = rawAuthSecret;
+if (!resolvedSecret) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'FATAL: AUTH_SECRET must be explicitly configured in production. Reusing database master credentials for token signing is prohibited.'
+    );
+  }
+  console.warn(
+    '[auth] WARNING: AUTH_SECRET is not set. Using ephemeral development secret. Set AUTH_SECRET in backend/.env for production.'
+  );
+  resolvedSecret = 'dev_auth_secret_local_dev_only_min_32_characters_long';
+}
+const SECRET = resolvedSecret;
 
 const TOKEN_TTL_HOURS = Math.max(
   1,
   Number(process.env.AUTH_TOKEN_TTL_HOURS ?? 12) || 12
 );
 export const TOKEN_TTL_SECONDS = TOKEN_TTL_HOURS * 60 * 60;
-
-if (!SECRET) {
-  console.warn(
-    '[auth] AUTH_SECRET is not set and APPWRITE_API_KEY is missing; session tokens cannot be signed.'
-  );
-} else if (!process.env.AUTH_SECRET?.trim()) {
-  console.warn(
-    '[auth] AUTH_SECRET is not set; falling back to APPWRITE_API_KEY to sign sessions. Set AUTH_SECRET in production.'
-  );
-}
 
 function sign(body: string): string {
   return createHmac('sha256', SECRET)

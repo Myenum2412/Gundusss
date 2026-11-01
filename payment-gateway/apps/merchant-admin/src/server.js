@@ -118,7 +118,9 @@ export class AdminServer {
     // This completely eliminates CORS errors, tunnel downtime 530s, and cross-origin failures.
     const clientApiBase = '';
     html = html.replaceAll('{{API_BASE_URL}}', clientApiBase);
-    html = html.replaceAll('{{ADMIN_API_TOKEN}}', getAdminToken());
+    // Never inject master ADMIN_API_TOKEN into static HTML markup!
+    // The client UI exchanges session tokens via POST /api/admin/session or uses local session storage.
+    html = html.replaceAll('{{ADMIN_API_TOKEN}}', '');
     return html;
   }
 

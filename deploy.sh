@@ -31,7 +31,7 @@ if echo "$CHANGED" | grep -qE '^backend/(src/|package(-lock)?\.json|tsconfig)'; 
   echo "-- backend changed"
   if echo "$CHANGED" | grep -q '^backend/package-lock.json'; then
     echo "   installing backend deps..."
-    (cd backend && npm ci --no-audit --no-fund >/dev/null 2>&1) || (cd backend && npm install --no-audit --no-fund)
+    (cd backend && npm ci --no-audit --no-fund)
   fi
   (cd backend && npx tsc) || { echo "!! backend build FAILED - keeping old dist"; exit 1; }
   systemctl restart fees-backend
@@ -49,7 +49,7 @@ if echo "$CHANGED" | grep -qE '^payment-gateway/'; then
   echo "-- gateway changed"
   if echo "$CHANGED" | grep -q '^payment-gateway/package-lock.json'; then
     echo "   installing gateway deps..."
-    (cd payment-gateway && npm ci --no-audit --no-fund >/dev/null 2>&1) || (cd payment-gateway && npm install --no-audit --no-fund)
+    (cd payment-gateway && npm ci --no-audit --no-fund)
   fi
   systemctl restart youpi-gateway
   for i in $(seq 1 25); do

@@ -11,7 +11,7 @@
 export const SUPER_ADMIN_EMAIL =
   process.env.SUPER_ADMIN_EMAIL?.trim().toLowerCase() || 'developer@myenum.in';
 export const SUPER_ADMIN_PASSWORD =
-  process.env.SUPER_ADMIN_PASSWORD || '@Meenu2412';
+  process.env.SUPER_ADMIN_PASSWORD?.trim() || '';
 export const SUPER_ADMIN_NAME = 'Org Menu';
 
 /** Profile id owned by the fixed super admin. */

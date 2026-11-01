@@ -114,6 +114,15 @@ await app.register(cors, {
   },
 });
 
+// Security headers on all outgoing responses
+app.addHook('onSend', async (_request, reply, payload) => {
+  reply.header('X-Content-Type-Options', 'nosniff');
+  reply.header('X-Frame-Options', 'SAMEORIGIN');
+  reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  reply.header('Permissions-Policy', 'geolocation=(), camera=(), microphone=()');
+  return payload;
+});
+
 app.setErrorHandler((error, _request, reply) => {
   app.log.error(error);
   const status =
@@ -122,7 +131,13 @@ app.setErrorHandler((error, _request, reply) => {
       : error instanceof Error && error.message.includes('HTTP 402')
       ? 402
       : 500;
-  const message = error instanceof Error ? error.message : 'Internal Server Error';
+  const isProd = process.env.NODE_ENV === 'production';
+  const message =
+    status >= 500 && isProd
+      ? 'An unexpected error occurred. Please try again later.'
+      : error instanceof Error
+      ? error.message
+      : 'Internal Server Error';
   reply.code(status).send({ error: message });
 });
 
