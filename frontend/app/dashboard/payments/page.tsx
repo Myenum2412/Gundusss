@@ -197,8 +197,11 @@ export interface UnifiedPaymentRecord {
   gatewayStatus?: string
   paymentUrl?: string
   utr?: string
+  payerVpa?: string
+  bankName?: string
   receiptId?: string | null
   createdAt: string
+  completedAt?: string
   source: "gateway" | "receipt" | "student"
   rawOrder?: PaymentOrder | null
   rawReceipt?: StoredReceipt | null
@@ -819,6 +822,8 @@ function ConfirmPaymentDialog({
 }) {
   const [method, setMethod] = useState("UPI")
   const [utr, setUtr] = useState("")
+  const [payerVpa, setPayerVpa] = useState("")
+  const [bankName, setBankName] = useState("")
   const [amount, setAmount] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -831,6 +836,8 @@ function ConfirmPaymentDialog({
         ? record.utr
         : ""
     )
+    setPayerVpa(record.payerVpa || "")
+    setBankName(record.bankName || "")
     setAmount(String(record.amount || ""))
     setError(null)
     setLoading(false)
@@ -847,6 +854,8 @@ function ConfirmPaymentDialog({
       await confirmPayment(record.orderId, {
         method,
         utr: utr.trim(),
+        payerVpa: payerVpa.trim() || undefined,
+        bankName: bankName.trim() || undefined,
         amount: Number(amount) || Number(record.amount) || undefined,
         operatorId: "admin",
       })
@@ -937,6 +946,32 @@ function ConfirmPaymentDialog({
               placeholder="e.g. 12-digit UPI UTR or bank reference"
               value={utr}
               onChange={(e) => setUtr(e.target.value)}
+              className="mt-1"
+            />
+          </Field>
+
+          <Field>
+            <FieldLabel className="text-xs font-semibold">
+              Payer UPI ID (Optional)
+            </FieldLabel>
+            <Input
+              type="text"
+              placeholder="e.g. student@okhdfcbank"
+              value={payerVpa}
+              onChange={(e) => setPayerVpa(e.target.value)}
+              className="mt-1"
+            />
+          </Field>
+
+          <Field>
+            <FieldLabel className="text-xs font-semibold">
+              Bank Name (Optional)
+            </FieldLabel>
+            <Input
+              type="text"
+              placeholder="e.g. HDFC Bank, SBI, ICICI Bank"
+              value={bankName}
+              onChange={(e) => setBankName(e.target.value)}
               className="mt-1"
             />
           </Field>
@@ -1244,9 +1279,12 @@ export default function PaymentsPage() {
         status: isPaid ? "SUCCESS" : (primaryOrder ? (normalizeStatus(primaryOrder.status) || "INITIATED") : "INITIATED"),
         gatewayStatus: isPaid ? "SUCCESS" : primaryOrder?.gatewayStatus,
         paymentUrl: payUrl,
-        utr: primaryOrder?.utr || matchedReceipt?.notes || (isPaid ? "Paid" : "Awaiting fee payment"),
+        utr: primaryOrder?.utr || matchedReceipt?.utr || matchedReceipt?.notes || (isPaid ? "Paid" : "Awaiting fee payment"),
+        payerVpa: primaryOrder?.payerVpa || matchedReceipt?.payerVpa,
+        bankName: primaryOrder?.bankName || matchedReceipt?.bankName,
         receiptId: effectiveReceiptId,
         createdAt,
+        completedAt: primaryOrder?.completedAt || (matchedReceipt?.paymentDate ? `${matchedReceipt.paymentDate}T00:00:00.000Z` : undefined),
         source: primaryOrder ? "gateway" : (matchedReceipt ? "receipt" : "student"),
         rawOrder: primaryOrder,
         rawReceipt: matchedReceipt || undefined,
@@ -1294,8 +1332,11 @@ export default function PaymentsPage() {
         gatewayStatus: isPaid ? "SUCCESS" : primaryOrder.gatewayStatus,
         paymentUrl: buildStudentPaymentUrl(primaryOrder.studentId, primaryOrder.paymentUrl || primaryOrder.checkoutUrl),
         utr: primaryOrder.utr || "—",
+        payerVpa: primaryOrder.payerVpa,
+        bankName: primaryOrder.bankName,
         receiptId: primaryOrder.receiptId || null,
         createdAt: primaryOrder.createdAt || new Date().toISOString(),
+        completedAt: primaryOrder.completedAt,
         source: "gateway",
         rawOrder: primaryOrder,
         reminderCount,
@@ -1348,9 +1389,12 @@ export default function PaymentsPage() {
         status: mappedStatus,
         gatewayStatus: mappedStatus === "SUCCESS" ? "SUCCESS" : undefined,
         paymentUrl: "",
-        utr: receipt.notes || "—",
+        utr: receipt.utr || receipt.notes || "—",
+        payerVpa: receipt.payerVpa,
+        bankName: receipt.bankName,
         receiptId: receipt.receiptId,
         createdAt: receipt.paymentDate ? `${receipt.paymentDate}T00:00:00.000Z` : new Date().toISOString(),
+        completedAt: receipt.paymentDate ? `${receipt.paymentDate}T00:00:00.000Z` : undefined,
         source: "receipt",
         rawReceipt: receipt,
         rawStudent: stu,
@@ -1382,8 +1426,11 @@ export default function PaymentsPage() {
         gatewayStatus: isPaid ? "SUCCESS" : order.gatewayStatus,
         paymentUrl: buildStudentPaymentUrl(undefined, order.paymentUrl || order.checkoutUrl),
         utr: order.utr || "—",
+        payerVpa: order.payerVpa,
+        bankName: order.bankName,
         receiptId: order.receiptId || null,
         createdAt: order.createdAt || new Date().toISOString(),
+        completedAt: order.completedAt,
         source: "gateway",
         rawOrder: order,
         reminderCount: 0,
@@ -1864,6 +1911,19 @@ export default function PaymentsPage() {
                             )}
                           </Button>
                         </div>
+                        {record.payerVpa && (
+                          <div className="mt-0.5 flex items-center gap-1 font-mono text-[10px] text-sky-700 dark:text-sky-400">
+                            <span className="font-semibold text-muted-foreground">UPI:</span> {record.payerVpa}
+                          </div>
+                        )}
+                        {(record.bankName || (record.utr && record.utr !== "—" && !record.utr.includes("Awaiting"))) && (
+                          <div className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+                            {record.bankName ? <span className="font-medium text-foreground">{record.bankName}</span> : null}
+                            {record.utr && record.utr !== "—" && !record.utr.includes("Awaiting") ? (
+                              <span className="font-mono text-[9px] opacity-80">UTR: {record.utr}</span>
+                            ) : null}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="min-w-[200px] whitespace-nowrap">
                         <div className="flex flex-col">
@@ -1973,7 +2033,12 @@ export default function PaymentsPage() {
                         )}
                       </TableCell>
                       <TableCell className="min-w-[140px] whitespace-nowrap tabular-nums text-xs text-muted-foreground">
-                        {formatDate(record.createdAt)}
+                        <div>{formatDate(record.completedAt || record.createdAt)}</div>
+                        {record.completedAt && (
+                          <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                            Paid: {formatDate(record.completedAt)}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="w-16 min-w-[64px] whitespace-nowrap text-right sticky right-0 z-10 bg-card/95 backdrop-blur-xs border-l border-border/40 shadow-[-4px_0_8px_-2px_rgba(0,0,0,0.04)]">
                         <div className="flex items-center justify-end">

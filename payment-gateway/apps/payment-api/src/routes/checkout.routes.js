@@ -1,6 +1,6 @@
 import { HttpServer } from '../server.js';
 import { toRupeesString, buildUpiUri, PaymentStatus, PaymentMethod, UPI_PROVIDERS, isInternalServiceRequest, isValidTransition, getObserverToken } from '@youpi/common';
-import { validateSessionDeviceAccess, verifyRegisteredDeviceCredentials } from '@youpi/core';
+import { validateSessionDeviceAccess, verifyRegisteredDeviceCredentials, detectIndianBank } from '@youpi/core';
 import { isAdminRequest, isPaymentOwner } from '../auth-guard.js';
 
 /**
@@ -472,17 +472,29 @@ export function registerCheckoutRoutes(server, ctx) {
       }
 
       // Resolve UTR and payer details from session or attributed observation
-      let utr = session.utr || session.bankReferenceNumber || session.bank_reference_number || '';
-      let payerVpa = session.payerVpa || session.payer_vpa || null;
+      let utr = session.utr || session.bankReferenceNumber || session.bank_reference_number || session.metadata?.utr || '';
+      let payerVpa = session.payerVpa || session.payer_vpa || session.metadata?.payerVpa || null;
+      let bankName = session.bankName || session.bank_name || session.metadata?.bankName || null;
       if (session.attributedObservationId) {
         try {
           const obsRow = ctx.db.queryOne(
-            'SELECT bank_reference_number, payer_vpa FROM payment_observations WHERE id = ?',
+            'SELECT bank_reference_number, sender_vpa, raw_payload, observed_at FROM payment_observations WHERE id = ?',
             [session.attributedObservationId]
           );
           if (!utr && obsRow?.bank_reference_number) utr = obsRow.bank_reference_number;
-          if (!payerVpa && obsRow?.payer_vpa) payerVpa = obsRow.payer_vpa;
+          if (!payerVpa && obsRow?.sender_vpa) payerVpa = obsRow.sender_vpa;
+          if (obsRow?.raw_payload) {
+            try {
+              const raw = JSON.parse(obsRow.raw_payload);
+              if (!bankName && raw.bankName) bankName = raw.bankName;
+              if (!payerVpa && raw.senderVpa) payerVpa = raw.senderVpa;
+            } catch {}
+          }
         } catch {}
+      }
+
+      if (!bankName && payerVpa) {
+        bankName = detectIndianBank('', '', payerVpa) || null;
       }
 
       const snapshot = session.metadata?.receivingAccountSnapshot;
@@ -508,6 +520,8 @@ export function registerCheckoutRoutes(server, ctx) {
         payeeVpa,
         payeeName,
         payerVpa,
+        bankName,
+        bankReference: utr || null,
         utr: utr || null,
         completedAt: session.completedAt ? (typeof session.completedAt.toISOString === 'function' ? session.completedAt.toISOString() : String(session.completedAt)) : (session.updatedAt ? (typeof session.updatedAt.toISOString === 'function' ? session.updatedAt.toISOString() : String(session.updatedAt)) : new Date().toISOString()),
         studentId: session.metadata?.studentId || null,

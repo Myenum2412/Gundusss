@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { HttpServer } from '../server.js';
 import { PaymentStatus, PaymentMethod, SellingMode, AuditActorType, isValidVpa, toRupeesString, deriveCloudflareRoutes, resolveRuntimeUrls, resolveGmailRedirectUri, createOAuthState, validateOutboundWebhookUrl, TERMINAL_STATES } from '@youpi/common';
-import { PaymentVerificationPipeline } from '@youpi/core';
+import { PaymentVerificationPipeline, detectIndianBank } from '@youpi/core';
 import { globalTunnelManager } from '../services/tunnel-manager.js';
 import { formatQrDataUrl } from '../services/whatsapp-berry.service.js';
 
@@ -232,19 +232,48 @@ export function registerAdminRoutes(server, ctx) {
     const payments = ctx.sessionRepo.findByMerchantId(merchantId, limit);
 
     HttpServer.json(res, 200, {
-      payments: payments.map(p => ({
-        id: p.id,
-        orderId: p.orderId,
-        amountPaise: p.amountPaise.toString(),
-        currency: p.currency,
-        method: p.method,
-        status: p.status,
-        verificationLevel: p.verificationLevel || 0,
-        verificationSources: p.verificationSources || [],
-        verificationTag: p.verificationTag || 'UNVERIFIED',
-        createdAt: p.createdAt,
-        completedAt: p.completedAt
-      }))
+      payments: payments.map(p => {
+        let utr = p.metadata?.utr || p.metadata?.bankReference || '';
+        let payerVpa = p.metadata?.payerVpa || '';
+        let bankName = p.metadata?.bankName || '';
+        if (p.attributedObservationId && (!utr || !payerVpa || !bankName)) {
+          try {
+            const obsRow = ctx.db.queryOne(
+              'SELECT bank_reference_number, sender_vpa, raw_payload, observed_at FROM payment_observations WHERE id = ?',
+              [p.attributedObservationId]
+            );
+            if (!utr && obsRow?.bank_reference_number) utr = obsRow.bank_reference_number;
+            if (!payerVpa && obsRow?.sender_vpa) payerVpa = obsRow.sender_vpa;
+            if (obsRow?.raw_payload) {
+              try {
+                const raw = JSON.parse(obsRow.raw_payload);
+                if (!bankName && raw.bankName) bankName = raw.bankName;
+                if (!payerVpa && raw.senderVpa) payerVpa = raw.senderVpa;
+              } catch {}
+            }
+          } catch {}
+        }
+        if (!bankName && payerVpa) {
+          bankName = detectIndianBank('', '', payerVpa) || '';
+        }
+
+        return {
+          id: p.id,
+          orderId: p.orderId,
+          amountPaise: p.amountPaise.toString(),
+          currency: p.currency,
+          method: p.method,
+          status: p.status,
+          utr: utr || null,
+          payerVpa: payerVpa || null,
+          bankName: bankName || null,
+          verificationLevel: p.verificationLevel || 0,
+          verificationSources: p.verificationSources || [],
+          verificationTag: p.verificationTag || 'UNVERIFIED',
+          createdAt: p.createdAt,
+          completedAt: p.completedAt
+        };
+      })
     });
   });
 

@@ -133,6 +133,7 @@ interface LocalOrder {
   upiId?: string;
   utr: string;
   payerVpa?: string;
+  bankName?: string;
   amount: string;
   studentId: string;
   studentName: string;
@@ -155,6 +156,7 @@ interface GatewayPaymentView {
   utr?: string;
   payeeVpa?: string;
   payerVpa?: string;
+  bankName?: string;
   completedAt?: string;
 }
 
@@ -182,6 +184,7 @@ interface ReceiptRecord {
   upiId?: string;
   utr?: string;
   payerVpa?: string;
+  bankName?: string;
   institutionName?: string;
   paymentDate: string;
   status: string;
@@ -224,6 +227,9 @@ interface WebhookPayload {
   currency?: string;
   method?: string;
   utr?: string;
+  payerVpa?: string;
+  bankName?: string;
+  bankReference?: string;
   completedAt?: string;
   metadata?: Record<string, unknown>;
 }
@@ -473,6 +479,8 @@ interface SettlementDetail {
   event: string;
   method: string;
   utr: string;
+  payerVpa?: string;
+  bankName?: string;
   amount?: string;
   completedAt?: string;
   explicitFeeId?: number | null;
@@ -570,7 +578,9 @@ async function settleSuccessPayment(
       const receiptMethodName = receiptMethod(detail.method || latest.method);
       const receiptUpi = latest.upiId || '';
       const receiptUtr = detail.utr || latest.utr;
-      const notes = `YOUPI PG · Method: ${receiptMethodName}${receiptUpi ? ` · UPI: ${receiptUpi}` : ''}${receiptUtr ? ` · UTR: ${receiptUtr}` : ''} · Order: ${orderId}${overpaid ? ' · OVERPAID: fee already settled by another payment' : ''}`;
+      const receiptBank = detail.bankName || latest.bankName || '';
+      const receiptPayer = detail.payerVpa || latest.payerVpa || '';
+      const notes = `YOUPI PG · Method: ${receiptMethodName}${receiptUpi ? ` · UPI: ${receiptUpi}` : ''}${receiptBank ? ` · Bank: ${receiptBank}` : ''}${receiptUtr ? ` · UTR: ${receiptUtr}` : ''}${receiptPayer ? ` · Payer: ${receiptPayer}` : ''} · Order: ${orderId}${overpaid ? ' · OVERPAID: fee already settled by another payment' : ''}`;
       const receipt: ReceiptRecord = {
         profileId,
         receiptId,
@@ -582,7 +592,8 @@ async function settleSuccessPayment(
         method: receiptMethodName,
         upiId: receiptUpi || undefined,
         utr: receiptUtr || undefined,
-        payerVpa: latest.payerVpa || undefined,
+        payerVpa: receiptPayer || undefined,
+        bankName: receiptBank || undefined,
         institutionName: latest.institutionName || undefined,
         paymentDate: paymentDate(detail.completedAt),
         status: overpaid ? 'Overpaid' : 'Paid',
@@ -612,6 +623,10 @@ async function settleSuccessPayment(
     profileId,
     status: detail.event,
     gatewayStatus: detail.event,
+    utr: detail.utr || settled.utr,
+    payerVpa: detail.payerVpa || settled.payerVpa,
+    bankName: detail.bankName || settled.bankName,
+    completedAt: detail.completedAt || settled.completedAt || nowIso(),
     updatedAt: nowIso(),
   };
   await saveLocalOrder(finalOrder);
@@ -652,7 +667,9 @@ async function settleSuccessPayment(
       if (recipientPhone) {
         const cleanPhone = recipientPhone.replace(/\D/g, '');
         if (cleanPhone.length >= 10) {
-          const receiptText = `🎉 *Payment Confirmation - Receipt #${finalOrder.receiptId || 'Paid'}*\n\nDear ${finalOrder.studentName || 'Student / Parent'},\n\nWe have successfully received your fee payment of *₹${finalOrder.amount || detail.amount || '0'}*.\n\n• *Order ID:* ${orderId}\n• *Method:* ${detail.method || 'UPI'}${detail.utr ? `\n• *UTR / Ref:* ${detail.utr}` : ''}\n• *Date:* ${paymentDate(detail.completedAt)}\n• *Status:* Confirmed (Paid)\n\nPlease find your official fee payment receipt attached in PDF format.\n\nThank you for your payment!\n— Accounts Desk`;
+          const receiptBank = finalOrder.bankName || detail.bankName;
+          const receiptPayer = finalOrder.payerVpa || detail.payerVpa;
+          const receiptText = `🎉 *Payment Confirmation - Receipt #${finalOrder.receiptId || 'Paid'}*\n\nDear ${finalOrder.studentName || 'Student / Parent'},\n\nWe have successfully received your fee payment of *₹${finalOrder.amount || detail.amount || '0'}*.\n\n• *Order ID:* ${orderId}\n• *Method:* ${detail.method || 'UPI'}${receiptBank ? `\n• *Bank:* ${receiptBank}` : ''}${detail.utr ? `\n• *UTR / Ref:* ${detail.utr}` : ''}${receiptPayer ? `\n• *Payer UPI:* ${receiptPayer}` : ''}\n• *Date:* ${paymentDate(detail.completedAt)}\n• *Status:* Confirmed (Paid)\n\nPlease find your official fee payment receipt attached in PDF format.\n\nThank you for your payment!\n— Accounts Desk`;
 
           const attachments: WaAttachment[] = [];
           try {
@@ -664,10 +681,11 @@ async function settleSuccessPayment(
               status: 'Paid',
               orderId,
               utr: detail.utr,
-              payerVpa: finalOrder.payerVpa,
+              bankName: receiptBank,
+              payerVpa: receiptPayer,
               studentId: finalOrder.studentId || '',
               studentName: finalOrder.studentName,
-              notes: `Fee payment confirmation for ${finalOrder.studentName || 'Student'} · Order: ${orderId}${detail.utr ? ` · UTR: ${detail.utr}` : ''}`,
+              notes: `Fee payment confirmation for ${finalOrder.studentName || 'Student'} · Order: ${orderId}${receiptBank ? ` · Bank: ${receiptBank}` : ''}${detail.utr ? ` · UTR: ${detail.utr}` : ''}${receiptPayer ? ` · Payer: ${receiptPayer}` : ''}`,
             };
 
             const pdfData = await buildReceiptPdfData(profileId, receiptPayload);
@@ -1047,13 +1065,16 @@ export async function paymentRoutes(app: FastifyInstance) {
         const gatewayUtr = gateway?.utr || '';
         const gatewayPayeeVpa = gateway?.payeeVpa || '';
         const gatewayPayerVpa = gateway?.payerVpa || '';
+        const gatewayBankName = gateway?.bankName || '';
 
         const changed =
           displayStatus !== order.status ||
           gatewayStatus !== order.gatewayStatus ||
           (method !== '' && method !== order.method) ||
           (Boolean(gatewayUtr) && gatewayUtr !== order.utr) ||
-          (Boolean(gatewayPayeeVpa) && gatewayPayeeVpa !== order.upiId);
+          (Boolean(gatewayPayeeVpa) && gatewayPayeeVpa !== order.upiId) ||
+          (Boolean(gatewayPayerVpa) && gatewayPayerVpa !== order.payerVpa) ||
+          (Boolean(gatewayBankName) && gatewayBankName !== order.bankName);
 
         if (changed) {
           const terminal = TERMINAL_STATUSES.has(order.status);
@@ -1070,6 +1091,7 @@ export async function paymentRoutes(app: FastifyInstance) {
             utr: gatewayUtr || order.utr,
             upiId: gatewayPayeeVpa || order.upiId,
             payerVpa: gatewayPayerVpa || order.payerVpa,
+            bankName: gatewayBankName || order.bankName,
             updatedAt: nowIso(),
           };
           await saveLocalOrder(order);
@@ -1099,7 +1121,15 @@ export async function paymentRoutes(app: FastifyInstance) {
   async function confirmOrderPayment(
     profileId: string,
     id: string,
-    body: { operatorId?: string; utr?: string; method?: string; amount?: number | string; notes?: string }
+    body: {
+      operatorId?: string;
+      utr?: string;
+      method?: string;
+      amount?: number | string;
+      payerVpa?: string;
+      bankName?: string;
+      notes?: string;
+    }
   ): Promise<LocalOrder> {
     let order = await findLocalOrder(profileId, id);
 
@@ -1134,6 +1164,8 @@ export async function paymentRoutes(app: FastifyInstance) {
 
     const confirmedMethod = body.method ? receiptMethod(body.method) : receiptMethod(order.method);
     const confirmedUtr = (body.utr ?? '').trim() || order.utr || '';
+    const confirmedPayerVpa = (body.payerVpa ?? '').trim() || order.payerVpa || '';
+    const confirmedBankName = (body.bankName ?? '').trim() || order.bankName || '';
 
     // Notify gateway if session has paymentId
     if (order.paymentId && YOUPI_ADMIN_TOKEN) {
@@ -1189,7 +1221,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       } else {
         receiptId = await nextReceiptId(profileId);
         const receiptUpi = order.upiId || '';
-        const notes = `YOUPI PG · Method: ${confirmedMethod}${receiptUpi ? ` · UPI: ${receiptUpi}` : ''}${confirmedUtr ? ` · UTR: ${confirmedUtr}` : ''} · Order: ${order.orderId}${overpaid ? ' · OVERPAID: fee already settled by another payment' : ''}`;
+        const notes = `YOUPI PG · Method: ${confirmedMethod}${receiptUpi ? ` · UPI: ${receiptUpi}` : ''}${confirmedBankName ? ` · Bank: ${confirmedBankName}` : ''}${confirmedUtr ? ` · UTR: ${confirmedUtr}` : ''}${confirmedPayerVpa ? ` · Payer: ${confirmedPayerVpa}` : ''} · Order: ${order.orderId}${overpaid ? ' · OVERPAID: fee already settled by another payment' : ''}`;
         const receipt: ReceiptRecord = {
           profileId,
           receiptId,
@@ -1201,6 +1233,8 @@ export async function paymentRoutes(app: FastifyInstance) {
           method: confirmedMethod,
           upiId: receiptUpi || undefined,
           utr: confirmedUtr || undefined,
+          payerVpa: confirmedPayerVpa || undefined,
+          bankName: confirmedBankName || undefined,
           institutionName: order.institutionName || undefined,
           paymentDate: paymentDate(),
           status: overpaid ? 'Overpaid' : 'Paid',
@@ -1234,6 +1268,8 @@ export async function paymentRoutes(app: FastifyInstance) {
       gatewayStatus: 'SUCCESS',
       receiptId,
       utr: confirmedUtr || order.utr,
+      payerVpa: confirmedPayerVpa || order.payerVpa,
+      bankName: confirmedBankName || order.bankName,
       method: body.method ? (normalizePaymentMethod(body.method) || order.method) : order.method,
       completedAt: nowIso(),
       updatedAt: nowIso(),
@@ -1255,7 +1291,7 @@ export async function paymentRoutes(app: FastifyInstance) {
   // POST /api/payments/:id/confirm — marks payment as paid, creates receipt, updates fee in Appwrite
   app.post('/api/payments/:id/confirm', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const body = (req.body ?? {}) as { operatorId?: string; utr?: string; method?: string; amount?: number | string; notes?: string };
+    const body = (req.body ?? {}) as { operatorId?: string; utr?: string; method?: string; amount?: number | string; notes?: string; payerVpa?: string; bankName?: string };
     const profileId = await resolveProfileId(req);
     try {
       const order = await confirmOrderPayment(profileId, id, body);
@@ -1270,7 +1306,7 @@ export async function paymentRoutes(app: FastifyInstance) {
   // POST /api/payments/:id/counter-confirm — cashier confirmation alias for any payment method
   app.post('/api/payments/:id/counter-confirm', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const body = (req.body ?? {}) as { operatorId?: string; utr?: string; method?: string; amount?: number | string };
+    const body = (req.body ?? {}) as { operatorId?: string; utr?: string; method?: string; amount?: number | string; payerVpa?: string; bankName?: string };
     const profileId = await resolveProfileId(req);
     try {
       const order = await confirmOrderPayment(profileId, id, body);
@@ -1400,7 +1436,8 @@ export async function paymentRoutes(app: FastifyInstance) {
     const metaProfileId =
       typeof meta.profileId === 'string' ? meta.profileId.trim() : '';
     const metaUpiId = typeof meta.upiId === 'string' ? meta.upiId : (typeof meta.payeeVpa === 'string' ? meta.payeeVpa : '');
-    const metaPayerVpa = typeof meta.payerVpa === 'string' ? meta.payerVpa : '';
+    const metaPayerVpa = (typeof payload.payerVpa === 'string' && payload.payerVpa) ? payload.payerVpa : (typeof meta.payerVpa === 'string' ? meta.payerVpa : '');
+    const metaBankName = (typeof payload.bankName === 'string' && payload.bankName) ? payload.bankName : (typeof meta.bankName === 'string' ? meta.bankName : '');
     const metaMerchantName = typeof meta.merchantName === 'string' ? meta.merchantName : '';
 
     // Prefer the profile echoed in metadata, then any stored order. There is no
@@ -1434,6 +1471,7 @@ export async function paymentRoutes(app: FastifyInstance) {
 
     const effectiveUpiId = metaUpiId || existing?.upiId || '';
     const effectivePayerVpa = metaPayerVpa || existing?.payerVpa || '';
+    const effectiveBankName = metaBankName || existing?.bankName || '';
     const effectiveMerchantName = metaMerchantName || existing?.institutionName || '';
 
     // Idempotent order upsert (deliveries may be retried).
@@ -1457,13 +1495,14 @@ export async function paymentRoutes(app: FastifyInstance) {
           utr: utr || existing.utr,
           upiId: effectiveUpiId,
           payerVpa: effectivePayerVpa,
+          bankName: effectiveBankName,
           institutionName: effectiveMerchantName,
           feeId: metaFeeId ?? existing.feeId,
           studentId: existing.studentId || metaStudentId,
           studentName: existing.studentName || metaStudentName,
           amount: existing.amount || payload.amount || '',
           completedAt: payload.completedAt || existing.completedAt || timestamp,
-          notes: `YOUPI PG · Method: ${method || existing.method || 'UPI'} · UTR: ${utr || existing.utr || 'N/A'}`,
+          notes: `YOUPI PG · Method: ${method || existing.method || 'UPI'}${effectiveBankName ? ` · Bank: ${effectiveBankName}` : ''}${effectivePayerVpa ? ` · Payer: ${effectivePayerVpa}` : ''} · UTR: ${utr || existing.utr || 'N/A'}`,
           updatedAt: timestamp,
         }
       : {
@@ -1476,6 +1515,7 @@ export async function paymentRoutes(app: FastifyInstance) {
           upiId: effectiveUpiId,
           utr,
           payerVpa: effectivePayerVpa,
+          bankName: effectiveBankName,
           institutionName: effectiveMerchantName,
           amount: payload.amount ?? '',
           studentId: metaStudentId,
@@ -1484,7 +1524,7 @@ export async function paymentRoutes(app: FastifyInstance) {
           checkoutUrl: '',
           receiptId: null,
           completedAt: payload.completedAt || timestamp,
-          notes: `YOUPI PG · Method: ${method || 'UPI'} · UTR: ${utr || 'N/A'}`,
+          notes: `YOUPI PG · Method: ${method || 'UPI'}${effectiveBankName ? ` · Bank: ${effectiveBankName}` : ''}${effectivePayerVpa ? ` · Payer: ${effectivePayerVpa}` : ''} · UTR: ${utr || 'N/A'}`,
           createdAt: timestamp,
           updatedAt: timestamp,
         };
@@ -1512,6 +1552,8 @@ export async function paymentRoutes(app: FastifyInstance) {
           event,
           method,
           utr,
+          payerVpa: effectivePayerVpa,
+          bankName: effectiveBankName,
           amount: payload.amount,
           completedAt: payload.completedAt,
           explicitFeeId: metaFeeId,

@@ -1,7 +1,7 @@
 import { toPaise } from '@youpi/common';
-import { extractIntelligentAmount } from './bank-sms-parser.js';
+import { extractIntelligentAmount, detectIndianBank } from './bank-sms-parser.js';
 
-export { extractIntelligentAmount };
+export { extractIntelligentAmount, detectIndianBank };
 
 /**
  * Bank email parser for extracting UPI credit alerts across Indian banks:
@@ -93,11 +93,15 @@ export class BankEmailParser {
       }
     }
 
+    // 5. Detect Bank Name
+    const bankName = detectIndianBank(combinedText, email.from || email.subject, senderVpa);
+
     return {
       amountPaise: extractedAmount.amountPaise,
       amount: extractedAmount.amountStr,
       bankReferenceNumber: bankRef,
       senderVpa,
+      bankName: bankName || undefined,
       observedAt,
       rawSnippet: combinedText.substring(0, 300)
     };

@@ -1,6 +1,6 @@
 import { HttpServer } from '../server.js';
 import { toPaise, toRupeesString, resolveRuntimeUrls, PaymentStatus, safeEqual, verifyHmac } from '@youpi/common';
-import { isTerminalStatus, toPublicOutcome, verifyRegisteredDeviceCredentials } from '@youpi/core';
+import { isTerminalStatus, toPublicOutcome, verifyRegisteredDeviceCredentials, detectIndianBank } from '@youpi/core';
 import { isAdminRequest, isPaymentOwner } from '../auth-guard.js';
 
 /**
@@ -426,6 +426,34 @@ export function registerPaymentRoutes(server, ctx) {
       ? toPublicOutcome(session.status)
       : session.status;
 
+    let utr = session.utr || session.bankReferenceNumber || session.bank_reference_number || session.metadata?.utr || '';
+    let payerVpa = session.payerVpa || session.payer_vpa || session.metadata?.payerVpa || null;
+    let bankName = session.bankName || session.bank_name || session.metadata?.bankName || null;
+    let completedAt = session.completedAt ? session.completedAt.toISOString() : null;
+
+    if (session.attributedObservationId) {
+      try {
+        const obsRow = ctx.db.queryOne(
+          'SELECT bank_reference_number, sender_vpa, raw_payload, observed_at FROM payment_observations WHERE id = ?',
+          [session.attributedObservationId]
+        );
+        if (!utr && obsRow?.bank_reference_number) utr = obsRow.bank_reference_number;
+        if (!payerVpa && obsRow?.sender_vpa) payerVpa = obsRow.sender_vpa;
+        if (obsRow?.raw_payload) {
+          try {
+            const raw = JSON.parse(obsRow.raw_payload);
+            if (!bankName && raw.bankName) bankName = raw.bankName;
+            if (!payerVpa && raw.senderVpa) payerVpa = raw.senderVpa;
+          } catch {}
+        }
+        if (!completedAt && obsRow?.observed_at) completedAt = new Date(obsRow.observed_at).toISOString();
+      } catch {}
+    }
+
+    if (!bankName && payerVpa) {
+      bankName = detectIndianBank('', '', payerVpa) || null;
+    }
+
     // Fields any payment-id holder may read. Everything else is merchant-private: the raw
     // state machine status, verification internals, merchant metadata and the return URL.
     const publicView = {
@@ -436,7 +464,11 @@ export function registerPaymentRoutes(server, ctx) {
       currency: session.currency,
       status: publicStatus,
       method: session.method,
-      completedAt: session.completedAt ? session.completedAt.toISOString() : null
+      utr: utr || null,
+      payerVpa: payerVpa || null,
+      bankName: bankName || null,
+      bankReference: utr || null,
+      completedAt: completedAt || (session.completedAt ? session.completedAt.toISOString() : null)
     };
 
     if (!isPaymentOwner(req, session, ctx)) {
@@ -444,18 +476,6 @@ export function registerPaymentRoutes(server, ctx) {
       return;
     }
 
-    let utr = session.utr || session.bankReferenceNumber || session.bank_reference_number || '';
-    let payerVpa = session.payerVpa || session.payer_vpa || null;
-    if (session.attributedObservationId) {
-      try {
-        const obsRow = ctx.db.queryOne(
-          'SELECT bank_reference_number, payer_vpa FROM payment_observations WHERE id = ?',
-          [session.attributedObservationId]
-        );
-        if (!utr && obsRow?.bank_reference_number) utr = obsRow.bank_reference_number;
-        if (!payerVpa && obsRow?.payer_vpa) payerVpa = obsRow.payer_vpa;
-      } catch {}
-    }
     const snapshot = session.metadata?.receivingAccountSnapshot;
     let receivingAccount = session.receivingAccountId
       ? ctx.accountRepo.findById(session.receivingAccountId)
@@ -470,6 +490,8 @@ export function registerPaymentRoutes(server, ctx) {
       utr: utr || null,
       payeeVpa: payeeVpa || null,
       payerVpa: payerVpa || null,
+      bankName: bankName || null,
+      bankReference: utr || null,
       internalStatus: session.status,
       verificationLevel: session.verificationLevel || 0,
       verificationSources: session.verificationSources || [],

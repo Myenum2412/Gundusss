@@ -171,10 +171,28 @@ export function PaymentTimeline({
                   <span className="font-mono font-medium text-primary">{order.upiId}</span>
                 </div>
               )}
+              {order.payerVpa && (
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Payer UPI ID</span>
+                  <span className="font-mono font-medium text-sky-700 dark:text-sky-400">{order.payerVpa}</span>
+                </div>
+              )}
+              {order.bankName && (
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Bank</span>
+                  <span className="font-semibold text-foreground">{order.bankName}</span>
+                </div>
+              )}
               {order.utr && (
                 <div>
                   <span className="text-muted-foreground block text-[11px]">Bank Ref / UTR</span>
                   <span className="font-mono font-medium text-foreground">{order.utr}</span>
+                </div>
+              )}
+              {order.completedAt && (
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Paid At</span>
+                  <span className="text-foreground">{new Date(order.completedAt).toLocaleString("en-IN")}</span>
                 </div>
               )}
               {order.receiptId && (

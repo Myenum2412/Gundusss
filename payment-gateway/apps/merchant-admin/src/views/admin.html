@@ -1452,19 +1452,18 @@
               <thead>
                 <tr>
                   <th>Order ID</th>
-                  <th>Payment ID</th>
                   <th>Amount</th>
                   <th>Method</th>
                   <th>Status</th>
-                  <th>Verification Tier</th>
-                  <th>Channel Sources</th>
-                  <th>Created At</th>
-                  <th>Completed At</th>
+                  <th>Payer UPI ID</th>
+                  <th>Bank &amp; UTR</th>
+                  <th>Verification</th>
+                  <th>Date &amp; Time</th>
                 </tr>
               </thead>
               <tbody id="paymentsLedgerTbody">
                 <tr>
-                  <td colspan="9" style="text-align:center; padding:1.5rem;">Loading transactions...</td>
+                  <td colspan="8" style="text-align:center; padding:1.5rem;">Loading transactions...</td>
                 </tr>
               </tbody>
             </table>
@@ -4694,32 +4693,59 @@
         const tbody = document.getElementById('paymentsLedgerTbody');
         if (!tbody) return;
 
-        tbody.innerHTML = (data.payments || []).map(p => {
+        if (!data.payments || data.payments.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:1.5rem; color:var(--text-muted);">No payment transactions recorded yet.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = data.payments.map(p => {
           let verifyBadge = '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>';
           if (p.status === 'SUCCESS') {
-          const tag = p.verificationTag || (p.verificationLevel >= 2 ? 'Dual Verification' : 'Single Verification');
-          if (p.verificationLevel >= 2) {
-            verifyBadge = `<span class="badge badge-success">✓✓ ${escapeHtmlValue(tag)}</span>`;
-          } else {
-            verifyBadge = `<span class="badge badge-info">✓ ${escapeHtmlValue(tag)}</span>`;
+            const tag = p.verificationTag || (p.verificationLevel >= 2 ? 'Dual Verification' : 'Single Verification');
+            if (p.verificationLevel >= 2) {
+              verifyBadge = `<span class="badge badge-success">✓✓ ${escapeHtmlValue(tag)}</span>`;
+            } else {
+              verifyBadge = `<span class="badge badge-info">✓ ${escapeHtmlValue(tag)}</span>`;
+            }
           }
-        }
 
           const sourcesChips = (p.verificationSources && p.verificationSources.length > 0)
             ? p.verificationSources.map(s => `<code style="font-size:0.7rem; background:#0f172a; padding:0.15rem 0.35rem; border-radius:0.25rem; margin-right:0.2rem; border:1px solid var(--border); color:#93c5fd;">${s === 'GOOGLE_MESSAGES' ? 'SMS' : escapeHtmlValue(s)}</code>`).join('')
-            : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>';
+            : '';
+
+          const ts = p.completedAt || p.createdAt;
+          const d = ts ? new Date(ts) : null;
+          const dtStr = d && !isNaN(d.getTime())
+            ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+            : '—';
+
+          const payerHtml = p.payerVpa
+            ? `<code style="color:#38bdf8; font-weight:600; font-size:0.8rem; background:#0b1120; padding:2px 6px; border-radius:4px; border:1px solid #1e293b;">${escapeHtml(p.payerVpa)}</code>`
+            : '<span style="color:var(--text-muted); font-size:0.75rem;">—</span>';
+
+          const bankHtml = (p.bankName || p.utr)
+            ? `<div>
+                ${p.bankName ? `<div style="font-weight:700; font-size:0.82rem; color:#f1f5f9;">${escapeHtml(p.bankName)}</div>` : ''}
+                ${p.utr ? `<code style="font-size:0.72rem; color:#94a3b8; background:#0f172a; padding:1px 5px; border-radius:3px;">Ref: ${escapeHtml(p.utr)}</code>` : ''}
+              </div>`
+            : '<span style="color:var(--text-muted); font-size:0.75rem;">—</span>';
 
           return `
           <tr>
-            <td><strong>Order #${escapeHtml(p.orderId)}</strong></td>
-            <td><code>${p.id}</code></td>
-            <td>₹${(Number(p.amountPaise) / 100).toFixed(2)}</td>
+            <td>
+              <strong>Order #${escapeHtml(p.orderId)}</strong>
+              <div style="font-size:0.72rem; font-family:monospace; color:var(--text-muted); margin-top:2px;">${escapeHtml(p.id)}</div>
+            </td>
+            <td><strong style="color:#f8fafc; font-size:0.92rem;">₹${(Number(p.amountPaise) / 100).toFixed(2)}</strong></td>
             <td>${escapeHtmlValue(p.method)}</td>
             <td><span class="badge ${p.status === 'SUCCESS' ? 'badge-success' : (p.status === 'ACTIVE' ? 'badge-info' : 'badge-danger')}">${escapeHtmlValue(p.status)}</span></td>
-            <td>${verifyBadge}</td>
-            <td>${sourcesChips}</td>
-            <td>${escapeHtmlValue(new Date(p.createdAt).toLocaleTimeString())}</td>
-            <td>${p.completedAt ? escapeHtmlValue(new Date(p.completedAt).toLocaleTimeString()) : '-'}</td>
+            <td>${payerHtml}</td>
+            <td>${bankHtml}</td>
+            <td>
+              ${verifyBadge}
+              ${sourcesChips ? `<div style="margin-top:0.25rem;">${sourcesChips}</div>` : ''}
+            </td>
+            <td><span style="font-size:0.78rem; color:#cbd5e1; white-space:nowrap;">${escapeHtml(dtStr)}</span></td>
           </tr>
         `;
         }).join('');

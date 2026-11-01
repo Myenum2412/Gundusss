@@ -420,10 +420,11 @@ export async function buildReceiptPdfData(
     // Non-blocking
   }
 
-  // 3. Extract transaction details (orderId, utr, payerVpa) from receipt fields or notes
+  // 3. Extract transaction details (orderId, utr, payerVpa, bankName) from receipt fields or notes
   let orderId = receipt.orderId || '';
   let utr = receipt.utr || '';
   let payerVpa = receipt.payerVpa || receipt.upiId || '';
+  let bankName = receipt.bankName || '';
 
   const notesStr = String(receipt.notes || '');
   if (!orderId) {
@@ -435,12 +436,16 @@ export async function buildReceiptPdfData(
     if (match) utr = match[1];
   }
   if (!payerVpa) {
-    const match = notesStr.match(/UPI:\s*([^\s·,]+)/i);
+    const match = notesStr.match(/UPI:\s*([^\s·,]+)/i) || notesStr.match(/Payer:\s*([^\s·,]+)/i);
     if (match) payerVpa = match[1];
+  }
+  if (!bankName) {
+    const match = notesStr.match(/Bank:\s*([^\s·,]+(?:\s+[^\s·,]+)?)/i);
+    if (match) bankName = match[1];
   }
 
   // If orderId found, see if we can look up order for more info
-  if (orderId && (!utr || !payerVpa || !studentData.studentName)) {
+  if (orderId && (!utr || !payerVpa || !bankName || !studentData.studentName)) {
     try {
       const orderRec = await getRecord<any>(
         APPWRITE_COLLECTIONS.paymentOrders,
@@ -449,6 +454,7 @@ export async function buildReceiptPdfData(
       if (orderRec?.data) {
         utr = utr || orderRec.data.utr;
         payerVpa = payerVpa || orderRec.data.payerVpa || orderRec.data.upiId;
+        bankName = bankName || orderRec.data.bankName;
         if (!studentData.studentName && orderRec.data.studentName) {
           studentData.studentName = orderRec.data.studentName;
         }
@@ -468,6 +474,7 @@ export async function buildReceiptPdfData(
     orderId: orderId || undefined,
     utr: utr || undefined,
     payerVpa: payerVpa || undefined,
+    bankName: bankName || undefined,
     student: {
       studentId: receipt.studentId || studentData.studentId || '—',
       studentName: receipt.studentName || studentData.studentName || 'Student',

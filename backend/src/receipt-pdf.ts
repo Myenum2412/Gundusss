@@ -10,6 +10,7 @@ export interface ReceiptPdfData {
   orderId?: string;
   utr?: string;
   payerVpa?: string;
+  bankName?: string;
 
   student: {
     studentId: string;
@@ -565,9 +566,16 @@ export async function generateReceiptPdf(data: ReceiptPdfData): Promise<Buffer> 
       ['Method', cleanMethod, false],
       ['Payment Date', paymentDate, false],
       ['Order / Ref ID', data.orderId || 'Counter Pass', false],
-      ['Bank Ref / UTR', data.utr || data.payerVpa || 'Recorded & Confirmed', false],
-      ['Amount Paid', formattedAmount, true],
     ];
+
+    if (data.bankName) {
+      paymentRows.push(['Bank', data.bankName, false]);
+    }
+    if (data.payerVpa) {
+      paymentRows.push(['Payer UPI', data.payerVpa, false]);
+    }
+    paymentRows.push(['Bank Ref / UTR', data.utr || (data.payerVpa ? 'Confirmed' : 'Recorded & Confirmed'), false]);
+    paymentRows.push(['Amount Paid', formattedAmount, true]);
 
     for (const [label, value, isAmount] of paymentRows) {
       doc

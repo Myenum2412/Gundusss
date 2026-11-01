@@ -1,4 +1,5 @@
 import { ObserverSource, ObservationAttributionStatus, toPaise, calculateObservationFingerprint } from '@youpi/common';
+import { detectIndianBank } from './bank-sms-parser.js';
 
 /**
  * Intelligent Monetary Amount Extractor.
@@ -141,6 +142,12 @@ export class ObservationNormalizer {
       }
     }
 
+    // 4b. Resolve Bank Name
+    let bankName = input.bankName || payload.bankName;
+    if (!bankName) {
+      bankName = detectIndianBank(textContent, payload.sender || payload.from, senderVpa) || undefined;
+    }
+
     // 5. Compute Deterministic Fingerprint
     const fingerprintHash = calculateObservationFingerprint({
       receivingAccountId: input.receivingAccountId,
@@ -157,9 +164,10 @@ export class ObservationNormalizer {
       observedAt: observedAtDate,
       senderVpa: senderVpa || undefined,
       bankReferenceNumber: bankRef || undefined,
+      bankName: bankName || undefined,
       fingerprintHash,
       attributionStatus: ObservationAttributionStatus.UNATTRIBUTED,
-      rawPayload: payload
+      rawPayload: { ...payload, bankName, senderVpa, bankReferenceNumber: bankRef }
     };
   }
 }

@@ -544,6 +544,19 @@ export default function ReceiptsPage() {
                     <DetailItem label="Status">
                       <StatusBadge value={viewReceipt.status} />
                     </DetailItem>
+                    {viewReceipt.payerVpa && (
+                      <DetailItem label="Payer UPI ID">
+                        <span className="font-mono text-sky-700 dark:text-sky-400 font-medium">{viewReceipt.payerVpa}</span>
+                      </DetailItem>
+                    )}
+                    {viewReceipt.bankName && (
+                      <DetailItem label="Bank Name">{viewReceipt.bankName}</DetailItem>
+                    )}
+                    {viewReceipt.utr && (
+                      <DetailItem label="UTR / Ref">
+                        <span className="font-mono">{viewReceipt.utr}</span>
+                      </DetailItem>
+                    )}
                     <DetailItem label="Notes">{viewReceipt.notes || "—"}</DetailItem>
                   </DetailList>
 
@@ -653,7 +666,20 @@ export default function ReceiptsPage() {
                 receipts.map((r, i) => (
                   <TableRow key={`${r.receiptId}-${i}`}>
                     <TableCell className="text-muted-foreground">{i + 1}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{r.receiptId}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      <div>{r.receiptId}</div>
+                      {r.payerVpa && (
+                        <div className="text-[10px] text-sky-700 dark:text-sky-400 font-medium">
+                          UPI: {r.payerVpa}
+                        </div>
+                      )}
+                      {(r.bankName || r.utr) && (
+                        <div className="text-[10px] text-muted-foreground font-sans">
+                          {r.bankName ? <span className="font-medium text-foreground">{r.bankName}</span> : null}
+                          {r.utr ? <span className="ml-1 font-mono text-[9px]">UTR: {r.utr}</span> : null}
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell className="font-medium text-foreground" title={r.studentId}>
                       {r.studentName} <span className="font-mono text-xs font-normal text-muted-foreground">({r.studentId})</span>
                     </TableCell>

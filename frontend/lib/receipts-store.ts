@@ -11,6 +11,9 @@ export interface StoredReceipt {
   paymentDate: string;
   status: string;
   notes: string;
+  utr?: string;
+  payerVpa?: string;
+  bankName?: string;
 }
 
 // Appwrite (through the API) is the only source of truth. Nothing is cached in

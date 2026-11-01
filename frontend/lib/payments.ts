@@ -24,6 +24,7 @@ export interface PaymentOrder {
   utr: string
   upiId?: string
   payerVpa?: string
+  bankName?: string
   institutionName?: string
   amount: string
   studentId: string
@@ -209,6 +210,8 @@ export function confirmPayment(
     method?: string
     amount?: number | string
     notes?: string
+    payerVpa?: string
+    bankName?: string
   }
 ): Promise<PaymentOrder> {
   return request<PaymentOrder>(`/api/payments/${encodeURIComponent(id)}/confirm`, {

@@ -534,6 +534,36 @@ export class PaymentSessionRepository {
       const targetStatus = wantsSuccess ? PaymentStatus.SUCCESS : session.status;
       const now = new Date().toISOString();
 
+      // Resolve observation payer and bank details to persist into session metadata
+      let newMetadata = session.metadata || {};
+      if (observationId) {
+        try {
+          const obsRow = this.db.queryOne(
+            'SELECT bank_reference_number, sender_vpa, raw_payload, observed_at FROM payment_observations WHERE id = ?',
+            [observationId]
+          );
+          if (obsRow) {
+            let bankName = '';
+            let rawSenderVpa = obsRow.sender_vpa;
+            if (obsRow.raw_payload) {
+              try {
+                const raw = JSON.parse(obsRow.raw_payload);
+                if (raw.bankName) bankName = raw.bankName;
+                if (!rawSenderVpa && raw.senderVpa) rawSenderVpa = raw.senderVpa;
+              } catch {}
+            }
+            newMetadata = {
+              ...newMetadata,
+              payerVpa: rawSenderVpa || newMetadata.payerVpa || '',
+              utr: obsRow.bank_reference_number || newMetadata.utr || '',
+              bankReference: obsRow.bank_reference_number || newMetadata.bankReference || '',
+              bankName: bankName || newMetadata.bankName || '',
+              paidAt: obsRow.observed_at || newMetadata.paidAt || now
+            };
+          }
+        } catch {}
+      }
+
       this.db.execute(`
         UPDATE payment_sessions
         SET status = ?,
@@ -542,6 +572,7 @@ export class PaymentSessionRepository {
             verification_tag = ?,
             attributed_observation_id = COALESCE(attributed_observation_id, ?),
             completed_at = COALESCE(completed_at, ?),
+            metadata = ?,
             updated_at = ?
         WHERE id = ?
       `, [
@@ -551,6 +582,7 @@ export class PaymentSessionRepository {
         tag,
         observationId,
         targetStatus === PaymentStatus.SUCCESS ? now : null,
+        JSON.stringify(newMetadata),
         now,
         sessionId
       ]);

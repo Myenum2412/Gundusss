@@ -1,6 +1,35 @@
 import { toPaise } from '@youpi/common';
 
 /**
+ * Detects Indian bank from SMS/Email body, sender header/address, or UPI handle.
+ * @param {string} text
+ * @param {string} [sender]
+ * @param {string} [vpa]
+ * @returns {string | null}
+ */
+export function detectIndianBank(text, sender, vpa) {
+  const combined = `${sender || ''} ${text || ''} ${vpa || ''}`.toLowerCase();
+
+  if (/@okhdfcbank\b|hdfc\b|hdfcbk/i.test(combined)) return 'HDFC Bank';
+  if (/@oksbi\b|sbi\b|sbinb|sbiupi|state bank of india/i.test(combined)) return 'State Bank of India';
+  if (/@okicici\b|icici\b|icicib/i.test(combined)) return 'ICICI Bank';
+  if (/@okaxis\b|@axl\b|axis\b|axisbk/i.test(combined)) return 'Axis Bank';
+  if (/@kotak\b|kotak\b|kotakb/i.test(combined)) return 'Kotak Mahindra Bank';
+  if (/@paytm\b|paytm\b|paytmb/i.test(combined)) return 'Paytm Payments Bank';
+  if (/@ybl\b|@ibl\b|yes\s*bank/i.test(combined)) return 'YES Bank';
+  if (/@barodampay\b|bob\b|bank of baroda/i.test(combined)) return 'Bank of Baroda';
+  if (/@pnb\b|punjab national bank|pnbsms/i.test(combined)) return 'Punjab National Bank';
+  if (/@cnrb\b|@canarabank\b|canara bank/i.test(combined)) return 'Canara Bank';
+  if (/@unionbank\b|union bank/i.test(combined)) return 'Union Bank of India';
+  if (/@idfcbank\b|idfc/i.test(combined)) return 'IDFC First Bank';
+  if (/@federal\b|federal bank/i.test(combined)) return 'Federal Bank';
+  if (/@indus\b|indusind/i.test(combined)) return 'IndusInd Bank';
+  if (/@postbank\b|ippb/i.test(combined)) return 'India Post Payments Bank';
+
+  return null;
+}
+
+/**
  * Intelligent Monetary Amount Extractor for Indian UPI & Bank SMS.
  * Extracts amounts with prefix (Rs. 200, INR 500, ₹50), suffix (20.00 Rs),
  * proximity words ("20.00 received", "credited with 20.00"),
@@ -171,11 +200,15 @@ export class BankSmsParser {
       }
     }
 
+    // 5. Detect Bank Name
+    const bankName = detectIndianBank(text, sms.sender, senderVpa);
+
     return {
       amountPaise: extractedAmount.amountPaise,
       amount: extractedAmount.amountStr,
       bankReferenceNumber: bankRef,
       senderVpa,
+      bankName: bankName || undefined,
       observedAt,
       rawText: text
     };

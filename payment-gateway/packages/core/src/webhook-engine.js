@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { generateHmac, toRupeesString, validateOutboundWebhookUrl } from '@youpi/common';
 import { isTerminalStatus, toPublicOutcome } from './state-machine.js';
+import { detectIndianBank } from './bank-sms-parser.js';
 
 export class WebhookEngine {
   /**
@@ -73,19 +74,37 @@ export class WebhookEngine {
       return { delivered: false, deliveryId, status: 400, error: `Webhook delivery blocked: ${endpointCheck.error}` };
     }
 
-    // 3. Resolve UTR / bank reference number if attributed
-    // The bank reference (UTR/RRN) lives on the attributed observation, not on the
-    // session row. Merchants need it to reconcile a webhook against their bank
-    // statement, and it is part of the documented webhook contract.
-    let utr = session.utr || session.bankReferenceNumber || session.bank_reference_number || '';
-    if (!utr && session.attributedObservationId) {
+    // 3. Resolve UTR / bank reference number, payer VPA, and bank name if attributed
+    let utr = session.utr || session.bankReferenceNumber || session.bank_reference_number || session.metadata?.utr || '';
+    let payerVpa = session.payerVpa || session.payer_vpa || session.metadata?.payerVpa || '';
+    let bankName = session.bankName || session.bank_name || session.metadata?.bankName || '';
+    let completedAt = session.completedAt ? (typeof session.completedAt.toISOString === 'function' ? session.completedAt.toISOString() : String(session.completedAt)) : null;
+
+    if (session.attributedObservationId) {
       try {
         const obsRow = this.db.queryOne(
-          'SELECT bank_reference_number FROM payment_observations WHERE id = ?',
+          'SELECT bank_reference_number, sender_vpa, raw_payload, observed_at FROM payment_observations WHERE id = ?',
           [session.attributedObservationId]
         );
-        if (obsRow?.bank_reference_number) utr = obsRow.bank_reference_number;
+        if (!utr && obsRow?.bank_reference_number) utr = obsRow.bank_reference_number;
+        if (!payerVpa && obsRow?.sender_vpa) payerVpa = obsRow.sender_vpa;
+        if (obsRow?.raw_payload) {
+          try {
+            const raw = JSON.parse(obsRow.raw_payload);
+            if (!bankName && raw.bankName) bankName = raw.bankName;
+            if (!payerVpa && raw.senderVpa) payerVpa = raw.senderVpa;
+          } catch {}
+        }
+        if (!completedAt && obsRow?.observed_at) completedAt = new Date(obsRow.observed_at).toISOString();
       } catch {}
+    }
+
+    if (!bankName && payerVpa) {
+      bankName = detectIndianBank('', '', payerVpa) || '';
+    }
+
+    if (!completedAt) {
+      completedAt = new Date().toISOString();
     }
 
     const deliveryId = crypto.randomUUID();
@@ -104,10 +123,20 @@ export class WebhookEngine {
       currency: session.currency || 'INR',
       method: session.method || 'UPI',
       utr: String(utr || ''),
+      payerVpa: String(payerVpa || ''),
+      bankName: String(bankName || ''),
+      bankReference: String(utr || ''),
       verificationTag: session.verificationTag || session.verification_tag || (session.method === 'COD' ? 'COD_ORDER_PLACED' : 'UNVERIFIED'),
       verificationLevel: session.verificationLevel != null ? Number(session.verificationLevel) : (session.verification_level != null ? Number(session.verification_level) : (session.method === 'COD' ? 1 : 0)),
-      completedAt: session.completedAt ? (typeof session.completedAt.toISOString === 'function' ? session.completedAt.toISOString() : String(session.completedAt)) : new Date().toISOString(),
-      metadata: session.metadata || {}
+      completedAt,
+      metadata: {
+        ...(session.metadata || {}),
+        payerVpa: String(payerVpa || ''),
+        bankName: String(bankName || ''),
+        bankReference: String(utr || ''),
+        utr: String(utr || ''),
+        completedAt
+      }
     };
 
     const payloadString = JSON.stringify(payloadObj);
