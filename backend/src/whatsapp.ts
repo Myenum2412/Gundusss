@@ -594,49 +594,36 @@ async function performSend(
 
   const plainText = message.trim();
 
-  // Pure text + CTA: send as official WhatsApp native interactive CTA-URL button bubble.
-  // Falls back gracefully to standard text with payment link if the interactive send fails.
+  // When CTA (Pay Now / Open link) is provided:
+  // Note: Meta WhatsApp strictly restricts interactive nativeFlowMessage / interactiveMessage
+  // buttons to verified WhatsApp Business Cloud API accounts (via Meta Graph API).
+  // When sent from an unofficial Web Companion device (Baileys/QR), the recipient's WhatsApp
+  // client (especially Android and iOS) refuses to decrypt the custom button flow and displays
+  // "Waiting for this message. This may take a while. Learn more", causing Signal ratchet failure.
+  // Standard formatted WhatsApp text with bold styling, emojis, and checkout link delivers
+  // instantly and decrypts reliably on 100% of devices.
   if (cta && cta.url) {
-    let sentInteractive = false;
-    try {
-      const footer = cta.footer || '— Accounts Desk';
-      const waMsg = buildCtaUrlMessage(
-        jid,
-        plainText || 'Please tap the button below to continue:',
-        footer,
-        cta,
-        sock?.user?.id
-      );
-      const msgId = waMsg.key?.id || ('3EB0' + randomBytes(8).toString('hex').toUpperCase());
-      await sock.relayMessage(jid, waMsg.message, { messageId: msgId });
-      firstId = msgId;
-      sentInteractive = true;
-      if (waMsg.message) {
-        persistMessage(msgId, jid, waMsg.message);
-      }
-      console.log(`[wa] Sent interactive CTA URL button message to ${jid} (id: ${msgId})`);
-    } catch (err: any) {
-      console.warn(`[wa] Interactive CTA send failed, falling back to standard text: ${err?.message ?? err}`);
+    let fullText = plainText;
+    const btnLabel = cta.displayText?.trim() || 'Pay Now';
+    const ctaSection = `\n\n💳 *${btnLabel}:*\n👉 ${cta.url}`;
+    if (!fullText) {
+      fullText = `💳 *${btnLabel}:*\n👉 ${cta.url}`;
+    } else if (!fullText.includes(cta.url)) {
+      fullText = `${fullText}${ctaSection}`;
+    }
+    if (cta.footer && !fullText.includes(cta.footer)) {
+      fullText = `${fullText}\n\n_${cta.footer}_`;
     }
 
-    if (!sentInteractive) {
-      let fallbackText = plainText;
-      const ctaSection = `\n\n💳 *${cta.displayText || 'Pay Now'}:*\n👉 ${cta.url}`;
-      if (!fallbackText) {
-        fallbackText = `💳 *${cta.displayText || 'Pay Now'}:*\n👉 ${cta.url}`;
-      } else if (!fallbackText.includes(cta.url)) {
-        fallbackText = `${fallbackText}${ctaSection}`;
-      }
-      const sent = await sock.sendMessage(jid, { text: fallbackText });
-      firstId = sent?.key?.id ?? null;
-      if (firstId) {
-        persistMessage(firstId, jid, {
-          conversation: fallbackText,
-          extendedTextMessage: { text: fallbackText },
-        });
-      }
-      console.log(`[wa] Sent fallback text message to ${jid} (id: ${firstId})`);
+    const sent = await sock.sendMessage(jid, { text: fullText });
+    firstId = sent?.key?.id ?? null;
+    if (firstId) {
+      persistMessage(firstId, jid, {
+        conversation: fullText,
+        extendedTextMessage: { text: fullText },
+      });
     }
+    console.log(`[wa] Sent message to ${jid} (id: ${firstId})`);
   } else if (plainText) {
     const protoPayload = {
       conversation: plainText,
