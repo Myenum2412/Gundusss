@@ -78,7 +78,7 @@ export function toPublicUser(user: UserRecord): PublicUser {
     role: normalizeRole(user.role),
     active: user.active !== false,
     profile_id: (user.profile_id ?? '').trim(),
-    super: user.super === true,
+    super: isSuperUser(user),
     created_at: user.created_at,
   };
 }

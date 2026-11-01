@@ -67,14 +67,15 @@ type GatewaySection = "control-center" | "merchant-admin"
 // get this panel.
 function gatewayConsoleUrl(token: string | null, section: GatewaySection = "control-center"): string {
   if (typeof window === "undefined") return ""
+  const resolvedToken = token || getToken()
   const params = new URLSearchParams()
-  if (token) params.set("fees_token", token)
+  if (resolvedToken) params.set("fees_token", resolvedToken)
   params.set("section", section === "merchant-admin" ? "operations" : "control-center")
   const query = `?${params.toString()}`
   if (/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
     return `http://127.0.0.1:6001/${query}`
   }
-  return token ? `https://api.myenum.in/youpi-admin/${query}` : ""
+  return resolvedToken ? `https://api.myenum.in/youpi-admin/${query}` : ""
 }
 
 function CopyLinkButton({ value }: { value: string }) {
@@ -109,8 +110,8 @@ export default function OrgMenuDashboardPage() {
   const [profiles, setProfiles] = useState<ProfileSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  // Session token (first-party cookie) — read after mount so SSR renders safely.
-  const [sessionToken, setSessionToken] = useState<string | null>(null)
+  // Session token (first-party cookie) — read safely.
+  const [sessionToken, setSessionToken] = useState<string | null>(() => (typeof window !== "undefined" ? getToken() : null))
   const [gatewaySection, setGatewaySection] = useState<GatewaySection>("control-center")
   useEffect(() => {
     setSessionToken(getToken())

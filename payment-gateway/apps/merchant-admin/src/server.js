@@ -118,6 +118,7 @@ export class AdminServer {
     // This completely eliminates CORS errors, tunnel downtime 530s, and cross-origin failures.
     const clientApiBase = '';
     html = html.replaceAll('{{API_BASE_URL}}', clientApiBase);
+    html = html.replaceAll('{{ADMIN_API_TOKEN}}', getAdminToken());
     return html;
   }
 
@@ -172,7 +173,7 @@ export class AdminServer {
       // we re-validate with the fees backend's gate and hand out the admin
       // token ONLY when the session belongs to an active SUPER admin. Never
       // cached, and the panel strips the JWT from its URL immediately.
-      if (pathname === '/api/admin/session') {
+      if (pathname === '/api/admin/session' || pathname.endsWith('/api/admin/session')) {
         let raw = '';
         req.on('data', (chunk) => { raw += chunk; if (raw.length > 16384) req.destroy(); });
         req.on('end', async () => {
@@ -333,12 +334,20 @@ export class AdminServer {
 
       // Dashboard View: GET / or GET /admin or GET /control-center or GET /logs or GET /merchant-admin or GET /hub
       if (pathname === '/' || pathname === '/admin' || pathname === '/control-center' || pathname === '/logs' || pathname === '/merchant-admin' || pathname === '/hub') {
-        const html = this.renderHtml();
-        res.writeHead(200, {
+        const feesToken = (url.searchParams.get('fees_token') || '').trim();
+        const headers = {
           'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'no-cache',
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
           ...BASE_SECURITY_HEADERS
-        });
+        };
+        if (feesToken) {
+          headers['Set-Cookie'] = [
+            `fees_session=${encodeURIComponent(feesToken)}; Path=/; Max-Age=43200; HttpOnly; SameSite=Lax` +
+              (String(req.headers['x-forwarded-proto'] || '').includes('https') ? '; Secure' : '')
+          ];
+        }
+        const html = this.renderHtml();
+        res.writeHead(200, headers);
         res.end(html);
         return;
       }

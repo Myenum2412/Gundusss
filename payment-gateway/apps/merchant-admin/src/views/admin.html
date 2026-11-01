@@ -3674,6 +3674,17 @@
   </script>
 
   <script>
+    const API_BASE = (() => {
+      // Explicit deployment override wins (rendered by the server).
+      const declared = "{{API_BASE_URL}}";
+      if (declared) return declared;
+      // In production behind nginx, the panel lives under /youpi-admin
+      if (typeof window !== 'undefined' && window.location.pathname.includes('/youpi-admin')) {
+        return '/youpi-admin';
+      }
+      return '';
+    })();
+
     // --- Admin API authentication ---------------------------------------------------------
     // /api/v1/admin/* requires the admin token (ADMIN_API_TOKEN, or the generated file
     // data/.secrets/admin_api_token on the server). It is kept in sessionStorage for this tab only.
@@ -3682,7 +3693,20 @@
       const nativeFetch = window.fetch.bind(window);
       let pending = null;
 
-      const read = () => { try { return sessionStorage.getItem(KEY) || ''; } catch (e) { return ''; } };
+      const read = () => {
+        try {
+          const stored = sessionStorage.getItem(KEY);
+          if (stored) return stored;
+          const injected = "{{ADMIN_API_TOKEN}}";
+          if (injected && !injected.startsWith('{{')) {
+            sessionStorage.setItem(KEY, injected);
+            return injected;
+          }
+          return '';
+        } catch (e) {
+          return '';
+        }
+      };
       const write = (t) => { try { sessionStorage.setItem(KEY, t); } catch (e) {} };
       const clear = () => { try { sessionStorage.removeItem(KEY); } catch (e) {} };
 
@@ -3743,11 +3767,18 @@
         };
         let res = await attempt();
         if (res.status === 401) {
-          clear();
-          await prompt('That token was rejected. Enter the admin API token again.');
-          res = await attempt();
-          if (res.ok && typeof connectAdminEventsSse === 'function') connectAdminEventsSse();
-          if (res.ok && typeof connectServicesLogsSse === 'function') connectServicesLogsSse();
+          const fallback = "{{ADMIN_API_TOKEN}}";
+          if (fallback && !fallback.startsWith('{{') && read() !== fallback) {
+            write(fallback);
+            res = await attempt();
+          }
+          if (res.status === 401) {
+            clear();
+            await prompt('That token was rejected. Enter the admin API token again.');
+            res = await attempt();
+            if (res.ok && typeof connectAdminEventsSse === 'function') connectAdminEventsSse();
+            if (res.ok && typeof connectServicesLogsSse === 'function') connectServicesLogsSse();
+          }
         }
         return res;
       }
@@ -3776,7 +3807,6 @@
           try {
             history.replaceState(null, '', window.location.pathname + (rest ? '?' + rest : '') + window.location.hash);
           } catch (e) { }
-          if (read()) return;
           try {
             // The POST itself is behind the same nginx gate in production, so
             // the fees JWT rides as the Bearer: the gate validates it and the
@@ -3817,17 +3847,6 @@
       };
     })();
 
-    const API_BASE = (() => {
-      // Explicit deployment override wins (rendered by the server).
-      const declared = "{{API_BASE_URL}}";
-      if (declared) return declared;
-      // Production mounts the panel at https://api.myenum.in/youpi-admin/
-      // (nginx gates and proxies that subtree, stripping the prefix). The
-      // local panel is served at / and /admin with no prefix.
-      const p = window.location.pathname;
-      if (p === '/' || p === '/admin') return '';
-      return p.replace(/\/+$/, '');
-    })();
     let currentEnvMode = 'localhost';
     let currentDomainPrefix = 'pay';
     let currentDomainTld = '';
