@@ -431,11 +431,16 @@ describe('Payment API End-to-End HTTP Integration Tests', () => {
   });
 
   test('Payment timer does not start until customer logs in or signs up', async () => {
-    // Ensure slot is clean
-    const prevActive = serverInstance.app.context.sessionRepo.findCurrentActiveOrProcessing('00000000-0000-0000-0000-000000000002');
-    if (prevActive) {
-      serverInstance.app.context.sessionRepo.transitionToTerminal(prevActive.id, PaymentStatus.CANCELLED);
-    }
+    // Ensure all slots and queues are completely clean
+    testDb.execute(`
+      UPDATE payment_sessions
+      SET status = 'CANCELLED'
+      WHERE status IN ('ACTIVE', 'PROCESSING', 'QUEUED')
+    `);
+    testDb.execute(`
+      UPDATE payment_receiving_accounts
+      SET is_slot_busy = 0, current_active_session_id = NULL
+    `);
 
     // 1. Create a payment without pre-authenticated customer
     const createRes = await request('/api/v1/payments', {

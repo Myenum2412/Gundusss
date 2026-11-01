@@ -1209,13 +1209,6 @@
       <!-- Theme: System (default) / Light / Dark -->
       <div class="theme-switch" role="radiogroup" aria-label="Colour theme"><button type="button" role="radio" data-theme-pref="system" onclick="setThemePref('system')" title="Follow system setting"><svg class="i" aria-hidden="true"><use href="#i-computer-desktop"/></svg>System</button><button type="button" role="radio" data-theme-pref="light" onclick="setThemePref('light')" title="Light theme"><svg class="i" aria-hidden="true"><use href="#i-sun"/></svg>Light</button><button type="button" role="radio" data-theme-pref="dark" onclick="setThemePref('dark')" title="Dark theme"><svg class="i" aria-hidden="true"><use href="#i-moon"/></svg>Dark</button></div>
 
-      <!-- YOUPI Store Port 5000 Switch Badge -->
-      <div class="store-switch-badge is-offline" id="headerStoreBadge" onclick="toggleYoupiStore()"
-        title="Click to 1-Click Enable/Disable YOUPI Showcase Store on Port 5000">
-        <span id="headerStoreDot">●</span>
-        <span id="headerStoreText">Store (5000): Checking...</span>
-      </div>
-
       <!-- Active VPA Display -->
       <span class="badge badge-info" id="accountVpaDisplay" style="cursor:pointer;"
         onclick="switchSection('storeSettings', 'subTabVpa')">
@@ -2714,36 +2707,6 @@
           </div>
         </div>
 
-        <!-- YOUPI SHOWCASE STORE PORT 5000 MASTER TOGGLE CARD -->
-        <div class="card"
-          style="border:2px solid #38bdf8; background:linear-gradient(135deg, rgba(56,189,248,0.06) 0%, rgba(15,23,42,0.95) 100%);">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
-            <div>
-              <div style="display:flex; align-items:center; gap:0.6rem;">
-                <span style="font-size:1.35rem;">🛍️</span>
-                <strong style="font-size:1.15rem; color:#ffffff;">YOUPI Showcase Store (Port 5000)</strong>
-                <span class="badge" id="cardStoreBadge"
-                  style="font-size:0.8rem; padding:0.3rem 0.75rem;">CHECKING...</span>
-              </div>
-              <p
-                style="font-size:0.84rem; color:var(--text-muted); margin-top:0.4rem; max-width:720px; line-height:1.5;">
-                Toggle the public YOUPI Showcase Store on or off anytime. When disabled, the Node process is terminated
-                and host port <code>5000</code> is freed. When enabled, it launches instantly.
-              </p>
-            </div>
-            <div style="display:flex; align-items:center; gap:0.75rem;">
-              <a href="http://localhost:5000" id="btnOpenStoreLink" target="_blank" class="btn btn-secondary"
-                style="font-size:0.85rem; padding:0.6rem 1.1rem; text-decoration:none;">
-                🌐 Open Store (5000) ↗
-              </a>
-              <button class="btn btn-primary" id="btnToggleYoupiStore"
-                style="font-size:0.88rem; padding:0.65rem 1.4rem;" onclick="toggleYoupiStore()">
-                ⚡ Toggle Port 5000
-              </button>
-            </div>
-          </div>
-        </div>
-
         <!-- MANAGED PROCESSES SUPERVISOR TABLE -->
         <div class="card">
           <div class="card-header">
@@ -2792,9 +2755,7 @@
               <select id="logServiceFilter" style="padding:0.4rem 0.75rem; font-size:0.78rem;" onchange="filterLogs()">
                 <option value="ALL">All Services</option>
                 <option value="payment-api">payment-api (6100)</option>
-                <option value="checkout-portal">checkout-portal (7000)</option>
                 <option value="merchant-admin">merchant-admin (6001)</option>
-                <option value="coin-wallet-store">coin-wallet-store (5000)</option>
                 <option value="sms-observer">sms-observer (6002)</option>
                 <option value="gmail-observer">gmail-observer (6003)</option>
               </select>
@@ -2833,8 +2794,8 @@
                 <span class="badge badge-primary" id="badgeLocalhostActive">ACTIVE</span>
               </div>
               <p style="font-size:0.8rem; color:var(--text-muted); margin:0; line-height:1.4;">
-                Routes API, Checkout, and Observers directly over local developer ports (<code>7000</code>,
-                <code>6100</code>, <code>6001</code>, <code>6003</code>, <code>5000</code>).
+                Routes API, Merchant Admin, and Observers directly over local developer ports (<code>6100</code>,
+                <code>6001</code>, <code>6003</code>).
               </p>
             </div>
 
@@ -4009,7 +3970,7 @@
       } else if (sectionId === 'developerHub') {
         items = [
           { id: 'subViewDevSimulator', label: '🎮 Payment Simulator', viewId: 'subViewDevSimulator' },
-          { id: 'subViewDevSupervisor', label: '🖥️ System Supervisor & Store (5000)', viewId: 'subViewDevSupervisor' },
+          { id: 'subViewDevSupervisor', label: '🖥️ System Supervisor', viewId: 'subViewDevSupervisor' },
           { id: 'subViewDevCloudflare', label: '☁️ Cloudflare Tunnel', viewId: 'subViewDevCloudflare' },
           { id: 'subViewDevWebhooks', label: '🔐 Webhooks & Secrets', viewId: 'subViewDevWebhooks' },
           { id: 'subViewDevAndroid', label: '📱 Android SMS Hub', viewId: 'subViewDevAndroid' },
@@ -4106,7 +4067,8 @@
         return;
       }
 
-      tbody.innerHTML = services.map(s => {
+      const filtered = (services || []).filter(s => s.id !== 'coin-wallet-store' && s.id !== 'checkout-portal');
+      tbody.innerHTML = filtered.map(s => {
         const isRunning = s.status === 'RUNNING';
         const isStarting = s.status === 'STARTING';
         const badgeClass = isRunning ? 'badge-success' : (isStarting ? 'badge-warning' : 'badge-danger');
@@ -4117,13 +4079,10 @@
           ? (upSec >= 3600 ? `${Math.floor(upSec / 3600)}h ${Math.floor((upSec % 3600) / 60)}m` : `${Math.floor(upSec / 60)}m ${upSec % 60}s`)
           : '-';
 
-        const isStore = s.id === 'coin-wallet-store';
-
         return `
-        <tr style="${isStore ? 'background:rgba(56,189,248,0.03);' : ''}">
+        <tr>
           <td>
             <strong>${escapeHtml(s.name)}</strong>
-            ${isStore ? '<span class="badge badge-info" style="font-size:0.68rem; margin-left:0.4rem;">Demo Store</span>' : ''}
             <div style="font-size:0.75rem; color:var(--text-muted); font-family:monospace;">${escapeHtml(s.id)}</div>
           </td>
           <td><code style="color:#f59e0b; background:#070c17; padding:2px 6px; border-radius:4px; font-weight:700;">${s.port}</code></td>
@@ -5203,7 +5162,7 @@
       if (currentEnvMode === 'production' && tld) {
         return `https://${prefix}.${tld}`;
       }
-      return 'http://localhost:7000';
+      return 'http://localhost:6100';
     }
 
     function setEnvMode(mode, save = true) {
@@ -5252,16 +5211,8 @@
 
       const routes = [
         {
-          key: 'checkout',
-          serviceName: '1. Checkout',
-          hostname: mkHost(cleanPrefix),
-          serviceUrl: 'http://localhost:7000',
-          purpose: 'Customer checkout / checkout portal',
-          optional: false
-        },
-        {
           key: 'api',
-          serviceName: '2. Payment API',
+          serviceName: '1. Payment API',
           hostname: mkHost(`${cleanPrefix}-api`),
           serviceUrl: 'http://localhost:6100',
           purpose: 'Payment API / merchant API / SSE / observer ingestion',
@@ -5269,7 +5220,7 @@
         },
         {
           key: 'admin',
-          serviceName: '3. Merchant Admin',
+          serviceName: '2. Merchant Admin',
           hostname: mkHost(`${cleanPrefix}-admin`),
           serviceUrl: 'http://localhost:6001',
           purpose: 'Merchant/Admin panel',
@@ -5277,19 +5228,11 @@
         },
         {
           key: 'gmail',
-          serviceName: '4. Gmail OAuth / Gmail Observer',
+          serviceName: '3. Gmail OAuth / Gmail Observer',
           hostname: mkHost(`${cleanPrefix}-gmail`),
           serviceUrl: 'http://localhost:6003',
           purpose: 'Gmail OAuth callback and Gmail observation service',
           optional: false
-        },
-        {
-          key: 'store',
-          serviceName: '5. Demo Store',
-          hostname: mkHost(`${cleanPrefix}-store`),
-          serviceUrl: 'http://localhost:5000',
-          purpose: 'Reference/demo store',
-          optional: true
         }
       ];
 
@@ -5334,15 +5277,7 @@
 
       const text = `CLOUDFLARE TUNNEL ROUTES
 
-1. Checkout
-   Public Hostname:
-       ${prefix}.${domain}
-   Service URL:
-       http://localhost:7000
-   Purpose:
-       Customer checkout / checkout portal
-
-2. Payment API
+1. Payment API
    Public Hostname:
        ${prefix}-api.${domain}
    Service URL:
@@ -5350,7 +5285,7 @@
    Purpose:
        Payment API / merchant API / SSE / observer ingestion
 
-3. Merchant Admin
+2. Merchant Admin
    Public Hostname:
        ${prefix}-admin.${domain}
    Service URL:
@@ -5358,24 +5293,16 @@
    Purpose:
        Merchant/Admin panel
 
-4. Gmail OAuth / Gmail Observer
+3. Gmail OAuth / Gmail Observer
    Public Hostname:
        ${prefix}-gmail.${domain}
    Service URL:
        http://localhost:6003
    Purpose:
-       Gmail OAuth callback and Gmail observation service
-
-5. Demo Store (OPTIONAL)
-   Public Hostname:
-       ${prefix}-store.${domain}
-   Service URL:
-       http://localhost:5000
-   Purpose:
-       Reference/demo store`;
+       Gmail OAuth callback and Gmail observation service`;
 
       navigator.clipboard.writeText(text).then(() => {
-        showAdminToast('All 5 Cloudflare mappings copied to clipboard!');
+        showAdminToast('All 3 Cloudflare mappings copied to clipboard!');
       }).catch(() => {
         showAdminToast('Clipboard copy failed.', false);
       });

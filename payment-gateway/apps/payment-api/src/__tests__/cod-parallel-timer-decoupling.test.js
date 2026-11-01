@@ -13,7 +13,7 @@ describe('COD Parallel Timer & UPI Queue Decoupling Suite', () => {
 
   before(async () => {
     testDb = new Database({ inMemory: true });
-    apiInstance = await startPaymentApi(6196, testDb);
+    apiInstance = await startPaymentApi(6216, testDb);
     baseUrl = `http://localhost:${apiInstance.port}`;
 
     const merchantId = '00000000-0000-0000-0000-000000000001';

@@ -105,11 +105,9 @@ console.log(runInLocalhostMode
   : '🟢 YOUPI PG V2 PRODUCTION GATEWAY ONLINE & ACTIVE');
 console.log('====================================================');
 console.log(runInLocalhostMode ? 'LOCAL SERVICE ROUTES:' : 'AUTHORITATIVE PUBLIC CLOUDFLARE ROUTES:');
-console.log(`• Checkout Portal:      ${runtimeUrls.checkoutUrl}  (-> :7000)`);
 console.log(`• Payment Core API:     ${runtimeUrls.apiUrl}  (-> :6100)`);
 console.log(`• Merchant Admin Hub:   ${runtimeUrls.adminUrl}  (-> :6001)`);
 console.log(`• Gmail OAuth/Observer: ${runtimeUrls.gmailUrl}  (-> :6003)`);
-console.log(`• Demo Store (Opt):     ${runtimeUrls.storeUrl}  (-> :5000)`);
 console.log('----------------------------------------------------');
 console.log('OBSERVATION CHANNELS:');
 console.log('• Android SMS Observer: Native APK -> Public Payment API');

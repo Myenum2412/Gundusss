@@ -26,17 +26,6 @@ export class ProcessManager extends EventEmitter {
         pid: null
       },
       {
-        id: 'checkout-portal',
-        name: 'Checkout Portal',
-        script: path.join(rootDir, 'apps/checkout-portal/src/index.js'),
-        port: Number(process.env.CHECKOUT_PORTAL_PORT || 7000),
-        healthPath: '/health',
-        child: null,
-        status: 'STOPPED',
-        startTime: null,
-        pid: null
-      },
-      {
         id: 'merchant-admin',
         name: 'Merchant Admin Dashboard',
         script: path.join(rootDir, 'apps/merchant-admin/src/index.js'),
@@ -63,17 +52,6 @@ export class ProcessManager extends EventEmitter {
         name: 'Google Messages / SMS Observer (Legacy)',
         script: path.join(rootDir, 'apps/sms-observer/src/index.js'),
         port: Number(process.env.SMS_OBSERVER_PORT || 6002),
-        healthPath: '/health',
-        child: null,
-        status: 'STOPPED',
-        startTime: null,
-        pid: null
-      },
-      {
-        id: 'coin-wallet-store',
-        name: 'YOUPI Showcase Store (Demo)',
-        script: path.join(rootDir, 'apps/coin-wallet-store/src/index.js'),
-        port: Number(process.env.COIN_STORE_PORT || 5000),
         healthPath: '/health',
         child: null,
         status: 'STOPPED',
