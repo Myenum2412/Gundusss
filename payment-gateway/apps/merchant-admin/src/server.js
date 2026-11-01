@@ -331,8 +331,8 @@ export class AdminServer {
         }
       }
 
-      // Dashboard View: GET / or GET /admin
-      if (pathname === '/' || pathname === '/admin') {
+      // Dashboard View: GET / or GET /admin or GET /control-center or GET /logs or GET /merchant-admin or GET /hub
+      if (pathname === '/' || pathname === '/admin' || pathname === '/control-center' || pathname === '/logs' || pathname === '/merchant-admin' || pathname === '/hub') {
         const html = this.renderHtml();
         res.writeHead(200, {
           'Content-Type': 'text/html; charset=utf-8',

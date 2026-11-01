@@ -1245,6 +1245,10 @@
       <span>🏪</span>
       <span>Daily Merchant Operations</span>
     </button>
+    <button class="main-nav-btn" id="mainNavControlCenter" onclick="switchSection('controlCenter')">
+      <span>🖥️</span>
+      <span>Control Center (Logs)</span>
+    </button>
     <button class="main-nav-btn" id="mainNavStoreSettings" onclick="switchSection('storeSettings')">
       <span>⚙️</span>
       <span>Store Settings</span>
@@ -3907,6 +3911,12 @@
 
     // --- NAVIGATION CONTROLLER: 3 HIGH-LEVEL SECTIONS ---
     function switchSection(sectionId, targetSubTab = null) {
+      if (sectionId === 'control-center' || sectionId === 'logs' || sectionId === 'supervisor') {
+        sectionId = 'controlCenter';
+      }
+      if (sectionId === 'merchant-admin' || sectionId === 'merchantAdmin' || sectionId === 'admin' || sectionId === 'hub') {
+        sectionId = 'operations';
+      }
       activeSection = sectionId;
 
       // Sync URL hash without jumping
@@ -3921,14 +3931,16 @@
       // Update main nav buttons
       document.querySelectorAll('.main-nav-btn').forEach(b => b.classList.remove('active'));
       if (sectionId === 'operations') document.getElementById('mainNavOperations').classList.add('active');
+      if (sectionId === 'controlCenter' && document.getElementById('mainNavControlCenter')) document.getElementById('mainNavControlCenter').classList.add('active');
       if (sectionId === 'storeSettings') document.getElementById('mainNavStoreSettings').classList.add('active');
       if (sectionId === 'developerHub') document.getElementById('mainNavDeveloperHub').classList.add('active');
       if (sectionId === 'security') document.getElementById('mainNavSecurity').classList.add('active');
 
       // Show/hide sections
+      const isDevOrCc = (sectionId === 'developerHub' || sectionId === 'controlCenter');
       document.getElementById('sectionOperations').hidden = (sectionId !== 'operations');
       document.getElementById('sectionStoreSettings').hidden = (sectionId !== 'storeSettings');
-      document.getElementById('sectionDeveloperHub').hidden = (sectionId !== 'developerHub');
+      document.getElementById('sectionDeveloperHub').hidden = !isDevOrCc;
       document.getElementById('sectionSecurity').hidden = (sectionId !== 'security');
 
       // Render sub-navigation bar
@@ -3939,7 +3951,7 @@
         fetchLiveData();
       } else if (sectionId === 'storeSettings') {
         if (!settingsLoaded) fetchGatewaySettings();
-      } else if (sectionId === 'developerHub') {
+      } else if (isDevOrCc) {
         loadServices();
         connectServicesLogsSse();
         fetchTunnelStatus();
@@ -3959,6 +3971,15 @@
           { id: 'subViewOpsCounter', label: '🏪 Counter Desk (POS Cashier)', viewId: 'subViewOpsCounter' },
           { id: 'subViewOpsTransactions', label: '💳 Transactions Ledger', viewId: 'subViewOpsTransactions' },
           { id: 'subViewOpsObservers', label: '📡 Payment Observers Status', viewId: 'subViewOpsObservers' }
+        ];
+      } else if (sectionId === 'controlCenter') {
+        items = [
+          { id: 'subViewDevSupervisor', label: '🖥️ Process Supervisor & Live Logs', viewId: 'subViewDevSupervisor' },
+          { id: 'subViewDevSimulator', label: '🎮 Payment Simulator', viewId: 'subViewDevSimulator' },
+          { id: 'subViewDevCloudflare', label: '☁️ Cloudflare Tunnel', viewId: 'subViewDevCloudflare' },
+          { id: 'subViewDevWebhooks', label: '🔐 Webhooks & Secrets', viewId: 'subViewDevWebhooks' },
+          { id: 'subViewDevAndroid', label: '📱 Android SMS Hub', viewId: 'subViewDevAndroid' },
+          { id: 'subViewDevProtocols', label: '📧 Gmail & WhatsApp Protocols', viewId: 'subViewDevProtocols' }
         ];
       } else if (sectionId === 'storeSettings') {
         items = [
@@ -3983,7 +4004,7 @@
         ];
       }
 
-      let defaultSub = targetSubTab || items[0].id;
+      let defaultSub = targetSubTab || (sectionId === 'controlCenter' ? 'subViewDevSupervisor' : items[0].id);
       items.forEach(item => {
         const btn = document.createElement('button');
         btn.className = `sub-nav-pill ${item.id === defaultSub ? 'active' : ''}`;
@@ -4008,7 +4029,7 @@
       const parent = document.getElementById(
         sectionId === 'operations' ? 'sectionOperations' :
           sectionId === 'storeSettings' ? 'sectionStoreSettings' :
-            sectionId === 'developerHub' ? 'sectionDeveloperHub' : 'sectionSecurity'
+            (sectionId === 'developerHub' || sectionId === 'controlCenter') ? 'sectionDeveloperHub' : 'sectionSecurity'
       );
       Array.from(parent.children).forEach(child => {
         if (child.id && child.id.startsWith('subView')) {
@@ -7614,16 +7635,45 @@
     }
 
     // --- INITIALIZATION ---
-    const validSections = ['operations', 'storeSettings', 'developerHub', 'security'];
+    const validSections = ['operations', 'storeSettings', 'developerHub', 'security', 'controlCenter'];
     const hashSec = (window.location.hash || '').replace('#', '').trim();
-    const searchSec = new URLSearchParams(window.location.search).get('section');
-    const initialSec = validSections.includes(hashSec) ? hashSec : (validSections.includes(searchSec) ? searchSec : 'operations');
-    switchSection(initialSec);
+    const searchParams = new URLSearchParams(window.location.search);
+    const searchSec = searchParams.get('section');
+    const searchSubTab = searchParams.get('subtab') || searchParams.get('tab');
+    const path = (window.location.pathname || '').toLowerCase();
+    const pathIsCc = path.endsWith('/control-center') || path.endsWith('/logs');
+    const pathIsMa = path.endsWith('/merchant-admin') || path.endsWith('/hub');
+
+    let initialSec = 'operations';
+    let initialSubTab = null;
+
+    const requested = hashSec || searchSec;
+    if (pathIsCc || requested === 'control-center' || requested === 'controlCenter' || requested === 'logs' || requested === 'supervisor') {
+      initialSec = 'controlCenter';
+      initialSubTab = 'subViewDevSupervisor';
+    } else if (pathIsMa || requested === 'merchant-admin' || requested === 'merchantAdmin' || requested === 'admin' || requested === 'hub' || requested === 'operations') {
+      initialSec = 'operations';
+    } else if (validSections.includes(hashSec)) {
+      initialSec = hashSec;
+    } else if (validSections.includes(searchSec)) {
+      initialSec = searchSec;
+    }
+
+    if (searchSubTab) {
+      if (searchSubTab === 'supervisor' || searchSubTab === 'logs' || searchSubTab === 'subViewDevSupervisor') {
+        initialSubTab = 'subViewDevSupervisor';
+      } else {
+        initialSubTab = searchSubTab;
+      }
+    }
+
+    switchSection(initialSec, initialSubTab);
 
     window.addEventListener('hashchange', () => {
       const h = (window.location.hash || '').replace('#', '').trim();
-      if (validSections.includes(h) && h !== activeSection) {
-        switchSection(h);
+      const normH = (h === 'control-center' || h === 'logs' || h === 'supervisor') ? 'controlCenter' : h;
+      if (validSections.includes(normH) && normH !== activeSection) {
+        switchSection(normH, normH === 'controlCenter' ? 'subViewDevSupervisor' : null);
       }
     });
 

@@ -15,12 +15,15 @@ import {
   ServerIcon,
   ShieldAlertIcon,
   ShieldCheckIcon,
+  StoreIcon,
+  TerminalIcon,
   UsersIcon,
 } from "lucide-react"
 
 import { useAuth } from "@/components/auth-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { cn } from "cn"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,16 +56,21 @@ function formatDate(value: string) {
   })
 }
 
-// The gateway-admin panel is served privately under the fees API origin
+type GatewaySection = "control-center" | "merchant-admin"
+
+// The gateway console (Control Center & Logs / Merchant Admin Hub) is served privately under the fees API origin
 // (https://api.myenum.in/youpi-admin/) and is gated per-request by the fees
 // session JWT — not by any public URL. The console appends its own session
 // token; the panel exchanges it once for the gateway admin token (verified
 // against /api/auth/gate for super-admin sessions only), so no admin-token
 // prompt ever appears. Super-admin (orgmenu) only: regular workspaces never
 // get this panel.
-function gatewayAdminUrl(token: string | null): string {
+function gatewayConsoleUrl(token: string | null, section: GatewaySection = "control-center"): string {
   if (typeof window === "undefined") return ""
-  const query = token ? `?fees_token=${encodeURIComponent(token)}` : ""
+  const params = new URLSearchParams()
+  if (token) params.set("fees_token", token)
+  params.set("section", section === "merchant-admin" ? "operations" : "control-center")
+  const query = `?${params.toString()}`
   if (/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
     return `http://127.0.0.1:6001/${query}`
   }
@@ -103,10 +111,11 @@ export default function OrgMenuDashboardPage() {
   const [error, setError] = useState<string | null>(null)
   // Session token (first-party cookie) — read after mount so SSR renders safely.
   const [sessionToken, setSessionToken] = useState<string | null>(null)
+  const [gatewaySection, setGatewaySection] = useState<GatewaySection>("control-center")
   useEffect(() => {
     setSessionToken(getToken())
   }, [])
-  const gatewayAdminSrc = gatewayAdminUrl(sessionToken)
+  const gatewayConsoleSrc = gatewayConsoleUrl(sessionToken, gatewaySection)
 
   const viewingOther = activeProfile.profileId !== profile.profileId
 
@@ -424,45 +433,100 @@ export default function OrgMenuDashboardPage() {
           </div>
         </div>
 
-        {/* YOUPI PG Gateway Admin — private, session-gated super-admin console.
+        {/* Payment Gateway Console (Control Center & Logs / Merchant Admin Hub) — private, session-gated super-admin console.
             Keep this block in orgmenu ONLY: it must never reappear in
             workspace settings. */}
         <section className="space-y-4">
-          <div className="flex items-center justify-between border-b pb-2">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
             <div>
-              <h2 className="text-[13px] font-semibold tracking-tight">
-                MyFees Gateway Admin
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                UPI accounts, slots, observers and payment queue — served privately
-                under the dashboard (not publicly linked).
+              <div className="flex items-center gap-2">
+                <h2 className="text-[14px] font-semibold tracking-tight">
+                  {gatewaySection === "control-center"
+                    ? "Payment Gateway Control Center (Logs)"
+                    : "Payment Gateway Merchant Admin Hub"}
+                </h2>
+                <Badge variant="secondary" className="text-[11px] font-medium">
+                  {gatewaySection === "control-center" ? "Host Processes & Logs" : "Operations, VPAs & Cashier"}
+                </Badge>
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {gatewaySection === "control-center"
+                  ? "Real-time process supervisor (ports 6100, 7000, 6001, etc.), service health, and aggregate live terminal logs."
+                  : "Receiving accounts (VPAs), slots, live payment observers, POS cashier till desk, and payment ledger."}
               </p>
             </div>
-            {gatewayAdminSrc && (
-              <a
-                href={gatewayAdminSrc}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
-              >
-                <ShieldAlertIcon className="size-3.5" />
-                <span>Open Console</span>
-                <ExternalLinkIcon className="size-3" />
-              </a>
-            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center rounded-lg border bg-muted/50 p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setGatewaySection("control-center")}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition",
+                    gatewaySection === "control-center"
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <TerminalIcon className="size-3.5" />
+                  <span>Control Center (Logs)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGatewaySection("merchant-admin")}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition",
+                    gatewaySection === "merchant-admin"
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <StoreIcon className="size-3.5" />
+                  <span>Merchant Admin Hub</span>
+                </button>
+              </div>
+
+              {gatewayConsoleSrc && (
+                <a
+                  href={gatewayConsoleSrc}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+                >
+                  <ShieldAlertIcon className="size-3.5" />
+                  <span>
+                    {gatewaySection === "control-center"
+                      ? "Open Control Center (Logs)"
+                      : "Open Merchant Admin Hub"}
+                  </span>
+                  <ExternalLinkIcon className="size-3" />
+                </a>
+              )}
+            </div>
           </div>
 
-          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-400">
-            The panel loads with your super-admin session and is not reachable
-            from anywhere else. No extra sign-in is needed.
+          <div className="flex items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-400">
+            <span>
+              {gatewaySection === "control-center"
+                ? "The Control Center streams live logs via Server-Sent Events (SSE) and supervises local gateway daemons. Session is authenticated automatically."
+                : "The Merchant Admin Hub provides complete operational control over receiving accounts, slots, cashier counter desk, and payment verification."}
+            </span>
+            <span className="hidden font-mono text-[11px] opacity-75 sm:inline">
+              Super Admin Session Active
+            </span>
           </div>
 
           <div className="overflow-hidden rounded-2xl border bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-            {gatewayAdminSrc ? (
+            {gatewayConsoleSrc ? (
               <iframe
-                src={gatewayAdminSrc}
-                title="MyFees Gateway Admin"
-                className="h-[720px] w-full border-0"
+                key={gatewaySection}
+                src={gatewayConsoleSrc}
+                title={
+                  gatewaySection === "control-center"
+                    ? "Payment Gateway Control Center (Logs)"
+                    : "Payment Gateway Merchant Admin Hub"
+                }
+                className="h-[750px] w-full border-0"
                 loading="lazy"
               />
             ) : (

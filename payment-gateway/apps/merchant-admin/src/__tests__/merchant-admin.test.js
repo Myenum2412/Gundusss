@@ -93,6 +93,23 @@ describe('Merchant Admin Integration Tests', () => {
     assert.ok(res.text.includes('Gmail Direct API'));
   });
 
+  test('GET /control-center and GET /logs render dashboard with Control Center (Logs)', async () => {
+    const resCc = await get('/control-center');
+    assert.equal(resCc.status, 200);
+    assert.ok(resCc.headers['content-type'].includes('text/html'));
+    assert.ok(resCc.text.includes('Control Center (Logs)'));
+    assert.ok(resCc.text.includes('Managed Host Processes (Unified Control Center)'));
+
+    const resLogs = await get('/logs');
+    assert.equal(resLogs.status, 200);
+    assert.ok(resLogs.headers['content-type'].includes('text/html'));
+
+    const resMa = await get('/merchant-admin');
+    assert.equal(resMa.status, 200);
+    assert.ok(resMa.headers['content-type'].includes('text/html'));
+    assert.ok(resMa.text.includes('Daily Merchant Operations'));
+  });
+
   test('GET /api/admin/tickets requires the admin token', async () => {
     const anonymous = await get('/api/admin/tickets');
     assert.equal(anonymous.status, 401);
