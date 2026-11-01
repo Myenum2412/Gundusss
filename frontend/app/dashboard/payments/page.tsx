@@ -200,9 +200,40 @@ export interface UnifiedPaymentRecord {
   receiptId?: string | null
   createdAt: string
   source: "gateway" | "receipt" | "student"
-  rawOrder?: PaymentOrder
-  rawReceipt?: StoredReceipt
-  rawStudent?: StoredStudent
+  rawOrder?: PaymentOrder | null
+  rawReceipt?: StoredReceipt | null
+  rawStudent?: StoredStudent | null
+  reminderCount: number
+  allOrders?: PaymentOrder[]
+}
+
+const REMINDER_STORAGE_KEY = "myfees_reminder_counts"
+
+function getStoredReminderCount(studentIdOrName?: string | null): number {
+  if (typeof window === "undefined" || !studentIdOrName) return 0
+  try {
+    const raw = localStorage.getItem(REMINDER_STORAGE_KEY)
+    if (!raw) return 0
+    const map = JSON.parse(raw)
+    return Number(map[studentIdOrName.trim().toLowerCase()] || 0)
+  } catch {
+    return 0
+  }
+}
+
+function incrementStoredReminderCount(studentIdOrName?: string | null): number {
+  if (typeof window === "undefined" || !studentIdOrName) return 1
+  try {
+    const raw = localStorage.getItem(REMINDER_STORAGE_KEY)
+    const map = raw ? JSON.parse(raw) : {}
+    const key = studentIdOrName.trim().toLowerCase()
+    const next = (Number(map[key]) || 0) + 1
+    map[key] = next
+    localStorage.setItem(REMINDER_STORAGE_KEY, JSON.stringify(map))
+    return next
+  } catch {
+    return 1
+  }
 }
 
 // Single Student Fee Reminder Dialog using interactive-button-bubble
@@ -211,11 +242,13 @@ function FeeReminderDialog({
   open,
   onOpenChange,
   companyName,
+  onReminderSent,
 }: {
   record: UnifiedPaymentRecord | null
   open: boolean
   onOpenChange: (open: boolean) => void
   companyName: string
+  onReminderSent?: () => void
 }) {
   const [phone, setPhone] = useState("")
   const [message, setMessage] = useState("")
@@ -241,9 +274,6 @@ function FeeReminderDialog({
     setPreparingLink(false)
 
     const paidRecord = normalizeStatus(record.status) === "SUCCESS"
-    // A local INITIATED row is not proof that its gateway session is still
-    // payable. Cancellation/expiry can happen without the local row being
-    // reconciled, so every unpaid reminder gets a newly minted checkout.
     const checkoutDecision = decideReminderCheckout({
       isPaid: paidRecord,
       localStatus: record.status,
@@ -254,6 +284,10 @@ function FeeReminderDialog({
     if (checkoutDecision.kind === "acknowledgment") {
       // Paid records get an acknowledgment message, not a fresh payable link.
       setMessage(generateReminderText({ record, companyName, paymentUrl: "" }))
+    } else if (record.paymentUrl && isGatewayCheckoutUrl(record.paymentUrl)) {
+      // Reuse the existing active gateway checkout URL to avoid creating redundant duplicate orders
+      setPaymentLink(record.paymentUrl)
+      setMessage(generateReminderText({ record, companyName, paymentUrl: record.paymentUrl }))
     } else {
       setMessage(generateReminderText({ record, companyName, paymentUrl: "" }))
       setPreparingLink(true)
@@ -347,8 +381,15 @@ function FeeReminderDialog({
             }
           : undefined,
       })
+      if (record.studentId && record.studentId !== "—") {
+        incrementStoredReminderCount(record.studentId)
+      }
+      if (record.studentName) {
+        incrementStoredReminderCount(record.studentName)
+      }
       setBotSent(true)
       window.setTimeout(() => setBotSent(false), 3000)
+      onReminderSent?.()
     } catch (err) {
       setBotError(
         err instanceof Error
@@ -452,6 +493,19 @@ function FeeReminderDialog({
               </div>
               <StatusBadge value={record.status} />
             </div>
+          </div>
+
+          {/* Messages Sent Count Status */}
+          <div className="flex items-center justify-between rounded-xl border bg-muted/40 px-3.5 py-2.5">
+            <div className="flex items-center gap-2">
+              <BellRingIcon className="size-4 text-emerald-600 dark:text-emerald-400" />
+              <span className="font-semibold text-xs text-foreground">
+                Total Reminders Sent to Student
+              </span>
+            </div>
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+              {(record.reminderCount || 0) + (botSent ? 1 : 0)} time{((record.reminderCount || 0) + (botSent ? 1 : 0)) === 1 ? "" : "s"}
+            </span>
           </div>
 
           {/* Recipient Phone Field */}
@@ -681,8 +735,14 @@ function BulkReminderDialog({
                           </span>
                         )}
                       </div>
-                      <p className="text-[11px] text-muted-foreground">
-                        {r.course} · {r.group} · {r.phone && r.phone !== "—" ? r.phone : "No phone"}
+                      <p className="text-[11px] text-muted-foreground flex items-center gap-2">
+                        <span>{r.course} · {r.group} · {r.phone && r.phone !== "—" ? r.phone : "No phone"}</span>
+                        {r.reminderCount > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.2 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+                            <BellRingIcon className="size-2.5" />
+                            {r.reminderCount} sent
+                          </span>
+                        )}
                       </p>
                     </div>
                   </div>
@@ -1007,10 +1067,11 @@ export default function PaymentsPage() {
   useLiveReload(reload, 5000)
 
   // Unified payment records combining gateway orders, receipts, and enrolled students
+  // Deduplicates payments by student to prevent multiple rows per student,
+  // and tracks how many times fee reminders/messages were delivered.
   const unifiedRecords = useMemo<UnifiedPaymentRecord[]>(() => {
     const records: UnifiedPaymentRecord[] = []
     const coveredReceiptIds = new Set<string>()
-    const studentsWithPayments = new Set<string>()
 
     // 1. Build student lookup maps
     const studentById = new Map<string, StoredStudent>()
@@ -1062,127 +1123,221 @@ export default function PaymentsPage() {
       return "4500"
     }
 
-    // Only real gateway checkout URLs are linkable. Students without one get a
-    // fresh checkout created when a reminder is opened.
     const buildStudentPaymentUrl = (studentId?: string, explicitUrl?: string) => {
       if (!isGatewayCheckoutUrl(explicitUrl)) return ""
       return getStudentSpecificPaymentUrl(explicitUrl as string, studentId)
     }
 
-    // 2. Add online gateway orders
+    // 2. Group all gateway orders by student key so duplicate checkout/reminder attempts
+    // are merged into a single consolidated row per student.
+    const ordersByStudentKey = new Map<string, PaymentOrder[]>()
+    const standaloneOrders: PaymentOrder[] = []
+
     for (const order of orders) {
       const stu =
-        studentById.get(order.studentId?.trim().toLowerCase()) ||
-        studentByName.get(order.studentName?.trim().toLowerCase())
+        (order.studentId ? studentById.get(order.studentId.trim().toLowerCase()) : null) ||
+        (order.studentName ? studentByName.get(order.studentName.trim().toLowerCase()) : null)
 
-      const orderIdLower = order.orderId.trim().toLowerCase()
+      const sId = (order.studentId || stu?.studentId || "").trim().toLowerCase()
+      const sName = (order.studentName || stu?.studentName || "").trim().toLowerCase()
+      const groupKey = sId || sName
 
-      // Cross-reference any receipt matching this order
-      let matchedReceipt = receiptByOrderId.get(orderIdLower) || null
-      if (!matchedReceipt && order.receiptId) {
-        matchedReceipt =
-          receipts.find(
-            (r) => r.receiptId.toLowerCase() === order.receiptId?.toLowerCase()
-          ) || null
+      if (groupKey) {
+        if (!ordersByStudentKey.has(groupKey)) ordersByStudentKey.set(groupKey, [])
+        ordersByStudentKey.get(groupKey)!.push(order)
+      } else {
+        standaloneOrders.push(order)
       }
-      if (!matchedReceipt) {
-        const studentReceipts =
-          (order.studentId ? receiptsByStudentId.get(order.studentId.trim().toLowerCase()) : null) ||
-          (order.studentName ? receiptsByStudentName.get(order.studentName.trim().toLowerCase()) : null) ||
-          []
-        const candidate = studentReceipts.find(
-          (r) => !coveredReceiptIds.has(r.receiptId.trim().toLowerCase())
-        )
-        if (candidate) {
-          matchedReceipt = candidate
+    }
+
+    const processedStudentKeys = new Set<string>()
+
+    // 3. Process every enrolled student in the roster
+    for (const student of students) {
+      const sId = student.studentId?.trim().toLowerCase() || ""
+      const sName = student.studentName?.trim().toLowerCase() || ""
+      const key = sId || sName
+      if (!key) continue
+      processedStudentKeys.add(key)
+      if (sId) processedStudentKeys.add(sId)
+      if (sName) processedStudentKeys.add(sName)
+
+      // Find all orders for this student
+      const studentOrders =
+        (sId ? ordersByStudentKey.get(sId) : null) ||
+        (sName ? ordersByStudentKey.get(sName) : null) ||
+        []
+      // Sort newest first
+      studentOrders.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+
+      // Find receipts for this student
+      const studentReceipts =
+        (sId ? receiptsByStudentId.get(sId) : null) ||
+        (sName ? receiptsByStudentName.get(sName) : null) ||
+        []
+
+      let matchedReceipt: StoredReceipt | null = null
+      for (const ord of studentOrders) {
+        const r = receiptByOrderId.get(ord.orderId.trim().toLowerCase())
+        if (r) {
+          matchedReceipt = r
+          break
         }
       }
-
-      const effectiveReceiptId = order.receiptId || matchedReceipt?.receiptId || null
-      if (effectiveReceiptId) {
-        coveredReceiptIds.add(effectiveReceiptId.trim().toLowerCase())
+      if (!matchedReceipt && studentReceipts.length > 0) {
+        matchedReceipt =
+          studentReceipts.find((r) => !coveredReceiptIds.has(r.receiptId.trim().toLowerCase())) ||
+          studentReceipts[0]
       }
-      if (stu?.studentId) {
-        studentsWithPayments.add(stu.studentId.trim().toLowerCase())
-      } else if (order.studentName) {
-        studentsWithPayments.add(order.studentName.trim().toLowerCase())
+      if (matchedReceipt) {
+        coveredReceiptIds.add(matchedReceipt.receiptId.trim().toLowerCase())
       }
 
-      const effectiveStudentId = order.studentId || stu?.studentId || ""
-      const payUrl = buildStudentPaymentUrl(effectiveStudentId, order.paymentUrl || order.checkoutUrl)
+      // Check if any order or receipt is paid
+      const hasPaidReceipt = Boolean(
+        matchedReceipt &&
+          (matchedReceipt.status?.toLowerCase() === "paid" ||
+            matchedReceipt.status?.toLowerCase() === "success" ||
+            matchedReceipt.status?.toLowerCase() === "settled")
+      )
+      const paidOrder = studentOrders.find(
+        (o) =>
+          o.status === "SUCCESS" ||
+          o.status === "PAID" ||
+          o.status === "COMPLETED" ||
+          o.gatewayStatus === "SUCCESS"
+      )
+      const isPaid = hasPaidReceipt || Boolean(paidOrder)
 
-      const isOrderPaid =
-        order.status === "SUCCESS" ||
-        order.status === "PAID" ||
-        order.status === "COMPLETED" ||
-        order.gatewayStatus === "SUCCESS" ||
-        Boolean(effectiveReceiptId)
+      // Message count: how many reminders / messages were sent to this student
+      const storedCount = Math.max(
+        sId ? getStoredReminderCount(sId) : 0,
+        sName ? getStoredReminderCount(sName) : 0
+      )
+      const reminderCount = Math.max(studentOrders.length, storedCount)
+
+      // Primary order: use paid order if any, else the latest active order
+      const primaryOrder = paidOrder || studentOrders[0]
+      const feeAmount = getStudentFee(student)
+      const amount = matchedReceipt ? matchedReceipt.amount : (primaryOrder ? primaryOrder.amount : feeAmount)
+      const effectiveReceiptId = matchedReceipt?.receiptId || primaryOrder?.receiptId || null
+      const payUrl = primaryOrder
+        ? buildStudentPaymentUrl(student.studentId, primaryOrder.paymentUrl || primaryOrder.checkoutUrl)
+        : buildStudentPaymentUrl(student.studentId)
+
+      const createdAt =
+        primaryOrder?.createdAt ||
+        (matchedReceipt?.paymentDate ? `${matchedReceipt.paymentDate}T00:00:00.000Z` : (student.joiningDate ? `${student.joiningDate}T00:00:00.000Z` : new Date().toISOString()))
 
       records.push({
-        id: `ord-${order.orderId}`,
-        orderId: order.orderId,
-        paymentId: order.paymentId,
-        studentId: effectiveStudentId || "—",
-        studentName: order.studentName || stu?.studentName || "—",
-        course: stu?.course || "—",
-        group: stu?.group || "—",
-        phone: stu?.phone || "—",
-        email: stu?.email || "—",
-        amount: order.amount,
-        method: order.method || "UPI",
-        status: isOrderPaid ? "SUCCESS" : (normalizeStatus(order.status) || "INITIATED"),
-        gatewayStatus: isOrderPaid ? "SUCCESS" : order.gatewayStatus,
+        id: `stu-${student.studentId}`,
+        orderId: primaryOrder ? primaryOrder.orderId : (matchedReceipt ? matchedReceipt.receiptId : `INV-${student.studentId}`),
+        paymentId: primaryOrder?.paymentId ?? null,
+        studentId: student.studentId,
+        studentName: student.studentName,
+        course: student.course || "—",
+        group: student.group || "—",
+        phone: student.phone || "—",
+        email: student.email || "—",
+        amount,
+        method: primaryOrder?.method || (matchedReceipt?.method ? (matchedReceipt.method.toLowerCase() === "cash" ? "CASH_COUNTER" : matchedReceipt.method) : "UPI"),
+        status: isPaid ? "SUCCESS" : (primaryOrder ? (normalizeStatus(primaryOrder.status) || "INITIATED") : "INITIATED"),
+        gatewayStatus: isPaid ? "SUCCESS" : primaryOrder?.gatewayStatus,
         paymentUrl: payUrl,
-        utr: order.utr || matchedReceipt?.notes || "—",
+        utr: primaryOrder?.utr || matchedReceipt?.notes || (isPaid ? "Paid" : "Awaiting fee payment"),
         receiptId: effectiveReceiptId,
-        createdAt: order.createdAt || new Date().toISOString(),
-        source: "gateway",
-        rawOrder: order,
+        createdAt,
+        source: primaryOrder ? "gateway" : (matchedReceipt ? "receipt" : "student"),
+        rawOrder: primaryOrder,
+        rawReceipt: matchedReceipt || undefined,
+        rawStudent: student,
+        reminderCount,
+        allOrders: studentOrders,
       })
     }
 
-    // 3. Add Appwrite receipts not already tied to an order
+    // 4. Any external orders not tied to an enrolled student in roster
+    for (const [key, ords] of ordersByStudentKey.entries()) {
+      if (processedStudentKeys.has(key)) continue
+      processedStudentKeys.add(key)
+
+      ords.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+      const paidOrder = ords.find(
+        (o) =>
+          o.status === "SUCCESS" ||
+          o.status === "PAID" ||
+          o.status === "COMPLETED" ||
+          o.gatewayStatus === "SUCCESS"
+      )
+      const primaryOrder = paidOrder || ords[0]
+      const isPaid = Boolean(paidOrder)
+
+      const storedCount = Math.max(
+        primaryOrder.studentId ? getStoredReminderCount(primaryOrder.studentId) : 0,
+        primaryOrder.studentName ? getStoredReminderCount(primaryOrder.studentName) : 0
+      )
+      const reminderCount = Math.max(ords.length, storedCount)
+
+      records.push({
+        id: `ord-${primaryOrder.orderId}`,
+        orderId: primaryOrder.orderId,
+        paymentId: primaryOrder.paymentId,
+        studentId: primaryOrder.studentId || "—",
+        studentName: primaryOrder.studentName || "—",
+        course: "—",
+        group: "—",
+        phone: "—",
+        email: "",
+        amount: primaryOrder.amount,
+        method: primaryOrder.method || "UPI",
+        status: isPaid ? "SUCCESS" : (normalizeStatus(primaryOrder.status) || "INITIATED"),
+        gatewayStatus: isPaid ? "SUCCESS" : primaryOrder.gatewayStatus,
+        paymentUrl: buildStudentPaymentUrl(primaryOrder.studentId, primaryOrder.paymentUrl || primaryOrder.checkoutUrl),
+        utr: primaryOrder.utr || "—",
+        receiptId: primaryOrder.receiptId || null,
+        createdAt: primaryOrder.createdAt || new Date().toISOString(),
+        source: "gateway",
+        rawOrder: primaryOrder,
+        reminderCount,
+        allOrders: ords,
+      })
+    }
+
+    // 5. Standalone Appwrite receipts not already tied to an order or student
     for (const receipt of receipts) {
       const rcpId = receipt.receiptId.trim().toLowerCase()
       if (coveredReceiptIds.has(rcpId)) continue
 
       const stu =
-        studentById.get(receipt.studentId?.trim().toLowerCase()) ||
-        studentByName.get(receipt.studentName?.trim().toLowerCase())
+        (receipt.studentId ? studentById.get(receipt.studentId.trim().toLowerCase()) : null) ||
+        (receipt.studentName ? studentByName.get(receipt.studentName.trim().toLowerCase()) : null)
 
-      if (stu?.studentId) {
-        studentsWithPayments.add(stu.studentId.trim().toLowerCase())
-      } else if (receipt.studentName) {
-        studentsWithPayments.add(receipt.studentName.trim().toLowerCase())
+      const sId = receipt.studentId?.trim().toLowerCase() || stu?.studentId?.trim().toLowerCase()
+      const sName = receipt.studentName?.trim().toLowerCase() || stu?.studentName?.trim().toLowerCase()
+      if ((sId && processedStudentKeys.has(sId)) || (sName && processedStudentKeys.has(sName))) {
+        continue
       }
+      coveredReceiptIds.add(rcpId)
 
       const rStatus = receipt.status?.trim().toLowerCase()
       let mappedStatus = "SUCCESS"
-      if (rStatus === "paid" || rStatus === "success" || rStatus === "settled") {
-        mappedStatus = "SUCCESS"
-      } else if (rStatus === "pending" || rStatus === "processing") {
-        mappedStatus = "PROCESSING"
-      } else if (rStatus === "cancelled" || rStatus === "canceled") {
-        mappedStatus = "CANCELLED"
-      } else if (rStatus === "failed") {
-        mappedStatus = "FAILED"
-      } else if (rStatus === "refunded") {
-        mappedStatus = "REFUNDED"
-      } else if (rStatus) {
-        mappedStatus = normalizeStatus(receipt.status)
-      }
+      if (rStatus === "paid" || rStatus === "success" || rStatus === "settled") mappedStatus = "SUCCESS"
+      else if (rStatus === "pending" || rStatus === "processing") mappedStatus = "PROCESSING"
+      else if (rStatus === "cancelled" || rStatus === "canceled") mappedStatus = "CANCELLED"
+      else if (rStatus === "failed") mappedStatus = "FAILED"
+      else if (rStatus === "refunded") mappedStatus = "REFUNDED"
+      else if (rStatus) mappedStatus = normalizeStatus(receipt.status)
 
       let mappedMethod = receipt.method || "Cash"
       if (mappedMethod.toLowerCase() === "cash") mappedMethod = "CASH_COUNTER"
       else if (mappedMethod.toLowerCase() === "upi") mappedMethod = "UPI"
       else if (mappedMethod.toLowerCase() === "card") mappedMethod = "CARD_COUNTER"
 
-      const effectiveStudentId = receipt.studentId || stu?.studentId || ""
       records.push({
         id: `rcp-${receipt.receiptId}`,
         orderId: receipt.receiptId,
         paymentId: null,
-        studentId: effectiveStudentId || "—",
+        studentId: receipt.studentId || stu?.studentId || "—",
         studentName: receipt.studentName || stu?.studentName || "—",
         course: stu?.course || "—",
         group: stu?.group || "—",
@@ -1192,71 +1347,46 @@ export default function PaymentsPage() {
         method: mappedMethod,
         status: mappedStatus,
         gatewayStatus: mappedStatus === "SUCCESS" ? "SUCCESS" : undefined,
-        paymentUrl: buildStudentPaymentUrl(effectiveStudentId),
+        paymentUrl: "",
         utr: receipt.notes || "—",
         receiptId: receipt.receiptId,
-        createdAt: receipt.paymentDate
-          ? `${receipt.paymentDate}T00:00:00.000Z`
-          : new Date().toISOString(),
+        createdAt: receipt.paymentDate ? `${receipt.paymentDate}T00:00:00.000Z` : new Date().toISOString(),
         source: "receipt",
         rawReceipt: receipt,
         rawStudent: stu,
+        reminderCount: 0,
       })
     }
 
-    // 4. Add enrolled students awaiting payment
-    for (const student of students) {
-      const sId = student.studentId?.trim().toLowerCase()
-      const sName = student.studentName?.trim().toLowerCase()
-      if (
-        (sId && studentsWithPayments.has(sId)) ||
-        (sName && studentsWithPayments.has(sName))
-      ) {
-        continue
-      }
-
-      const studentReceipts =
-        (sId ? receiptsByStudentId.get(sId) : null) ||
-        (sName ? receiptsByStudentName.get(sName) : null) ||
-        []
-      const matchedReceipt = studentReceipts.find(
-        (r) => !coveredReceiptIds.has(r.receiptId.trim().toLowerCase())
-      )
-
-      const feeAmount = getStudentFee(student)
-      const hasPaidReceipt = Boolean(
-        matchedReceipt &&
-          (matchedReceipt.status?.toLowerCase() === "paid" ||
-            matchedReceipt.status?.toLowerCase() === "success")
-      )
-
-      if (matchedReceipt) {
-        coveredReceiptIds.add(matchedReceipt.receiptId.trim().toLowerCase())
-      }
+    // 6. Anonymous walk-in counter orders
+    for (const order of standaloneOrders) {
+      const isPaid =
+        order.status === "SUCCESS" ||
+        order.status === "PAID" ||
+        order.status === "COMPLETED" ||
+        order.gatewayStatus === "SUCCESS"
 
       records.push({
-        id: `stu-${student.studentId}`,
-        orderId: matchedReceipt ? matchedReceipt.receiptId : `INV-${student.studentId}`,
-        paymentId: null,
-        studentId: student.studentId,
-        studentName: student.studentName,
-        course: student.course || "—",
-        group: student.group || "—",
-        phone: student.phone || "—",
-        email: student.email || "—",
-        amount: matchedReceipt ? matchedReceipt.amount : feeAmount,
-        method: matchedReceipt ? matchedReceipt.method : "UPI",
-        status: hasPaidReceipt ? "SUCCESS" : "INITIATED",
-        gatewayStatus: hasPaidReceipt ? "SUCCESS" : undefined,
-        paymentUrl: buildStudentPaymentUrl(student.studentId),
-        utr: matchedReceipt ? (matchedReceipt.notes || "—") : "Awaiting fee payment",
-        receiptId: matchedReceipt ? matchedReceipt.receiptId : null,
-        createdAt: student.joiningDate
-          ? `${student.joiningDate}T00:00:00.000Z`
-          : new Date().toISOString(),
-        source: "student",
-        rawStudent: student,
-        rawReceipt: matchedReceipt,
+        id: `ord-${order.orderId}`,
+        orderId: order.orderId,
+        paymentId: order.paymentId,
+        studentId: "—",
+        studentName: order.studentName || "Walk-in Counter",
+        course: "—",
+        group: "—",
+        phone: "—",
+        email: "",
+        amount: order.amount,
+        method: order.method || "CASH_COUNTER",
+        status: isPaid ? "SUCCESS" : (normalizeStatus(order.status) || "INITIATED"),
+        gatewayStatus: isPaid ? "SUCCESS" : order.gatewayStatus,
+        paymentUrl: buildStudentPaymentUrl(undefined, order.paymentUrl || order.checkoutUrl),
+        utr: order.utr || "—",
+        receiptId: order.receiptId || null,
+        createdAt: order.createdAt || new Date().toISOString(),
+        source: "gateway",
+        rawOrder: order,
+        reminderCount: 0,
       })
     }
 
@@ -1422,7 +1552,14 @@ export default function PaymentsPage() {
   }
 
   function openHistory(record: UnifiedPaymentRecord) {
-    if (record.rawOrder) {
+    if (record.allOrders && record.allOrders.length > 0) {
+      const primaryOrder = record.rawOrder || record.allOrders[0]
+      const combinedEvents = record.allOrders.flatMap((o) => o.events || [])
+      setTimelineOrder({
+        ...primaryOrder,
+        events: combinedEvents.length > 0 ? combinedEvents : primaryOrder.events,
+      })
+    } else if (record.rawOrder) {
       setTimelineOrder(record.rawOrder)
     } else {
       const syntheticOrder: PaymentOrder = {
@@ -1659,6 +1796,7 @@ export default function PaymentsPage() {
                 <TableHead className="min-w-[130px] whitespace-nowrap">Method</TableHead>
                 <TableHead className="min-w-[160px] whitespace-nowrap">Status</TableHead>
                 <TableHead className="min-w-[120px] whitespace-nowrap">Receipt</TableHead>
+                <TableHead className="min-w-[130px] whitespace-nowrap">Reminders</TableHead>
                 <TableHead className="min-w-[140px] whitespace-nowrap">Date</TableHead>
                 <TableHead className="w-16 min-w-[64px] whitespace-nowrap text-right sticky right-0 bg-card z-20 border-l border-border/40 shadow-[-4px_0_8px_-2px_rgba(0,0,0,0.04)]">
                   Actions
@@ -1668,7 +1806,7 @@ export default function PaymentsPage() {
             <TableBody>
               {!hydrated ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={10} className="p-0">
+                  <TableCell colSpan={11} className="p-0">
                     <EmptyState
                       icon={QrCodeIcon}
                       title="Loading student payments…"
@@ -1678,7 +1816,7 @@ export default function PaymentsPage() {
                 </TableRow>
               ) : unifiedRecords.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={10} className="p-0">
+                  <TableCell colSpan={11} className="p-0">
                     <EmptyState
                       icon={QrCodeIcon}
                       title="No payment records found"
@@ -1688,7 +1826,7 @@ export default function PaymentsPage() {
                 </TableRow>
               ) : filteredRecords.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={10} className="p-0">
+                  <TableCell colSpan={11} className="p-0">
                     <EmptyState
                       icon={QrCodeIcon}
                       title="No records match this filter"
@@ -1819,6 +1957,19 @@ export default function PaymentsPage() {
                           </div>
                         ) : (
                           <span className="font-mono text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="min-w-[130px] whitespace-nowrap">
+                        {record.reminderCount > 0 ? (
+                          <span
+                            className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-700 border border-emerald-600/20 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/30"
+                            title={`${record.reminderCount} reminder message${record.reminderCount === 1 ? "" : "s"} sent to ${record.studentName}`}
+                          >
+                            <BellRingIcon className="size-3 text-emerald-600 dark:text-emerald-400" />
+                            <span>{record.reminderCount} sent</span>
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </TableCell>
                       <TableCell className="min-w-[140px] whitespace-nowrap tabular-nums text-xs text-muted-foreground">
@@ -1972,6 +2123,7 @@ export default function PaymentsPage() {
           if (!open) setReminderRecord(null)
         }}
         companyName={companyName}
+        onReminderSent={reload}
       />
 
       {/* Bulk Reminders Dialog */}
