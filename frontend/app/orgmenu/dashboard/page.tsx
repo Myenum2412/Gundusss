@@ -452,7 +452,7 @@ export default function OrgMenuDashboardPage() {
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {gatewaySection === "control-center"
-                  ? "Real-time process supervisor (ports 6100, 6001, 6003, etc.), service health, and aggregate live terminal logs."
+                  ? "Real-time process supervisor (ports 6100, 7000, 6001, 6003, etc.), service health, and aggregate live terminal logs."
                   : "Receiving accounts (VPAs), slots, live payment observers, POS cashier till desk, and payment ledger."}
               </p>
             </div>

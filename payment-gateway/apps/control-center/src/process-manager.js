@@ -26,6 +26,17 @@ export class ProcessManager extends EventEmitter {
         pid: null
       },
       {
+        id: 'checkout-portal',
+        name: 'Checkout Portal',
+        script: path.join(rootDir, 'apps/checkout-portal/src/index.js'),
+        port: Number(process.env.CHECKOUT_PORTAL_PORT || 7000),
+        healthPath: '/health',
+        child: null,
+        status: 'STOPPED',
+        startTime: null,
+        pid: null
+      },
+      {
         id: 'merchant-admin',
         name: 'Merchant Admin Dashboard',
         script: path.join(rootDir, 'apps/merchant-admin/src/index.js'),

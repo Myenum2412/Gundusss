@@ -2754,6 +2754,7 @@
               <select id="logServiceFilter" style="padding:0.4rem 0.75rem; font-size:0.78rem;" onchange="filterLogs()">
                 <option value="ALL">All Services</option>
                 <option value="payment-api">payment-api (6100)</option>
+                <option value="checkout-portal">checkout-portal (7000)</option>
                 <option value="merchant-admin">merchant-admin (6001)</option>
                 <option value="sms-observer">sms-observer (6002)</option>
                 <option value="gmail-observer">gmail-observer (6003)</option>
@@ -4066,7 +4067,7 @@
         return;
       }
 
-      const filtered = (services || []).filter(s => s.id !== 'coin-wallet-store' && s.id !== 'checkout-portal');
+      const filtered = (services || []).filter(s => s.id !== 'coin-wallet-store');
       tbody.innerHTML = filtered.map(s => {
         const isRunning = s.status === 'RUNNING';
         const isStarting = s.status === 'STARTING';
@@ -5237,8 +5238,16 @@
 
       const routes = [
         {
+          key: 'checkout',
+          serviceName: '1. Customer Checkout',
+          hostname: mkHost(cleanPrefix),
+          serviceUrl: 'http://localhost:7000',
+          purpose: 'Customer checkout / checkout portal (pay.myenum.in)',
+          optional: false
+        },
+        {
           key: 'api',
-          serviceName: '1. Payment API',
+          serviceName: '2. Payment API',
           hostname: mkHost(`${cleanPrefix}-api`),
           serviceUrl: 'http://localhost:6100',
           purpose: 'Payment API / merchant API / SSE / observer ingestion',
@@ -5246,7 +5255,7 @@
         },
         {
           key: 'admin',
-          serviceName: '2. Merchant Admin',
+          serviceName: '3. Merchant Admin',
           hostname: mkHost(`${cleanPrefix}-admin`),
           serviceUrl: 'http://localhost:6001',
           purpose: 'Merchant/Admin panel',
@@ -5254,7 +5263,7 @@
         },
         {
           key: 'gmail',
-          serviceName: '3. Gmail OAuth / Gmail Observer',
+          serviceName: '4. Gmail OAuth / Gmail Observer',
           hostname: mkHost(`${cleanPrefix}-gmail`),
           serviceUrl: 'http://localhost:6003',
           purpose: 'Gmail OAuth callback and Gmail observation service',
@@ -5303,7 +5312,15 @@
 
       const text = `CLOUDFLARE TUNNEL ROUTES
 
-1. Payment API
+1. Customer Checkout
+   Public Hostname:
+       ${prefix}.${domain}
+   Service URL:
+       http://localhost:7000
+   Purpose:
+       Customer checkout / checkout portal
+
+2. Payment API
    Public Hostname:
        ${prefix}-api.${domain}
    Service URL:
@@ -5311,7 +5328,7 @@
    Purpose:
        Payment API / merchant API / SSE / observer ingestion
 
-2. Merchant Admin
+3. Merchant Admin
    Public Hostname:
        ${prefix}-admin.${domain}
    Service URL:
@@ -5319,7 +5336,7 @@
    Purpose:
        Merchant/Admin panel
 
-3. Gmail OAuth / Gmail Observer
+4. Gmail OAuth / Gmail Observer
    Public Hostname:
        ${prefix}-gmail.${domain}
    Service URL:
@@ -5328,7 +5345,7 @@
        Gmail OAuth callback and Gmail observation service`;
 
       navigator.clipboard.writeText(text).then(() => {
-        showAdminToast('All 3 Cloudflare mappings copied to clipboard!');
+        showAdminToast('All 4 Cloudflare mappings copied to clipboard!');
       }).catch(() => {
         showAdminToast('Clipboard copy failed.', false);
       });

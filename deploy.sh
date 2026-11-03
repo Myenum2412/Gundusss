@@ -53,8 +53,9 @@ if echo "$CHANGED" | grep -qE '^payment-gateway/'; then
   fi
   systemctl restart youpi-gateway
   for i in $(seq 1 25); do
-    if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6100/health | grep -q '^200$'; then
-      echo "   gateway: healthy (attempt $i)"
+    if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6100/health | grep -q '^200$' && \
+       curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7000/health | grep -q '^200$'; then
+      echo "   gateway & checkout portal: healthy (attempt $i)"
       break
     fi
     sleep 1

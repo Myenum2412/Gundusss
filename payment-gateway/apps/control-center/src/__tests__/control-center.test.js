@@ -87,10 +87,11 @@ describe('Control Center Supervisor Integration Tests', () => {
     const res = await get('/api/services', ADMIN_AUTH);
     assert.equal(res.status, 200);
     assert.ok(Array.isArray(res.body));
-    assert.equal(res.body.length, 4);
+    assert.equal(res.body.length, 5);
 
     const ids = res.body.map(s => s.id);
     assert.ok(ids.includes('payment-api'));
+    assert.ok(ids.includes('checkout-portal'));
     assert.ok(ids.includes('merchant-admin'));
     assert.ok(ids.includes('gmail-observer'));
     assert.ok(ids.includes('sms-observer'));
