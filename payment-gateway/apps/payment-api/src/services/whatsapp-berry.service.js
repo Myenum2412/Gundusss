@@ -622,8 +622,9 @@ export class WhatsAppBerryService extends EventEmitter {
    * @param {string} to 10-digit or full phone number
    * @param {string} otpCode 6-digit verification code
    * @param {string} [customerName]
+   * @param {{ userEmail?: string }} [options] fees app account owning the session
    */
-  async sendOtp(to, otpCode, customerName = '') {
+  async sendOtp(to, otpCode, customerName = '', options = {}) {
     const greeting = customerName ? `Hello *${customerName}*!` : 'Hello!';
     const message =
       `🔐 *YOUPI PG Verification Code*\n\n` +
@@ -631,16 +632,48 @@ export class WhatsAppBerryService extends EventEmitter {
       `⏱ _Valid for 5 minutes. Do not share this code with anyone._\n\n` +
       `— *YOUPI PG Secure Payments*`;
 
-    return this.sendMessage(to, message);
+    return this.sendMessage(to, message, options);
+  }
+
+  /**
+   * Resolve the fees app account email(s) whose connected WhatsApp session may
+   * deliver bridged messages.
+   *
+   * An explicit per-request value wins, then FEES_WHATSAPP_BRIDGE_USER_EMAIL
+   * (comma-separated, tried in order). When neither is set we fall back to the
+   * fees backend's own system session by omitting userEmail from the request.
+   *
+   * @param {string} [explicit]
+   * @returns {string[]}
+   */
+  bridgeUserEmails(explicit) {
+    const emails = [];
+    const push = (value) => {
+      for (const part of String(value || '').split(',')) {
+        const email = part.trim().toLowerCase();
+        if (email && !emails.includes(email)) emails.push(email);
+      }
+    };
+    push(explicit);
+    push(process.env.FEES_WHATSAPP_BRIDGE_USER_EMAIL);
+    return emails;
   }
 
   /**
    * Deliver through the fees app's linked WhatsApp bot when this gateway's own
    * session is not connected. Returns null when the bridge is not configured.
+   *
+   * The fees backend keeps one isolated WhatsApp session per account, so the
+   * bridge must be told which account owns the connected number. Without
+   * userEmail it always uses the fees system/super-admin session — which is
+   * disconnected in a normal merchant deployment even when the workspace
+   * owner's own WhatsApp is linked.
+   *
    * @param {string} to
    * @param {string} message
+   * @param {{ userEmail?: string }} [options]
    */
-  async sendViaFeesBridge(to, message) {
+  async sendViaFeesBridge(to, message, options = {}) {
     const baseUrl = (process.env.FEES_WHATSAPP_BRIDGE_URL || 'http://127.0.0.1:4000')
       .trim()
       .replace(/\/+$/, '');
@@ -657,46 +690,82 @@ export class WhatsAppBerryService extends EventEmitter {
       return { success: false, delivered: false, bridge: true, error: `Invalid recipient phone number: ${to}` };
     }
 
-    try {
-      const res = await fetch(`${baseUrl}/api/whatsapp/internal/send`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-WhatsApp-Bridge-Token': token
-        },
-        body: JSON.stringify({ to: cleanTo, message }),
-        signal: AbortSignal.timeout(20000)
-      });
-      const json = await res.json().catch(() => ({}));
+    // Try every configured workspace owner before giving up. `[null]` keeps the
+    // legacy system-session behaviour when no account email is configured.
+    const configuredEmails = this.bridgeUserEmails(options.userEmail);
+    const candidates = configuredEmails.length > 0 ? configuredEmails : [null];
+    let lastFailure = null;
 
-      if (!res.ok) {
-        const error = json?.error || `Fees WhatsApp bridge rejected the message (HTTP ${res.status})`;
-        console.warn(`[WhatsAppBerryService] Fees bridge delivery failed for ${cleanTo}: ${error}`);
-        return { success: false, delivered: false, bridge: true, error, status: this.status };
+    for (const userEmail of candidates) {
+      try {
+        const payload = { to: cleanTo, message };
+        if (userEmail) payload.userEmail = userEmail;
+
+        const res = await fetch(`${baseUrl}/api/whatsapp/internal/send`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-WhatsApp-Bridge-Token': token
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(20000)
+        });
+        const json = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          const error = json?.error || `Fees WhatsApp bridge rejected the message (HTTP ${res.status})`;
+          console.warn(
+            `[WhatsAppBerryService] Fees bridge delivery failed for ${cleanTo}` +
+              `${userEmail ? ` via ${userEmail}` : ''}: ${error}`
+          );
+          lastFailure = {
+            success: false,
+            delivered: false,
+            bridge: true,
+            error,
+            status: this.status,
+            attemptedUserEmails: configuredEmails
+          };
+          continue;
+        }
+
+        console.log(
+          `[WhatsAppBerryService] Message delivered through the fees WhatsApp bridge to ${cleanTo}` +
+            `${userEmail ? ` via ${userEmail}` : ''}`
+        );
+        return {
+          success: true,
+          delivered: true,
+          bridge: true,
+          id: json?.data?.id || `bridge_${Date.now()}`,
+          status: this.status,
+          userEmail: userEmail || null,
+          result: json?.data
+        };
+      } catch (err) {
+        const error = `Fees WhatsApp bridge unreachable at ${baseUrl}: ${err.message}`;
+        console.warn(`[WhatsAppBerryService] ${error}`);
+        lastFailure = {
+          success: false,
+          delivered: false,
+          bridge: true,
+          error,
+          status: this.status,
+          attemptedUserEmails: configuredEmails
+        };
       }
-
-      console.log(`[WhatsAppBerryService] Message delivered through the fees WhatsApp bridge to ${cleanTo}`);
-      return {
-        success: true,
-        delivered: true,
-        bridge: true,
-        id: json?.data?.id || `bridge_${Date.now()}`,
-        status: this.status,
-        result: json?.data
-      };
-    } catch (err) {
-      const error = `Fees WhatsApp bridge unreachable at ${baseUrl}: ${err.message}`;
-      console.warn(`[WhatsAppBerryService] ${error}`);
-      return { success: false, delivered: false, bridge: true, error, status: this.status };
     }
+
+    return lastFailure;
   }
 
   /**
    * Universal message sender via BerryProtocol
    * @param {string} to
    * @param {string} message
+   * @param {{ userEmail?: string }} [options] fees app account owning the bridge session
    */
-  async sendMessage(to, message) {
+  async sendMessage(to, message, options = {}) {
     const cleanTo = String(to || '').replace(/[^0-9]/g, '');
     const dummyPrefixes = ['910000000000', '0000000000', '919999999999'];
     const isDummy = dummyPrefixes.some(prefix => cleanTo.startsWith(prefix));
@@ -740,25 +809,31 @@ export class WhatsAppBerryService extends EventEmitter {
     }
 
     if (!this.client || this.status !== 'CONNECTED') {
-      const bridgeResult = await this.sendViaFeesBridge(to, message);
+      const bridgeResult = await this.sendViaFeesBridge(to, message, options);
       if (bridgeResult) {
         if (bridgeResult.delivered) return bridgeResult;
         console.warn(`[WhatsAppBerryService] Fees bridge fallback failed for ${to}: ${bridgeResult.error || 'unknown error'}`);
       }
       const bridgeNote = bridgeResult?.error ? ` Fees app bridge: ${bridgeResult.error}` : '';
+      const attempted = Array.isArray(bridgeResult?.attemptedUserEmails)
+        ? bridgeResult.attemptedUserEmails.filter(Boolean)
+        : [];
+      const hint = attempted.length > 0
+        ? ` Link WhatsApp for ${attempted.join(', ')} in the fees app Settings, or link this gateway's own number in Merchant Admin.`
+        : ' Please link WhatsApp in Merchant Admin.';
       console.warn(`[WhatsAppBerryService] WhatsApp BerryProtocol not connected (Status: ${this.status}). Message logged for ${to}.`);
       return {
         success: false,
         delivered: false,
         queued: true,
         status: this.status,
-        message: `WhatsApp is not connected (Status: ${this.status}).${bridgeNote} Please link WhatsApp in Merchant Admin.`
+        message: `WhatsApp is not connected (Status: ${this.status}).${bridgeNote}${hint}`
       };
     }
 
     const jid = this.formatJid(to);
     if (!jid) {
-      const bridgeResult = await this.sendViaFeesBridge(to, message);
+      const bridgeResult = await this.sendViaFeesBridge(to, message, options);
       if (bridgeResult) return bridgeResult;
       return { success: false, delivered: false, error: `Invalid recipient phone number: ${to}` };
     }
@@ -793,7 +868,7 @@ export class WhatsAppBerryService extends EventEmitter {
         this.initialize().catch(() => {});
       }
 
-      const bridgeResult = await this.sendViaFeesBridge(to, message);
+      const bridgeResult = await this.sendViaFeesBridge(to, message, options);
       if (bridgeResult?.delivered) return bridgeResult;
       return {
         success: false,
