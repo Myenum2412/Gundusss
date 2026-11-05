@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { getWaState, startWa, logoutWa, sendWaMessage, waSessionKeyFor } from '../whatsapp.js';
+import { getWaState, startWa, logoutWa, sendWaMessage, waSessionKeyFor, findAvailableWaSessionKey } from '../whatsapp.js';
 
 const AttachmentSchema = z
   .object({
@@ -160,22 +160,29 @@ export async function whatsappRoutes(app: FastifyInstance) {
         .send({ error: 'A message, attachment, or CTA button is required.' });
     }
 
-    // System sender: the fixed super admin's own WhatsApp session.
-    const key = userEmail ? waSessionKeyFor(userEmail) : waSessionKeyFor();
-    try {
-      const result = await sendWaMessage(
-        to,
-        message,
-        attachment ? [attachment] : [],
-        cta,
-        key
-      );
-      return { data: result };
-    } catch (err: any) {
-      const code = err?.statusCode === 409 ? 409 : err?.statusCode === 400 ? 400 : 500;
-      return reply.code(code).send({
-        error: err?.message ?? 'WhatsApp bridge could not deliver the message',
-      });
+    // System sender: the requested user's session, falling back to any connected session or super admin
+    const primaryKey = userEmail ? waSessionKeyFor(userEmail) : waSessionKeyFor();
+    const candidateKeys = Array.from(new Set([primaryKey, findAvailableWaSessionKey(primaryKey)].filter(Boolean) as string[]));
+    let lastError: any = null;
+
+    for (const key of candidateKeys) {
+      try {
+        const result = await sendWaMessage(
+          to,
+          message,
+          attachment ? [attachment] : [],
+          cta,
+          key
+        );
+        return { data: result };
+      } catch (err: any) {
+        lastError = err;
+      }
     }
+
+    const code = lastError?.statusCode === 409 ? 409 : lastError?.statusCode === 400 ? 400 : 500;
+    return reply.code(code).send({
+      error: lastError?.message ?? 'WhatsApp bridge could not deliver the message',
+    });
   });
 }

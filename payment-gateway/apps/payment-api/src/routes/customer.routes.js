@@ -280,6 +280,19 @@ export function registerCustomerRoutes(server, ctx) {
     console.log(`[CustomerAuth] OTP generated for +91${cleanMobile} (expires in 5 mins)`);
 
     if (!dispatchResult || dispatchResult.delivered !== true) {
+      if (process.env.YOUPI_EXPOSE_DEV_OTP === "true" && process.env.NODE_ENV !== "production") {
+        console.log(`[CustomerAuth] Dev OTP expose enabled: proceeding despite delivery failure for +91${cleanMobile}`);
+        HttpServer.json(res, 200, {
+          success: true,
+          message: "OTP generated (dev bypass).",
+          mobileNumber: cleanMobile,
+          expiresInSeconds: 300,
+          devOtp: otpCode,
+          dispatch: dispatchResult
+        });
+        return;
+      }
+
       // Nothing reached the customer: release the cooldown so they can retry
       // immediately, and discard the undelivered challenge. Reporting success
       // here used to leave the checkout UI on an OTP screen forever.
@@ -299,6 +312,7 @@ export function registerCustomerRoutes(server, ctx) {
         error: deliveryError,
         code: 'OTP_DELIVERY_FAILED',
         mobileNumber: cleanMobile,
+        canContinueAsGuest: true,
         dispatch: dispatchResult
       });
       return;

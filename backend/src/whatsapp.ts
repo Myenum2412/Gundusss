@@ -22,7 +22,7 @@
  * normalizeWaNumber / waSessionKeyFor — every caller passes the acting user's
  * session key (or none, for system-level sends).
  */
-import { rmSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
+import { rmSync, mkdirSync, existsSync, copyFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { randomBytes } from 'node:crypto';
@@ -164,6 +164,41 @@ export function hasWaCredentials(userKey?: string | null): boolean {
   } catch {
     return false;
   }
+}
+/**
+ * Find any session key that is currently connected, or has valid credentials
+ * on disk ready to start.
+ */
+export function findAvailableWaSessionKey(preferredKey?: string | null): string | null {
+  const pref = preferredKey ? waSessionKeyFor(preferredKey) : null;
+  if (pref) {
+    const prefSession = sessions.get(pref);
+    if (prefSession?.status === "ready" && prefSession.sock) return pref;
+    if (hasWaCredentials(pref)) return pref;
+  }
+
+  // Check any other in-memory sessions that are ready
+  for (const [k, s] of sessions.entries()) {
+    if (s.status === "ready" && s.sock) return k;
+  }
+
+  // Check on disk under AUTH_DIR for any paired session folder
+  try {
+    if (existsSync(AUTH_DIR)) {
+      const entries = readdirSync(AUTH_DIR);
+      for (const entry of entries) {
+        if (entry === pref) continue;
+        const creds = path.join(AUTH_DIR, entry, "creds.json");
+        if (existsSync(creds)) {
+          return entry;
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return null;
 }
 
 function getSession(userKey?: string | null): WaSession {

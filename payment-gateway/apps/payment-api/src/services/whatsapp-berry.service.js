@@ -116,7 +116,7 @@ export class WhatsAppBerryService extends EventEmitter {
     this.isInitializing = false;
     this.shouldKeepPairingAlive = true;
     this.reconnectTimer = null;
-    this.isSimulatedMode = false;
+    this.isSimulatedMode = options.isSimulatedMode ?? (process.env.YOUPI_WHATSAPP_SIMULATE === "true");
 
     // Check if previous valid connection session exists on disk
     this.restoreSessionMeta();

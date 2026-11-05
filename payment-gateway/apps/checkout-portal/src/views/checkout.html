@@ -426,6 +426,49 @@
     let otpCooldownTimer = null;
     let otpCooldownSec = 0;
 
+    function showGuestFallbackPrompt(errorMsg) {
+      const notice = document.getElementById("authGuestFallbackNotice");
+      const noticeText = document.getElementById("authGuestFallbackNoticeText");
+      if (notice) {
+        notice.style.display = "block";
+        if (noticeText) {
+          const isWaNotConnected = String(errorMsg || "").includes("WhatsApp is not connected");
+          noticeText.innerHTML = isWaNotConnected
+            ? "WhatsApp OTP is not linked on this gateway. You can skip WhatsApp login and proceed directly to make your payment."
+            : escapeHtml(errorMsg || "WhatsApp OTP delivery failed. You can proceed directly to payment.");
+        }
+      }
+    }
+
+    function handleContinueAsGuest() {
+      const mobileInput = document.getElementById("authMobileInput");
+      const nameInput = document.getElementById("authSignupName");
+      const emailInput = document.getElementById("authSignupEmail");
+
+      const rawMobile = mobileInput ? mobileInput.value : "";
+      const cleanMobile = String(rawMobile).replace(/\D/g, "").slice(-10);
+      const name = (nameInput && nameInput.value.trim()) || currentAuthName || (window.rawOrderData?.customer?.name) || (window.rawOrderData?.metadata?.studentName) || "Guest Payer";
+      const email = (emailInput && emailInput.value.trim()) || currentAuthEmail || "";
+
+      activeCustomer = {
+        id: "guest_" + Date.now(),
+        name: name,
+        fullName: name,
+        mobileNumber: cleanMobile || (window.rawOrderData?.customer?.mobileNumber) || "",
+        phoneNumber: cleanMobile || (window.rawOrderData?.customer?.mobileNumber) || "",
+        email: email,
+        isGuest: true
+      };
+
+      try {
+        localStorage.setItem("youpi_guest_payer", JSON.stringify(activeCustomer));
+      } catch (e) {}
+
+      updateCustomerDisplay(activeCustomer);
+      setGatewayAuthMode(false);
+      showOptionToast("Proceeding to payment options");
+    }
+
     function setGatewayAuthMode(isAuthView) {
       const authEl = document.getElementById('preGatewayAuthView');
       const payEl = document.getElementById('paymentGatewayInterface');
@@ -605,6 +648,7 @@
           if (sendData && sendData.devOtp) lastReceivedDevOtp = sendData.devOtp;
           if (!sendRes.ok) {
             showOptionToast(sendData.error || 'Could not deliver the WhatsApp OTP. Please try again.');
+            showGuestFallbackPrompt(sendData.error);
             return;
           }
 
@@ -707,6 +751,7 @@
           showOptionToast('WhatsApp verification code sent!');
         } else {
           showOptionToast(data.error || 'Failed to send WhatsApp OTP.');
+          showGuestFallbackPrompt(data.error);
         }
       } catch (e) {
         showOptionToast('Network error sending WhatsApp OTP.');
