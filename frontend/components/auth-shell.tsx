@@ -1,4 +1,4 @@
-import { SproutIcon } from "lucide-react"
+
 
 export function AuthShell({
   title,
@@ -17,8 +17,8 @@ export function AuthShell({
     <div className="grid min-h-svh bg-background lg:grid-cols-[1fr_1.1fr]">
       <div className="flex flex-col p-6 md:p-10">
         <a href="/" className="flex w-fit items-center gap-2.5">
-          <span className="flex size-8 items-center justify-center rounded-[10px] bg-primary text-primary-foreground shadow-sm">
-            <SproutIcon className="size-4" />
+          <span className="flex size-9 items-center justify-center rounded-[10px] bg-primary/10 overflow-hidden shadow-sm">
+            <img src="/logo.png" alt="MyFees" className="size-8 object-contain" />
           </span>
           <span className="text-sm font-semibold tracking-tight">MyFees</span>
         </a>

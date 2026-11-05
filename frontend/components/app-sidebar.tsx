@@ -17,7 +17,6 @@ import {
   SidebarSeparator,
 } from "@/components/ui/sidebar"
 import {
-  SproutIcon,
   LayoutDashboardIcon,
   GraduationCapIcon,
   ClipboardListIcon,
@@ -186,8 +185,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" className="rounded-xl hover:bg-sidebar-accent">
-              <div className="flex aspect-square size-8 items-center justify-center rounded-[10px] bg-primary text-primary-foreground shadow-sm">
-                <SproutIcon className="size-4" />
+              <div className="flex aspect-square size-8 items-center justify-center rounded-[10px] bg-primary/10 overflow-hidden shadow-sm">
+                <img
+                  src="/logo.png"
+                  alt="MyFees"
+                  className="size-7 object-contain"
+                />
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate text-[13px] font-semibold tracking-tight">

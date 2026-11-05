@@ -376,8 +376,8 @@ export default function PublicPaymentPage() {
             {/* YOUPI PG Header */}
             <div className="flex items-center justify-between bg-slate-900 px-4 py-3 text-white dark:bg-slate-950 border-b border-slate-800">
               <div className="flex items-center gap-2">
-                <span className="grid size-6 place-items-center rounded-full bg-emerald-500/20 text-emerald-400">
-                  <WalletIcon className="size-3.5" />
+                <span className="grid size-6 place-items-center rounded-lg bg-white/10 overflow-hidden">
+                  <img src="/logo.png" alt="MyFees" className="size-5 object-contain" />
                 </span>
                 <div>
                   <p className="text-xs font-bold leading-tight">MyFees</p>
@@ -577,8 +577,8 @@ export default function PublicPaymentPage() {
             {/* 1. YOUPI PG Banner */}
             <div className="flex items-center justify-between bg-slate-900 px-4 py-3 text-white dark:bg-slate-950 border-b border-slate-800">
               <div className="flex items-center gap-2">
-                <span className="grid size-6 place-items-center rounded-full bg-emerald-500/20 text-emerald-400">
-                  <WalletIcon className="size-3.5" />
+                <span className="grid size-6 place-items-center rounded-lg bg-white/10 overflow-hidden">
+                  <img src="/logo.png" alt="MyFees" className="size-5 object-contain" />
                 </span>
                 <div>
                   <p className="text-xs font-bold leading-tight tracking-wide">MyFees</p>
