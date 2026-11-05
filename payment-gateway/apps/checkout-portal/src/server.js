@@ -393,9 +393,10 @@ export class CheckoutServer {
         }
       }
 
-      // Static CSS & JS Asset Handler with Secure Path Traversal Prevention
-      if (pathname.startsWith('/css/') || pathname.startsWith('/js/')) {
-        const assetFolder = pathname.startsWith('/css/') ? 'css' : 'js';
+      // Static asset handler (CSS, JS, self-hosted fonts) with secure path-traversal prevention
+      const assetPrefix = ['/css/', '/js/', '/fonts/'].find((prefix) => pathname.startsWith(prefix));
+      if (assetPrefix) {
+        const assetFolder = assetPrefix.slice(1, -1);
         const assetName = path.basename(pathname);
         const assetDir = path.resolve(__dirname, '..', 'public', assetFolder);
         const assetPath = path.resolve(assetDir, assetName);
@@ -404,10 +405,14 @@ export class CheckoutServer {
         const isSecure = relative && !relative.startsWith('..') && !path.isAbsolute(relative);
 
         if (isSecure && fs.existsSync(assetPath)) {
-          const contentType = assetFolder === 'css' ? 'text/css; charset=utf-8' : 'application/javascript; charset=utf-8';
+          const contentType = assetFolder === 'css'
+            ? 'text/css; charset=utf-8'
+            : assetFolder === 'js'
+              ? 'application/javascript; charset=utf-8'
+              : 'font/woff2';
           res.writeHead(200, {
             'Content-Type': contentType,
-            'Cache-Control': 'public, max-age=86400',
+            'Cache-Control': assetFolder === 'fonts' ? 'public, max-age=31536000, immutable' : 'public, max-age=86400',
             'Access-Control-Allow-Origin': '*'
           });
           fs.createReadStream(assetPath).pipe(res);

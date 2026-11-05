@@ -320,7 +320,7 @@ export class AdminServer {
       }
 
       // Self-hosted UI fonts (CSP blocks third-party font CDNs)
-      const fontMatch = /^\/fonts\/(dm-sans|sora)\.woff2$/.exec(pathname);
+      const fontMatch = /^\/fonts\/(inter-latin|dm-sans|sora)\.woff2$/.exec(pathname);
       if (fontMatch && req.method === 'GET') {
         const fontPath = path.resolve(__dirname, '../public/fonts', `${fontMatch[1]}.woff2`);
         if (fs.existsSync(fontPath)) {

@@ -7,7 +7,10 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 // Initializes the Appwrite client and pings once when the app starts.
 import "@/lib/appwrite";
 
-const inter = Inter({ subsets: ['latin'], display: 'swap' });
+// Expose the loaded family as a CSS variable so the Tailwind `font-sans`
+// token resolves to the actual next/font face instead of the literal name
+// "Inter", which next/font never registers (it emits `__Inter_<hash>`).
+const inter = Inter({ subsets: ['latin'], display: 'swap', variable: '--font-inter' });
 
 export const metadata: Metadata = {
   title: 'MyFees · Fees Manager',
@@ -26,7 +29,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={cn("font-sans", inter.className)}>
+    <html lang="en" className={cn("font-sans", inter.variable)}>
       <body className="min-h-svh bg-background text-foreground">
         <TooltipProvider>{children}</TooltipProvider>
       </body>

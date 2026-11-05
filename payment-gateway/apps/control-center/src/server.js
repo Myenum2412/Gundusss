@@ -17,7 +17,7 @@ const BASE_SECURITY_HEADERS = Object.freeze({
 });
 
 /** Routes reachable without a credential (liveness probe and the dashboard shell). */
-const PUBLIC_PATHS = new Set(['/health', '/', '/dashboard', '/fonts/dm-sans.woff2', '/fonts/sora.woff2']);
+const PUBLIC_PATHS = new Set(['/health', '/', '/dashboard', '/fonts/inter-latin.woff2', '/fonts/dm-sans.woff2', '/fonts/sora.woff2']);
 
 /** True when the caller presented the admin bearer token in constant time (or ?token= on GET SSE). */
 function hasAdminToken(req, url = null, pathname = '') {
@@ -199,7 +199,7 @@ export class ControlCenterServer {
       }
 
       // Self-hosted UI fonts (CSP blocks third-party font CDNs)
-      const fontMatch = /^\/fonts\/(dm-sans|sora)\.woff2$/.exec(pathname);
+      const fontMatch = /^\/fonts\/(inter-latin|dm-sans|sora)\.woff2$/.exec(pathname);
       if (fontMatch && method === 'GET') {
         const fontPath = path.resolve(__dirname, '../public/fonts', `${fontMatch[1]}.woff2`);
         if (fs.existsSync(fontPath)) {

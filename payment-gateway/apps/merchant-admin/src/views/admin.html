@@ -17,28 +17,21 @@
   <style>
     /* YOUPI Merchant & Supervisor Hub
        Direction: a payments ledger. Cool stone neutrals, one emerald accent,
-       Sora for display (brand, headings, figures), DM Sans for UI text, both self-hosted
-       from /fonts because the CSP is style-src 'self'. Icons: Heroicons outline sprite.
+       Inter for all text (matching the MyFees app), self-hosted from /fonts
+       because the CSP is style-src 'self'. Icons: Heroicons outline sprite.
        One radius scale (6 controls / 10 surfaces / 4 tags). */
     @font-face {
-      font-family: "DM Sans";
-      src: url("/fonts/dm-sans.woff2") format("woff2");
-      font-weight: 100 1000;
-      font-display: swap;
-    }
-
-    @font-face {
-      font-family: "Sora";
-      src: url("/fonts/sora.woff2") format("woff2");
-      font-weight: 100 800;
+      font-family: "Inter";
+      src: url("/fonts/inter-latin.woff2") format("woff2");
+      font-weight: 100 900;
       font-display: swap;
     }
 
     :root,
     [data-theme="light"] {
       --theme: light;
-      --font-ui: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-      --font-display: "Sora", "DM Sans", system-ui, sans-serif;
+      --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-display: "Inter", system-ui, sans-serif;
       --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
       --r-ctl: 6px;
       --r-surf: 10px;

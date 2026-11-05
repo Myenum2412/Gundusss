@@ -170,8 +170,8 @@ export class CoinWalletStoreServer {
         return;
       }
 
-      // SERVE LOCAL PUBLIC ASSETS: /assets/*, /css/*, /js/*
-      if ((pathname.startsWith('/assets/') || pathname.startsWith('/css/') || pathname.startsWith('/js/')) && (method === 'GET' || method === 'HEAD')) {
+      // SERVE LOCAL PUBLIC ASSETS: /assets/*, /css/*, /js/*, /fonts/*
+      if ((pathname.startsWith('/assets/') || pathname.startsWith('/css/') || pathname.startsWith('/js/') || pathname.startsWith('/fonts/')) && (method === 'GET' || method === 'HEAD')) {
         const publicDir = path.resolve(__dirname, '../public');
         const safeRelative = path.normalize(pathname.replace(/^\//, '')).replace(/^(\.\.(\/|\\|$))+/, '');
         const targetPath = path.join(publicDir, safeRelative);
@@ -181,6 +181,7 @@ export class CoinWalletStoreServer {
           const ext = path.extname(targetPath).toLowerCase();
           const contentType = ext === '.css' ? 'text/css; charset=utf-8'
             : ext === '.js' ? 'application/javascript; charset=utf-8'
+            : ext === '.woff2' ? 'font/woff2'
             : ext === '.png' ? 'image/png'
             : ext === '.svg' ? 'image/svg+xml'
             : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
