@@ -35,6 +35,7 @@ export interface UserRecord {
   password_hash: string;
   role?: Role;
   active?: boolean;
+  avatar_url?: string;
   /** Workspace this account belongs to. */
   profile_id?: string;
   /** True only for the fixed developer account. */
@@ -50,6 +51,7 @@ export interface PublicUser {
   email: string;
   role: Role;
   active: boolean;
+  avatar_url?: string;
   profile_id: string;
   super: boolean;
   created_at: string;
@@ -77,6 +79,7 @@ export function toPublicUser(user: UserRecord): PublicUser {
     email: normalizeEmail(user.email),
     role: normalizeRole(user.role),
     active: user.active !== false,
+    avatar_url: (user.avatar_url ?? '').trim() || undefined,
     profile_id: (user.profile_id ?? '').trim(),
     super: isSuperUser(user),
     created_at: user.created_at,

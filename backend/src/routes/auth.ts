@@ -13,10 +13,13 @@ import {
   countUsers,
   findUserByEmail,
   getAuthUser,
+  invalidateUserCache,
   normalizeEmail,
+  saveUser,
   toPublicUser,
   verifyPassword,
   type PublicUser,
+  type UserRecord,
 } from '../users.js';
 
 const SetupSchema = z.object({
@@ -172,6 +175,28 @@ export async function authRoutes(app: FastifyInstance) {
         activeProfile,
       },
     };
+  });
+
+  // PUT /api/auth/profile — update current authenticated user's profile/avatar
+  app.put('/api/auth/profile', async (req, reply) => {
+    if (!req.auth?.email) {
+      return reply.code(401).send({ error: 'Authentication required.' });
+    }
+    const body = (req.body ?? {}) as { name?: string; avatar_url?: string };
+    const user = await findUserByEmail(req.auth.email);
+    if (!user) {
+      return reply.code(404).send({ error: 'User not found.' });
+    }
+    const updated: UserRecord = {
+      ...user,
+      name: typeof body.name === 'string' && body.name.trim() ? body.name.trim() : user.name,
+      avatar_url: typeof body.avatar_url === 'string' ? body.avatar_url : user.avatar_url,
+      updated_at: new Date().toISOString(),
+    };
+    await saveUser(updated);
+    invalidateUserCache(user.email);
+    const pub = toPublicUser(updated);
+    return { data: pub };
   });
 
   // GET /api/auth/gate — nginx auth_request target for the gateway-admin panel.

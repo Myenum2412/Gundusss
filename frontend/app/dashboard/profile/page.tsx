@@ -16,11 +16,12 @@ import { isSyncing } from "@/lib/live"
 import { useLiveReload } from "@/hooks/use-live-reload"
 import { useAuth } from "@/components/auth-provider"
 import { ROLE_LABELS } from "@/lib/session"
+import { updateProfile } from "@/lib/auth"
 
 const API_URL = API_BASE
 
 export default function ProfilePage() {
-  const { user: authUser, signOut, can, activeProfile } = useAuth()
+  const { user: authUser, signOut, can, activeProfile, refresh } = useAuth()
   const [counts, setCounts] = useState({
     students: 0,
     groups: 0,
@@ -108,6 +109,11 @@ export default function ProfilePage() {
     await signOut()
   }
 
+  async function handleAvatarUpdate(avatarUrl: string) {
+    await updateProfile({ avatar_url: avatarUrl })
+    await refresh()
+  }
+
   return (
     <DashboardShell trail={[{ label: "Dashboard", href: "/dashboard" }, { label: "Profile" }]}>
       <PageHeader
@@ -124,7 +130,9 @@ export default function ProfilePage() {
           userId: String(authUser.id),
           profileId: activeProfile.profileId,
           paymentUrl: activeProfile.paymentUrl,
+          avatarUrl: authUser.avatar_url,
         }}
+        onAvatarUpdate={handleAvatarUpdate}
         stats={[
           { label: "Students", value: String(counts.students) },
           { label: "Groups", value: String(counts.groups) },

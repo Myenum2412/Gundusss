@@ -19,6 +19,7 @@ export interface AuthUser {
   profile_id: string
   /** True only for the fixed developer super admin. */
   super: boolean
+  avatar_url?: string
   created_at?: string
 }
 

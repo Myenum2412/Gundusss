@@ -82,6 +82,18 @@ export async function getMe(): Promise<{
   ).data
 }
 
+export async function updateProfile(input: {
+  name?: string
+  avatar_url?: string
+}): Promise<AuthUser> {
+  const res = await apiFetch("/api/auth/profile", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  })
+  return (await readBody<{ data: AuthUser }>(res)).data
+}
+
 export async function logout(): Promise<void> {
   try {
     await apiFetch("/api/auth/logout", { method: "POST" })

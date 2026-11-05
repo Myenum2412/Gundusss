@@ -631,6 +631,7 @@ export interface BusinessProfileUser {
   userId: string
   profileId: string
   paymentUrl: string
+  avatarUrl?: string
 }
 
 export interface BusinessProfileStat {
@@ -667,6 +668,7 @@ export interface BusinessProfileFormProps {
   optionCount?: number
   canManageSettings?: boolean
   onSignOut?: () => void
+  onAvatarUpdate?: (avatarUrl: string) => Promise<void>
 }
 
 export default function BusinessProfileForm({
@@ -678,6 +680,7 @@ export default function BusinessProfileForm({
   optionCount = 0,
   canManageSettings = true,
   onSignOut,
+  onAvatarUpdate,
 }: BusinessProfileFormProps = {}) {
   const [profile, setProfile] = useState<BusinessProfile | null>(null)
   const [saved, setSaved] = useState<BusinessProfile | null>(null)
@@ -704,9 +707,12 @@ export default function BusinessProfileForm({
     try {
       const dataUrl = await processImageFile(file, 512, 512, 0.88)
       patchSection("media", { logoUrl: dataUrl })
+      if (onAvatarUpdate) {
+        await onAvatarUpdate(dataUrl)
+      }
       setNotice({
         tone: "success",
-        text: "Profile image updated. Click 'Save changes' to save permanently.",
+        text: "Avatar updated and synced to app sidebar!",
       })
     } catch {
       setNotice({
@@ -714,6 +720,17 @@ export default function BusinessProfileForm({
         text: "Could not process that image file. Please try another.",
       })
     }
+  }
+
+  async function handleRemoveAvatar() {
+    patchSection("media", { logoUrl: "" })
+    if (onAvatarUpdate) {
+      await onAvatarUpdate("")
+    }
+    setNotice({
+      tone: "success",
+      text: "Avatar removed.",
+    })
   }
 
   async function handleCoverUpload(file: File) {
@@ -1036,6 +1053,50 @@ export default function BusinessProfileForm({
                   e.target.value = ""
                 }}
               />
+
+              {/* Avatar Component with Upload Action */}
+              {(() => {
+                const effectiveAvatar = user?.avatarUrl || profile.media.logoUrl || ""
+                const source = (user?.name || user?.email || "?").trim()
+                const words = source.split(/\s+/).filter(Boolean)
+                const initialsText = words.length >= 2 ? (words[0][0] + words[1][0]).toUpperCase() : source.slice(0, 2).toUpperCase()
+
+                return (
+                  <div className="relative -mt-12 sm:-mt-16 shrink-0 group">
+                    <div className="size-20 sm:size-24 rounded-2xl border-4 border-background bg-card shadow-lg overflow-hidden flex items-center justify-center">
+                      {effectiveAvatar ? (
+                        <img
+                          src={effectiveAvatar}
+                          alt={user?.name || "Avatar"}
+                          className="size-full object-cover"
+                        />
+                      ) : (
+                        <div className="size-full bg-primary/10 text-primary flex items-center justify-center text-xl sm:text-2xl font-bold">
+                          {initialsText}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => logoInputRef.current?.click()}
+                      className="absolute -bottom-1 -right-1 rounded-full bg-primary text-primary-foreground p-2 shadow-md hover:bg-primary/90 transition-transform active:scale-95 cursor-pointer"
+                      title="Upload avatar image"
+                    >
+                      <Camera className="size-3.5" />
+                    </button>
+                    {effectiveAvatar && (
+                      <button
+                        type="button"
+                        onClick={handleRemoveAvatar}
+                        className="absolute -top-1 -right-1 rounded-full bg-background/90 text-muted-foreground p-1 shadow-sm hover:text-destructive border cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Remove avatar"
+                      >
+                        <XIcon className="size-3" />
+                      </button>
+                    )}
+                  </div>
+                )
+              })()}
 
               <div className="pb-1">
                 <div className="flex flex-wrap items-center gap-2">
