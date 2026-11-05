@@ -578,7 +578,7 @@ export function registerCheckoutRoutes(server, ctx) {
     }
 
     let upiUri = null;
-    if (session.status === PaymentStatus.ACTIVE && payeeVpa) {
+    if ([PaymentStatus.ACTIVE, PaymentStatus.INITIATED].includes(session.status) && payeeVpa) {
       try {
         upiUri = buildUpiUri({
           payeeVpa,
@@ -1128,6 +1128,18 @@ export function registerCheckoutRoutes(server, ctx) {
         error: 'Cannot start verification: payment session has EXPIRED.'
       });
       return;
+    }
+
+    if (session.status === PaymentStatus.INITIATED) {
+      const targetAccountId = session.receivingAccountId || ctx.accountRepo?.findActiveForMerchant(session.merchantId)?.id;
+      if (targetAccountId) {
+        ctx.queueEngine.enqueueOrActivate(session.id, targetAccountId);
+        const refreshed = ctx.sessionRepo.findById(session.id);
+        if (refreshed) {
+          session.status = refreshed.status;
+          session.expiresAt = refreshed.expiresAt;
+        }
+      }
     }
 
     if (session.status !== PaymentStatus.ACTIVE) {
