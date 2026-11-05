@@ -820,10 +820,14 @@ export async function createGatewayCheckout(
 
   let merchantName = 'Institute Office';
   let profilePaymentUrl = '';
+  let ownerEmail = '';
   try {
     const profile = await getProfile(input.profileId);
     if (profile?.name?.trim()) {
       merchantName = profile.name.trim();
+    }
+    if (profile?.ownerEmail?.trim()) {
+      ownerEmail = profile.ownerEmail.trim().toLowerCase();
     }
     if (profile?.paymentUrl?.trim()) {
       profilePaymentUrl = profile.paymentUrl.trim();
@@ -850,6 +854,9 @@ export async function createGatewayCheckout(
     metadata: {
       profileId: input.profileId,
       merchantName,
+      // The gateway's customer OTP login uses this to send the code through
+      // the workspace owner's own connected WhatsApp session.
+      ownerEmail: ownerEmail || undefined,
       studentId: input.studentId ?? '',
       studentName,
       feeId: input.feeId ?? null,

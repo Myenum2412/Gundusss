@@ -181,6 +181,31 @@ export function registerCustomerRoutes(server, ctx) {
     const email = normalizeEmail(body.email);
     const isNewUser = Boolean(body.isNewUser);
 
+    // Resolve which fees workspace owns this checkout so the OTP is delivered
+    // through THAT workspace's connected WhatsApp number. The checkout page
+    // sends paymentId; the fees backend stamps metadata.ownerEmail when it
+    // creates the session. Falls back to the configured bridge account.
+    let bridgeUserEmail = '';
+    try {
+      const paymentId = String(body.paymentId || body.sessionId || '').trim();
+      const orderId = String(body.orderId || '').trim();
+      let session = null;
+      if (paymentId && typeof ctx.sessionRepo.findById === 'function') {
+        session = ctx.sessionRepo.findById(paymentId);
+      }
+      // Never let a caller borrow another merchant's WhatsApp session.
+      if (session && ctx.defaultMerchant && session.merchantId !== ctx.defaultMerchant.id) {
+        session = null;
+      }
+      if (!session && orderId && ctx.defaultMerchant && typeof ctx.sessionRepo.findByOrderId === 'function') {
+        session = ctx.sessionRepo.findByOrderId(ctx.defaultMerchant.id, orderId);
+      }
+      const meta = session?.metadata && typeof session.metadata === 'object' ? session.metadata : {};
+      if (meta.ownerEmail) bridgeUserEmail = String(meta.ownerEmail).trim().toLowerCase();
+    } catch (err) {
+      console.warn(`[CustomerAuth] Could not resolve checkout owner for WhatsApp OTP: ${err.message}`);
+    }
+
     if (!rawMobile) {
       HttpServer.json(res, 400, { error: 'Mobile number is required.' });
       return;
@@ -242,7 +267,9 @@ export function registerCustomerRoutes(server, ctx) {
 
     if (berry) {
       try {
-        dispatchResult = await berry.sendOtp(cleanMobile, otpCode, displayName);
+        dispatchResult = await berry.sendOtp(cleanMobile, otpCode, displayName, {
+          userEmail: bridgeUserEmail || undefined
+        });
       } catch (err) {
         console.warn(`[CustomerAuth] WhatsApp dispatch notice: ${err.message}`);
       }

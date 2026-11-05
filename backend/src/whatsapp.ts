@@ -727,11 +727,24 @@ export async function sendWaMessage(
   userKey?: string | null
 ) {
   const key = waSessionKeyFor(userKey);
-  const session = getSession(key);
+  let session = getSession(key);
 
-  // If socket is starting or reconnecting, wait briefly for connection to open
-  if (session.status === 'starting' || (!session.sock && session.status !== 'qr' && session.status !== 'error')) {
-    await waitForReady(key, 7_000);
+  // A paired session that is idle after a restart (or reconnecting) must be
+  // brought up before we can send. Previously only `starting` was awaited, so
+  // the first send after a deploy failed with "not connected" even though the
+  // account's creds were safely on disk.
+  if (session.status !== 'ready' && session.status !== 'qr' && hasWaCredentials(key)) {
+    if (
+      !session.starting &&
+      (session.status === 'idle' || session.status === 'disconnected' || session.status === 'error')
+    ) {
+      void startWa(key);
+    }
+    await waitForReady(key, 12_000);
+    session = getSession(key);
+  } else if (session.status === 'starting') {
+    await waitForReady(key, 12_000);
+    session = getSession(key);
   }
 
   if (!session.sock || session.status !== 'ready') {
