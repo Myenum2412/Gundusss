@@ -755,7 +755,7 @@ export class WhatsAppBerryService extends EventEmitter {
           delivered: true,
           bridge: true,
           id: json?.data?.id || `bridge_${Date.now()}`,
-          status: this.status,
+          status: 'CONNECTED',
           userEmail: userEmail || null,
           result: json?.data
         };

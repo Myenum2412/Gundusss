@@ -230,8 +230,8 @@ try {
   // live ~8s later, so a QR is already waiting in the dashboard right after a
   // deploy/restart instead of showing "connecting" until the first UI poll.
   // Import lazily so the WhatsApp stack can never delay the API's boot.
-  const { startWa } = await import('./whatsapp.js');
-  void startWa();
+  const { warmAllWa } = await import('./whatsapp.js');
+  void warmAllWa();
 } catch (err) {
   app.log.error(err);
   process.exit(1);

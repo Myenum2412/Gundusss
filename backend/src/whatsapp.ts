@@ -511,6 +511,24 @@ export async function startWa(userKey?: string | null) {
   return getWaState(key);
 }
 
+export function warmAllWa(): void {
+  void startWa();
+  try {
+    if (existsSync(AUTH_DIR)) {
+      const entries = readdirSync(AUTH_DIR);
+      for (const entry of entries) {
+        const creds = path.join(AUTH_DIR, entry, 'creds.json');
+        if (existsSync(creds)) {
+          console.log('[wa] Auto-warming paired session on boot:', entry);
+          void startWa(entry);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[wa] Error warming saved sessions:', err);
+  }
+}
+
 export async function logoutWa(userKey?: string | null) {
   const key = waSessionKeyFor(userKey);
   const session = getSession(key);
