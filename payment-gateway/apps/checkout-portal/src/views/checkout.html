@@ -2242,7 +2242,7 @@
         };
       }
 
-      // 3. Pre-Gateway Customer Authentication Gate (Preserves identity up to 1 week)
+      // 3. Customer Identity & Direct Gateway Access (Show UPI QR scan immediately)
       if (data.customer) {
         activeCustomer = data.customer;
       } else if (!activeCustomer) {
@@ -2250,22 +2250,36 @@
         if (preserved && preserved.customer) {
           activeCustomer = preserved.customer;
           activeToken = preserved.token || activeToken;
+        } else {
+          // Check local stored guest payer
+          try {
+            const storedGuest = JSON.parse(localStorage.getItem("youpi_guest_payer") || "null");
+            if (storedGuest && (storedGuest.name || storedGuest.mobileNumber)) {
+              activeCustomer = storedGuest;
+            }
+          } catch (e) {}
+
+          // Auto-initialize guest payer from session metadata or default so UPI QR code is immediately visible
+          if (!activeCustomer) {
+            const payerName = data.metadata?.studentName || data.studentName || data.metadata?.payerName || 'Payer';
+            const payerPhone = data.metadata?.phone || data.metadata?.mobileNumber || data.metadata?.studentPhone || data.customerPhone || '';
+            activeCustomer = {
+              id: 'guest_' + Date.now(),
+              name: payerName,
+              fullName: payerName,
+              mobileNumber: payerPhone,
+              phoneNumber: payerPhone,
+              email: data.metadata?.email || '',
+              isGuest: true
+            };
+            try {
+              localStorage.setItem("youpi_guest_payer", JSON.stringify(activeCustomer));
+            } catch (e) {}
+          }
         }
       }
-      const hasCustomer = Boolean(data.customer || activeCustomer);
 
-      if (!hasCustomer) {
-        setGatewayAuthMode(true);
-        const stepMob = document.getElementById('authStepMobile');
-        const isAlreadyOnMobile = stepMob && !stepMob.hidden;
-        if (!currentAuthStep || (currentAuthStep === 'mobile' && !isAlreadyOnMobile)) {
-          goToAuthStep('mobile');
-        }
-        renderSavedAccountsUI();
-        return;
-      }
-
-      // Authenticated Customer
+      // Authenticated or Direct Guest Customer: unlock payment interface
       if (activeCustomer) {
         updateCustomerDisplay(activeCustomer);
         // Automatically bind customer to the payment session if session is INITIATED or unbound
@@ -2351,15 +2365,13 @@
             return;
           }
 
-          // Payment Done button permanently hidden — system auto-detects incoming transfers
           if (btnContinue) {
-            btnContinue.style.display = 'none';
+            btnContinue.style.display = 'inline-flex';
           }
 
           runCountdown(remainingSec, sec => {
             const tText = document.getElementById('activeTimerText');
             if (tText) tText.textContent = formatTime(sec);
-            if (btnContinue) btnContinue.style.display = 'none';
           }, () => {
             const tText = document.getElementById('activeTimerText');
             if (tText) tText.textContent = 'Expired';
