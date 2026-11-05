@@ -107,6 +107,14 @@ export class WebhookEngine {
       completedAt = new Date().toISOString();
     }
 
+    let customerPhone = session.metadata?.phone || session.metadata?.customerPhone || '';
+    if (!customerPhone && session.customerId && this.db) {
+      try {
+        const custRow = this.db.queryOne('SELECT mobile_number FROM customers WHERE id = ?', [session.customerId]);
+        if (custRow?.mobile_number) customerPhone = custRow.mobile_number;
+      } catch {}
+    }
+
     const deliveryId = crypto.randomUUID();
     const timestampNum = Date.now();
     const timestamp = timestampNum.toString();
@@ -129,8 +137,13 @@ export class WebhookEngine {
       verificationTag: session.verificationTag || session.verification_tag || (session.method === 'COD' ? 'COD_ORDER_PLACED' : 'UNVERIFIED'),
       verificationLevel: session.verificationLevel != null ? Number(session.verificationLevel) : (session.verification_level != null ? Number(session.verification_level) : (session.method === 'COD' ? 1 : 0)),
       completedAt,
+      customer: {
+        ...(session.customer || {}),
+        ...(customerPhone ? { phoneNumber: customerPhone, phone: customerPhone } : {})
+      },
       metadata: {
         ...(session.metadata || {}),
+        ...(customerPhone ? { phone: customerPhone, customerPhone } : {}),
         payerVpa: String(payerVpa || ''),
         bankName: String(bankName || ''),
         bankReference: String(utr || ''),

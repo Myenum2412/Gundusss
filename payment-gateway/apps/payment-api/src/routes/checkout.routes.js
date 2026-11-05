@@ -886,11 +886,17 @@ export function registerCheckoutRoutes(server, ctx) {
     }
 
     // Bind customer to payment session
+    const updatedMeta = {
+      ...(session.metadata || {}),
+      phone: customer.mobileNumber,
+      customerPhone: customer.mobileNumber,
+      customerName: customer.name
+    };
     ctx.db.execute(`
       UPDATE payment_sessions
-      SET customer_id = ?, updated_at = ?
+      SET customer_id = ?, metadata = ?, updated_at = ?
       WHERE id = ?
-    `, [customer.id, new Date().toISOString(), params.id]);
+    `, [customer.id, JSON.stringify(updatedMeta), new Date().toISOString(), params.id]);
 
     // INVARIANT: Single Active Payment Session per Customer
     if (otherActive && otherActive.id !== params.id) {

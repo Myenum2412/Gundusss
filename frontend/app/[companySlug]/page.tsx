@@ -95,6 +95,7 @@ export default function PublicPaymentPage() {
   const [submitting, setSubmitting] = useState(false)
   const [cashError, setCashError] = useState<string | null>(null)
   const [order, setOrder] = useState<PaymentOrder | null>(null)
+  const [pollStatus, setPollStatus] = useState<string | null>(null)
   const [cashPass, setCashPass] = useState<{
     passId: string
     studentName: string
@@ -239,6 +240,7 @@ export default function PublicPaymentPage() {
       try {
         const orderData = await getPublicPaymentStatus(queryOrderId)
         if (!active) return
+        if (orderData?.status) setPollStatus(orderData.status)
         if (
           orderData &&
           (orderData.status === "SUCCESS" || orderData.status === "COMPLETED")
@@ -401,6 +403,14 @@ export default function PublicPaymentPage() {
               </p>
               <div className="mt-3 inline-block rounded-xl bg-emerald-50 px-4 py-1.5 text-2xl font-black tabular-nums text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-400">
                 {formatInr(order.amount)}
+              </div>
+
+              <div className="mt-3 flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-left text-xs text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
+                <span className="text-xl leading-none">📱</span>
+                <div>
+                  <p className="font-bold leading-tight">Official Receipt Sent to WhatsApp</p>
+                  <p className="text-[11px] opacity-85">An official PDF payment receipt has been automatically dispatched to your linked WhatsApp number.</p>
+                </div>
               </div>
 
               <div className="mt-4 divide-y rounded-xl border bg-muted/20 text-xs text-left">

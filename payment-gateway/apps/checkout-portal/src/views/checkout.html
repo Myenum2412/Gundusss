@@ -2113,6 +2113,12 @@
 
           emitTriggerHook('PAYMENT_COMPLETED', { amount: data.amount, method: data.method, isCod: isCodOrder });
 
+          const payerPhone = data.customer?.phoneNumber || data.customer?.phone || data.metadata?.phone || (activeCustomer ? (activeCustomer.phoneNumber || activeCustomer.mobileNumber) : '');
+          const waNoticeText = document.getElementById('receiptWaNoticeText');
+          if (waNoticeText && payerPhone) {
+            waNoticeText.textContent = `A PDF receipt and payment confirmation has been dispatched to WhatsApp (+${payerPhone.replace(/\D/g, '')}).`;
+          }
+
           try {
             postToMerchant({
               event: 'youpi.payment_success',

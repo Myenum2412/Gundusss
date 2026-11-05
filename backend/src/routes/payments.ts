@@ -25,7 +25,14 @@ import {
   getEffectiveCheckoutUpi,
   isUsableUpiId,
 } from './payment-settings.js';
-import { getWaState, sendWaMessage, waSessionKeyFor, type WaAttachment } from '../whatsapp.js';
+import {
+  getWaState,
+  sendWaMessage,
+  waSessionKeyFor,
+  findAvailableWaSessionKey,
+  hasWaCredentials,
+  type WaAttachment,
+} from '../whatsapp.js';
 import { generateReceiptPdf } from '../receipt-pdf.js';
 import { buildReceiptPdfData } from './collections.js';
 import { generateNextMonthBill } from '../billing.js';
@@ -137,6 +144,7 @@ interface LocalOrder {
   amount: string;
   studentId: string;
   studentName: string;
+  phone?: string;
   institutionName?: string;
   feeId: number | null;
   checkoutUrl: string;
@@ -231,6 +239,7 @@ interface WebhookPayload {
   bankName?: string;
   bankReference?: string;
   completedAt?: string;
+  customer?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
 }
 
@@ -498,6 +507,123 @@ interface SettlementDetail {
  * Returns null when the receipt could not be recorded — callers must ask
  * the sender to retry.
  */
+
+async function sendReceiptWhatsApp(
+  app: FastifyInstance,
+  profileId: string,
+  order: LocalOrder,
+  detail: {
+    method?: string;
+    utr?: string;
+    payerVpa?: string;
+    bankName?: string;
+    amount?: string | number;
+    completedAt?: string;
+    metaPhone?: string;
+  },
+  waUserKey?: string
+): Promise<boolean> {
+  try {
+    const senderProfile = await getProfile(profileId);
+    const candidateKey =
+      (waUserKey ?? '').trim() ||
+      (senderProfile?.ownerEmail ? String(senderProfile.ownerEmail).trim().toLowerCase() : '') ||
+      waSessionKeyFor();
+
+    // Auto-discover any active / paired session (myenumam@gmail.com, candidate, or any on disk)
+    const waKey =
+      findAvailableWaSessionKey(candidateKey) ||
+      (hasWaCredentials(candidateKey) ? candidateKey : null) ||
+      findAvailableWaSessionKey('myenumam@gmail.com') ||
+      waSessionKeyFor('myenumam@gmail.com');
+
+    let recipientPhone =
+      order.phone ||
+      (order.metadata as any)?.phone ||
+      detail.metaPhone ||
+      '';
+
+    if (!recipientPhone && order.studentId) {
+      const stuRec = await getRecord<{ phone?: string }>(
+        APPWRITE_COLLECTIONS.students,
+        scopedEntityId(profileId, order.studentId)
+      );
+      recipientPhone = stuRec?.data?.phone || '';
+    }
+
+    if (!recipientPhone && order.studentName) {
+      try {
+        const studentRecords = await listScopedRecords<{ studentName?: string; phone?: string }>(
+          APPWRITE_COLLECTIONS.students,
+          profileId
+        );
+        const match = studentRecords.find(
+          (s) => s.data.studentName?.trim().toLowerCase() === order.studentName?.trim().toLowerCase()
+        );
+        if (match?.data?.phone) {
+          recipientPhone = match.data.phone;
+        }
+      } catch {}
+    }
+
+    if (!recipientPhone) {
+      app.log.warn({ orderId: order.orderId }, 'No recipient phone number found for WhatsApp receipt dispatch');
+      return false;
+    }
+
+    const cleanPhone = recipientPhone.replace(/\D/g, '');
+    if (cleanPhone.length < 10) {
+      app.log.warn({ orderId: order.orderId, recipientPhone }, 'Recipient phone number too short for WhatsApp receipt');
+      return false;
+    }
+
+    const receiptBank = order.bankName || detail.bankName;
+    const receiptPayer = order.payerVpa || detail.payerVpa;
+    const receiptMethodName = detail.method || order.method || 'UPI';
+    const amountVal = order.amount || detail.amount || '0';
+    const dateVal = paymentDate(detail.completedAt || order.completedAt);
+    const receiptNum = order.receiptId || `REC-${order.orderId.slice(-6)}`;
+
+    const receiptText = `🎉 *Payment Confirmation - Receipt #${receiptNum}*\n\nDear ${order.studentName || 'Student / Parent'},\n\nWe have successfully received your fee payment of *₹${amountVal}*.\n\n• *Receipt ID:* #${receiptNum}\n• *Order ID:* ${order.orderId}\n• *Method:* ${receiptMethodName}${receiptBank ? `\n• *Bank:* ${receiptBank}` : ''}${detail.utr || order.utr ? `\n• *UTR / Ref:* ${detail.utr || order.utr}` : ''}${receiptPayer ? `\n• *Payer:* ${receiptPayer}` : ''}\n• *Date:* ${dateVal}\n• *Status:* Confirmed (Paid)\n\nPlease find your official fee payment receipt attached in PDF format.\n\nThank you for your payment!\n— ${order.institutionName || senderProfile?.name || 'Accounts Desk'}`;
+
+    const attachments: WaAttachment[] = [];
+    try {
+      const receiptPayload: any = {
+        receiptId: receiptNum,
+        paymentDate: dateVal,
+        amount: amountVal,
+        method: receiptMethodName,
+        status: 'Paid',
+        orderId: order.orderId,
+        utr: detail.utr || order.utr,
+        bankName: receiptBank,
+        payerVpa: receiptPayer,
+        studentId: order.studentId || '',
+        studentName: order.studentName,
+        notes: `Fee payment confirmation for ${order.studentName || 'Student'} · Order: ${order.orderId}${receiptBank ? ` · Bank: ${receiptBank}` : ''}${detail.utr || order.utr ? ` · UTR: ${detail.utr || order.utr}` : ''}`,
+      };
+
+      const pdfData = await buildReceiptPdfData(profileId, receiptPayload);
+      const pdfBuffer = await generateReceiptPdf(pdfData);
+
+      attachments.push({
+        name: `Receipt_${receiptNum}.pdf`,
+        mime: 'application/pdf',
+        data: pdfBuffer.toString('base64'),
+      });
+    } catch (pdfErr) {
+      app.log.warn({ pdfErr }, 'Could not generate receipt PDF for WhatsApp send');
+    }
+
+    await sendWaMessage(cleanPhone, receiptText, attachments, undefined, waKey);
+    app.log.info({ orderId: order.orderId, recipientPhone: cleanPhone, waKey }, 'WhatsApp receipt dispatched successfully');
+    return true;
+  } catch (err: any) {
+    app.log.warn({ err: err?.message || err, orderId: order.orderId }, 'Could not send WhatsApp payment confirmation');
+    return false;
+  }
+}
+
 async function settleSuccessPayment(
   app: FastifyInstance,
   profileId: string,
@@ -642,74 +768,20 @@ async function settleSuccessPayment(
       : 'Payment settled by the gateway.',
   });
 
-  // Automatically send payment receipt confirmation to student WhatsApp if
-  // a phone number is available. Sent through the workspace OWNER's own
-  // isolated WhatsApp session (each account owns its own connected number).
+  // Automatically dispatch payment receipt confirmation and official PDF to payer WhatsApp
   try {
-    const senderProfile = await getProfile(profileId);
-    const waKey =
-      (waUserKey ?? '').trim() ||
-      (senderProfile?.ownerEmail ? String(senderProfile.ownerEmail).trim().toLowerCase() : '') ||
-      waSessionKeyFor();
-    const wa = getWaState(waKey);
-    if (wa.status === 'ready') {
-      let recipientPhone = '';
-      if (finalOrder.studentId) {
-        const stuRec = await getRecord<{ phone?: string }>(
-          APPWRITE_COLLECTIONS.students,
-          scopedEntityId(profileId, finalOrder.studentId)
-        );
-        recipientPhone = stuRec?.data?.phone || '';
-      }
-      if (!recipientPhone && detail.metaPhone) {
-        recipientPhone = detail.metaPhone;
-      }
-      if (recipientPhone) {
-        const cleanPhone = recipientPhone.replace(/\D/g, '');
-        if (cleanPhone.length >= 10) {
-          const receiptBank = finalOrder.bankName || detail.bankName;
-          const receiptPayer = finalOrder.payerVpa || detail.payerVpa;
-          const receiptText = `🎉 *Payment Confirmation - Receipt #${finalOrder.receiptId || 'Paid'}*\n\nDear ${finalOrder.studentName || 'Student / Parent'},\n\nWe have successfully received your fee payment of *₹${finalOrder.amount || detail.amount || '0'}*.\n\n• *Order ID:* ${orderId}\n• *Method:* ${detail.method || 'UPI'}${receiptBank ? `\n• *Bank:* ${receiptBank}` : ''}${detail.utr ? `\n• *UTR / Ref:* ${detail.utr}` : ''}${receiptPayer ? `\n• *Payer UPI:* ${receiptPayer}` : ''}\n• *Date:* ${paymentDate(detail.completedAt)}\n• *Status:* Confirmed (Paid)\n\nPlease find your official fee payment receipt attached in PDF format.\n\nThank you for your payment!\n— Accounts Desk`;
-
-          const attachments: WaAttachment[] = [];
-          try {
-            const receiptPayload: any = {
-              receiptId: finalOrder.receiptId || orderId,
-              paymentDate: paymentDate(detail.completedAt),
-              amount: finalOrder.amount || detail.amount || '0',
-              method: detail.method || 'UPI',
-              status: 'Paid',
-              orderId,
-              utr: detail.utr,
-              bankName: receiptBank,
-              payerVpa: receiptPayer,
-              studentId: finalOrder.studentId || '',
-              studentName: finalOrder.studentName,
-              notes: `Fee payment confirmation for ${finalOrder.studentName || 'Student'} · Order: ${orderId}${receiptBank ? ` · Bank: ${receiptBank}` : ''}${detail.utr ? ` · UTR: ${detail.utr}` : ''}${receiptPayer ? ` · Payer: ${receiptPayer}` : ''}`,
-            };
-
-            const pdfData = await buildReceiptPdfData(profileId, receiptPayload);
-            const pdfBuffer = await generateReceiptPdf(pdfData);
-
-            attachments.push({
-              name: `Receipt_${finalOrder.receiptId || orderId}.pdf`,
-              mime: 'application/pdf',
-              data: pdfBuffer.toString('base64'),
-            });
-          } catch (pdfErr) {
-            app.log.warn({ pdfErr }, 'Could not generate receipt PDF for WhatsApp send');
-          }
-
-          void sendWaMessage(cleanPhone, receiptText, attachments, undefined, waKey).catch((err: any) => {
-            app.log.warn({ err }, 'Could not send WhatsApp payment confirmation');
-          });
-        }
-      }
-    }
+    await sendReceiptWhatsApp(app, profileId, finalOrder, {
+      method: detail.method,
+      utr: detail.utr,
+      payerVpa: detail.payerVpa,
+      bankName: detail.bankName,
+      amount: detail.amount,
+      completedAt: detail.completedAt,
+      metaPhone: detail.metaPhone,
+    }, waUserKey);
   } catch (err) {
     // Non-blocking
   }
-
   return { order: finalOrder, overpaid };
 }
 
@@ -859,6 +931,7 @@ export async function createGatewayCheckout(
       ownerEmail: ownerEmail || undefined,
       studentId: input.studentId ?? '',
       studentName,
+      phone: input.phone || undefined,
       feeId: input.feeId ?? null,
       source: input.source,
       upiId: effectiveUpiId || undefined,
@@ -950,6 +1023,7 @@ export async function createGatewayCheckout(
         amount: amountStr,
         studentId: input.studentId ?? '',
         studentName,
+        phone: input.phone || undefined,
         institutionName: merchantName,
         feeId: input.feeId ?? null,
         checkoutUrl: paymentUrl,
@@ -1283,6 +1357,21 @@ export async function paymentRoutes(app: FastifyInstance) {
     };
     await saveLocalOrder(refreshed);
 
+    // Automatically dispatch payment receipt confirmation and official PDF to payer WhatsApp
+    try {
+      await sendReceiptWhatsApp(app, profileId, refreshed, {
+        method: confirmedMethod,
+        utr: confirmedUtr,
+        payerVpa: confirmedPayerVpa,
+        bankName: confirmedBankName,
+        amount: refreshed.amount,
+        completedAt: refreshed.completedAt,
+        metaPhone: refreshed.phone,
+      });
+    } catch (err) {
+      // Non-blocking
+    }
+
     await recordPaymentEvent(profileId, {
       orderId: order.orderId,
       status: 'SUCCESS',
@@ -1566,9 +1655,7 @@ export async function paymentRoutes(app: FastifyInstance) {
           explicitFeeId: metaFeeId,
           metaStudentName,
           metaPhone:
-            payload.metadata && typeof payload.metadata.phone === 'string'
-              ? payload.metadata.phone
-              : undefined,
+            (payload.customer && typeof payload.customer.phoneNumber === 'string' ? payload.customer.phoneNumber : payload.customer && typeof payload.customer.phone === 'string' ? payload.customer.phone : payload.metadata && typeof payload.metadata.phone === 'string' ? payload.metadata.phone : payload.metadata && typeof payload.metadata.customerPhone === 'string' ? payload.metadata.customerPhone : undefined),
         },
         'webhook'
       );
