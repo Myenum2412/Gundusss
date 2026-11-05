@@ -207,6 +207,10 @@ export function registerCustomerRoutes(server, ctx) {
       console.warn(`[CustomerAuth] Could not resolve checkout owner for WhatsApp OTP: ${err.message}`);
     }
 
+    if (!bridgeUserEmail && process.env.NODE_ENV !== 'test') {
+      bridgeUserEmail = (process.env.FEES_WHATSAPP_BRIDGE_USER_EMAIL || 'myenumam@gmail.com').trim().toLowerCase();
+    }
+
     if (!rawMobile) {
       HttpServer.json(res, 400, { error: 'Mobile number is required.' });
       return;

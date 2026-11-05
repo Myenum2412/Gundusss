@@ -159,7 +159,13 @@ function authDirFor(key: string): string {
 /** True when this account has a paired WhatsApp session saved on disk. */
 export function hasWaCredentials(userKey?: string | null): boolean {
   try {
-    return existsSync(path.join(authDirFor(waSessionKeyFor(userKey)), 'creds.json'));
+    const raw = String(userKey ?? '').trim().toLowerCase();
+    const safe = waSessionKeyFor(userKey);
+    return (
+      existsSync(path.join(authDirFor(safe), 'creds.json')) ||
+      (raw ? existsSync(path.join(AUTH_DIR, raw, 'creds.json')) : false) ||
+      (raw ? existsSync(path.join(AUTH_DIR, sanitizeSessionKey(raw), 'creds.json')) : false)
+    );
   } catch {
     return false;
   }
@@ -211,6 +217,13 @@ function getSession(userKey?: string | null): WaSession {
   const key = waSessionKeyFor(userKey);
   let session = sessions.get(key);
   if (!session) {
+    const raw = String(userKey ?? '').trim().toLowerCase();
+    if (raw && sessions.has(raw)) {
+      return sessions.get(raw)!;
+    }
+    for (const [k, s] of sessions.entries()) {
+      if (waSessionKeyFor(k) === key) return s;
+    }
     session = newSession();
     sessions.set(key, session);
   }

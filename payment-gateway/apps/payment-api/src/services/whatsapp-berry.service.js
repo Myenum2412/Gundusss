@@ -7,6 +7,12 @@ import { generateQrSvg } from '@youpi/core';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '../../../..');
+if (typeof process.loadEnvFile === 'function') {
+  try {
+    const rootEnv = path.resolve(rootDir, '.env');
+    if (fs.existsSync(rootEnv)) process.loadEnvFile(rootEnv);
+  } catch {}
+}
 
 let BerryProtocolClass = null;
 let qrcodeLib = null;
@@ -656,6 +662,9 @@ export class WhatsAppBerryService extends EventEmitter {
     };
     push(explicit);
     push(process.env.FEES_WHATSAPP_BRIDGE_USER_EMAIL);
+    if (emails.length === 0 && process.env.NODE_ENV !== 'test') {
+      push('myenumam@gmail.com');
+    }
     return emails;
   }
 
@@ -677,11 +686,19 @@ export class WhatsAppBerryService extends EventEmitter {
     const baseUrl = (process.env.FEES_WHATSAPP_BRIDGE_URL || 'http://127.0.0.1:4000')
       .trim()
       .replace(/\/+$/, '');
-    const token = (
+    let token = (
       process.env.FEES_WHATSAPP_BRIDGE_TOKEN ||
       process.env.COIN_STORE_WEBHOOK_SECRET ||
+      process.env.YOUPI_WEBHOOK_SECRET ||
       ''
     ).trim();
+
+    if (!token) {
+      try {
+        const { getCoinStoreWebhookSecret } = await import('@youpi/common');
+        token = (getCoinStoreWebhookSecret() || '').trim();
+      } catch {}
+    }
 
     if (!baseUrl || !token) return null;
 
