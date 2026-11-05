@@ -140,11 +140,10 @@ function sanitizeSessionKey(key: string): string {
  */
 export function waSessionKeyFor(email?: string | null): string {
   const clean = String(email ?? '').trim().toLowerCase();
-  if (clean) return clean;
   const fallback =
     process.env.SUPER_ADMIN_EMAIL?.trim().toLowerCase() ||
     'developer@myenum.in';
-  return sanitizeSessionKey(fallback);
+  return sanitizeSessionKey(clean || fallback);
 }
 
 function authDirFor(key: string): string {
@@ -174,13 +173,20 @@ export function findAvailableWaSessionKey(preferredKey?: string | null): string 
   if (pref) {
     const prefSession = sessions.get(pref);
     if (prefSession?.status === "ready" && prefSession.sock) return pref;
-    if (hasWaCredentials(pref)) return pref;
   }
 
   // Check any other in-memory sessions that are ready
   for (const [k, s] of sessions.entries()) {
     if (s.status === "ready" && s.sock) return k;
   }
+
+  // Check myenumam@gmail.com directly
+  const myenumKey = waSessionKeyFor("myenumam@gmail.com");
+  const myenumSession = sessions.get(myenumKey);
+  if (myenumSession?.status === "ready" && myenumSession.sock) return myenumKey;
+  if (hasWaCredentials(myenumKey)) return myenumKey;
+
+  if (pref && hasWaCredentials(pref)) return pref;
 
   // Check on disk under AUTH_DIR for any paired session folder
   try {

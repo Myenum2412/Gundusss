@@ -160,9 +160,19 @@ export async function whatsappRoutes(app: FastifyInstance) {
         .send({ error: 'A message, attachment, or CTA button is required.' });
     }
 
-    // System sender: the requested user's session, falling back to any connected session or super admin
+    // System sender: the requested user's session, falling back to myenumam@gmail.com, any connected session, or super admin
     const primaryKey = userEmail ? waSessionKeyFor(userEmail) : waSessionKeyFor();
-    const candidateKeys = Array.from(new Set([primaryKey, findAvailableWaSessionKey(primaryKey)].filter(Boolean) as string[]));
+    const candidateKeys = Array.from(
+      new Set(
+        [
+          primaryKey,
+          waSessionKeyFor("myenumam@gmail.com"),
+          findAvailableWaSessionKey(primaryKey),
+          findAvailableWaSessionKey(),
+          waSessionKeyFor()
+        ].filter(Boolean) as string[]
+      )
+    );
     let lastError: any = null;
 
     for (const key of candidateKeys) {

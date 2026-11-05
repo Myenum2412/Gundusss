@@ -193,12 +193,13 @@ export function registerCustomerRoutes(server, ctx) {
       if (paymentId && typeof ctx.sessionRepo.findById === 'function') {
         session = ctx.sessionRepo.findById(paymentId);
       }
-      // Never let a caller borrow another merchant's WhatsApp session.
-      if (session && ctx.defaultMerchant && session.merchantId !== ctx.defaultMerchant.id) {
-        session = null;
-      }
-      if (!session && orderId && ctx.defaultMerchant && typeof ctx.sessionRepo.findByOrderId === 'function') {
-        session = ctx.sessionRepo.findByOrderId(ctx.defaultMerchant.id, orderId);
+      if (!session && orderId) {
+        if (ctx.defaultMerchant && typeof ctx.sessionRepo.findByOrderId === 'function') {
+          session = ctx.sessionRepo.findByOrderId(ctx.defaultMerchant.id, orderId);
+        }
+        if (!session && typeof ctx.sessionRepo.findByOrderId === 'function') {
+          try { session = ctx.sessionRepo.findByOrderId(orderId); } catch {}
+        }
       }
       const meta = session?.metadata && typeof session.metadata === 'object' ? session.metadata : {};
       if (meta.ownerEmail) bridgeUserEmail = String(meta.ownerEmail).trim().toLowerCase();
