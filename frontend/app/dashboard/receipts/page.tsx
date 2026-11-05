@@ -123,10 +123,6 @@ export default function ReceiptsPage() {
 
   useLiveReload(reloadReceipts)
 
-  useEffect(() => {
-    if (hydrated) void saveReceipts(receipts)
-  }, [receipts, hydrated])
-
   const reloadDependencies = useCallback(() => {
     loadStudents()
       .then(setAvailableStudents)
@@ -205,8 +201,15 @@ export default function ReceiptsPage() {
         paymentDate: form.paymentDate,
         status: form.status,
         notes: form.notes,
+        utr: prev?.utr,
+        payerVpa: prev?.payerVpa,
+        bankName: prev?.bankName,
+        orderId: prev?.orderId,
+        institutionName: prev?.institutionName,
       }
-      setReceipts((list) => list.map((r, i) => (i === editingIndex ? updated : r)))
+      const nextList = receipts.map((r, i) => (i === editingIndex ? updated : r))
+      setReceipts(nextList)
+      void saveReceipts(nextList)
       setEditingIndex(null)
     } else {
       const receipt: StoredReceipt = {
@@ -219,7 +222,9 @@ export default function ReceiptsPage() {
         status: form.status,
         notes: form.notes,
       }
-      setReceipts((r) => [...r, receipt])
+      const nextList = [...receipts, receipt]
+      setReceipts(nextList)
+      void saveReceipts(nextList)
       setNextId((n) => n + 1)
     }
 
@@ -289,7 +294,9 @@ export default function ReceiptsPage() {
   }
 
   function onDelete(index: number) {
-    setReceipts((r) => r.filter((_, i) => i !== index))
+    const nextList = receipts.filter((_, i) => i !== index)
+    setReceipts(nextList)
+    void saveReceipts(nextList)
   }
 
   function onCancel() {

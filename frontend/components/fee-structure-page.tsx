@@ -38,6 +38,10 @@ import {
   saveFeeStructures,
 } from "@/lib/fee-structures-store"
 import {
+  loadReceipts,
+  type StoredReceipt,
+} from "@/lib/receipts-store"
+import {
   loadDropdowns,
   type DropdownMap,
 } from "@/lib/dropdown-store"
@@ -58,7 +62,7 @@ const initialForm = {
   dueDate: "",
   lateFee: "",
   paymentMethods: [] as string[],
-  status: "Active",
+  status: "Unpaid",
   description: "",
   studentIds: [] as string[],
 }
@@ -67,6 +71,28 @@ type FeeStructure = typeof initialForm & { structureId: string }
 
 function nextStructureId(n: number) {
   return `FEE-${String(n).padStart(3, "0")}`
+}
+
+function getStructureStatus(
+  structure: FeeStructure,
+  receiptsList: StoredReceipt[]
+): "Paid" | "Unpaid" {
+  const st = (structure.status || "").toLowerCase().trim()
+  if (st === "paid") return "Paid"
+  if (st === "unpaid") return "Unpaid"
+
+  const hasPaid = receiptsList.some((r) => {
+    const isPaid = (r.status || "").toLowerCase() === "paid"
+    if (!isPaid) return false
+    if (structure.studentIds?.length && structure.studentIds.includes(r.studentId)) return true
+    if (
+      r.notes &&
+      (r.notes.includes(structure.structureId) || r.notes.includes(structure.structureName))
+    )
+      return true
+    return false
+  })
+  return hasPaid ? "Paid" : "Unpaid"
 }
 
 export function FeeStructurePage() {
@@ -79,6 +105,7 @@ export function FeeStructurePage() {
     []
   )
   const [availableGroups, setAvailableGroups] = useState<StoredGroup[]>([])
+  const [receipts, setReceipts] = useState<StoredReceipt[]>([])
   const [dropdowns, setDropdowns] = useState<DropdownMap | null>(null)
   const [viewStructure, setViewStructure] = useState<FeeStructure | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
@@ -110,10 +137,6 @@ export function FeeStructurePage() {
 
   useLiveReload(reloadStructures)
 
-  useEffect(() => {
-    if (hydrated) void saveFeeStructures(structures)
-  }, [structures, hydrated])
-
   const reloadDependencies = useCallback(() => {
     loadStudents()
       .then(setAvailableStudents)
@@ -121,6 +144,9 @@ export function FeeStructurePage() {
     loadGroups()
       .then(setAvailableGroups)
       .catch((error) => console.error("Failed to load student groups", error))
+    loadReceipts()
+      .then(setReceipts)
+      .catch((error) => console.error("Failed to load receipts", error))
     loadDropdowns()
       .then(setDropdowns)
       .catch((error) => console.error("Failed to load dropdown options", error))
@@ -189,21 +215,24 @@ export function FeeStructurePage() {
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // Persisted to Appwrite via the save effect.
     if (editingIndex !== null) {
       const id = structures[editingIndex]?.structureId ?? nextStructureId(nextId)
       const updated: FeeStructure = {
         ...form,
         structureId: id,
       }
-      setStructures((prev) => prev.map((s, i) => (i === editingIndex ? updated : s)))
+      const nextList = structures.map((s, i) => (i === editingIndex ? updated : s))
+      setStructures(nextList)
+      void saveFeeStructures(nextList)
       setEditingIndex(null)
     } else {
       const structure: FeeStructure = {
         ...form,
         structureId: nextStructureId(nextId),
       }
-      setStructures((s) => [...s, structure])
+      const nextList = [...structures, structure]
+      setStructures(nextList)
+      void saveFeeStructures(nextList)
       setNextId((n) => n + 1)
     }
     setForm(initialForm)
@@ -221,7 +250,9 @@ export function FeeStructurePage() {
   }
 
   function onDelete(index: number) {
-    setStructures((s) => s.filter((_, i) => i !== index))
+    const nextList = structures.filter((_, i) => i !== index)
+    setStructures(nextList)
+    void saveFeeStructures(nextList)
   }
 
   function onCancel() {
@@ -230,16 +261,16 @@ export function FeeStructurePage() {
     setOpen(false)
   }
 
-  const activeStructures = structures.filter((s) => s.status === "Active")
+  const paidStructures = structures.filter((s) => getStructureStatus(s, receipts) === "Paid")
+  const unpaidStructures = structures.filter((s) => getStructureStatus(s, receipts) === "Unpaid")
   const combinedValue = structures.reduce((sum, s) => sum + (parseFloat(String(s.amount)) || 0), 0)
   const studentsCovered = structures.reduce((sum, s) => sum + (s.studentIds?.length ?? 0), 0)
   const feeTypes = new Set(structures.map((s) => s.feeType).filter(Boolean)).size
-  const methods = new Set(structures.flatMap((s) => s.paymentMethods ?? [])).size
   const stats = [
     {
       name: "Total structures",
       value: String(structures.length),
-      change: `${activeStructures.length} active`,
+      change: `${paidStructures.length} paid · ${unpaidStructures.length} unpaid`,
       changeType: "neutral" as const,
     },
     {
@@ -249,15 +280,15 @@ export function FeeStructurePage() {
       changeType: "neutral" as const,
     },
     {
-      name: "Students assigned",
-      value: String(studentsCovered),
-      change: `across ${structures.length} structures`,
+      name: "Paid structures",
+      value: String(paidStructures.length),
+      change: `${unpaidStructures.length} pending unpaid`,
       changeType: "neutral" as const,
     },
     {
-      name: "Payment methods",
-      value: String(methods),
-      change: "accepted overall",
+      name: "Students assigned",
+      value: String(studentsCovered),
+      change: `across ${structures.length} structures`,
       changeType: "neutral" as const,
     },
   ]
@@ -463,19 +494,16 @@ export function FeeStructurePage() {
                     </div>
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="status">Status</FieldLabel>
+                    <FieldLabel htmlFor="status">Fee Status</FieldLabel>
                     <select
                       id="status"
                       className={selectClassName}
-                      value={form.status}
+                      value={form.status === "Active" ? "Paid" : form.status}
                       onChange={set("status")}
                       required
                     >
-                      {(dropdowns?.studentStatus ?? []).map((o) => (
-                        <option key={o} value={o}>
-                          {o}
-                        </option>
-                      ))}
+                      <option value="Paid">Paid</option>
+                      <option value="Unpaid">Unpaid</option>
                     </select>
                   </Field>
                   <Field className="md:col-span-2">
@@ -610,8 +638,8 @@ export function FeeStructurePage() {
                     <DetailItem label="Payment Methods">
                       {viewStructure.paymentMethods.length === 0 ? "—" : viewStructure.paymentMethods.join(", ")}
                     </DetailItem>
-                    <DetailItem label="Status">
-                      <StatusBadge value={viewStructure.status} />
+                    <DetailItem label="Fee Status">
+                      <StatusBadge value={getStructureStatus(viewStructure, receipts)} />
                     </DetailItem>
                     <DetailItem label="Description">{viewStructure.description || "—"}</DetailItem>
                     <DetailItem label="Students">
@@ -679,7 +707,7 @@ export function FeeStructurePage() {
                     <TableCell>{s.feeType}</TableCell>
                     <TableCell className="tabular-nums">₹ {s.amount}</TableCell>
                     <TableCell>
-                      <StatusBadge value={s.status} />
+                      <StatusBadge value={getStructureStatus(s, receipts)} />
                     </TableCell>
                     <TableCell className="text-right">
                       <RowActions

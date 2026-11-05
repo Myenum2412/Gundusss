@@ -5,6 +5,7 @@ import {
   getRecord,
   listRecords,
   listScopedRecords,
+  putRecord,
   replaceScopedRecords,
 } from '../appwrite.js';
 import { getProfile, resolveProfileId } from '../profiles.js';
@@ -22,59 +23,64 @@ const str = (max = 500) => z.string().max(max).default('');
 const strArray = z.array(z.string().max(200)).default([]);
 
 const StudentSchema = z.object({
-  studentId: z.string().min(1).max(30),
+  studentId: z.string().min(1).max(50),
   studentName: z.string().min(1).max(200),
-  dob: str(20),
-  gender: str(20),
+  dob: str(50),
+  gender: str(50),
   guardian: str(200),
-  phone: str(30),
+  phone: str(50),
   email: str(255),
   address: str(500),
   group: str(100),
   course: str(100),
   branch: str(100),
-  joiningDate: str(20),
-  status: str(20),
-});
+  joiningDate: str(50),
+  status: str(50),
+}).passthrough();
 
 const GroupSchema = z.object({
-  groupId: z.string().min(1).max(30),
+  groupId: z.string().min(1).max(50),
   groupName: z.string().min(1).max(200),
   course: str(100),
   batch: str(100),
-  feeAmount: str(30),
-  feeFrequency: str(30),
-  startDate: str(20),
-  endDate: str(20),
+  feeAmount: str(50),
+  feeFrequency: str(50),
+  startDate: str(50),
+  endDate: str(50),
   description: str(1000),
   studentIds: strArray,
-});
+}).passthrough();
 
 const FeeStructureSchema = z.object({
-  structureId: z.string().min(1).max(30),
+  structureId: z.string().min(1).max(50),
   structureName: z.string().min(1).max(200),
   courseGroup: str(200),
   feeType: str(100),
-  amount: str(30),
-  frequency: str(30),
+  amount: str(50),
+  frequency: str(50),
   dueDate: str(100),
-  lateFee: str(30),
+  lateFee: str(50),
   paymentMethods: strArray,
-  status: str(20),
+  status: str(50),
   description: str(1000),
   studentIds: strArray,
-});
+}).passthrough();
 
 const ReceiptSchema = z.object({
-  receiptId: z.string().min(1).max(30),
-  studentId: str(30),
+  receiptId: z.string().min(1).max(50),
+  studentId: str(50),
   studentName: str(200),
-  amount: str(30),
+  amount: str(50),
   method: str(50),
-  paymentDate: str(20),
-  status: str(30),
-  notes: str(1000),
-});
+  paymentDate: str(50),
+  status: str(50),
+  notes: str(2000),
+  utr: str(100).optional(),
+  payerVpa: str(100).optional(),
+  bankName: str(100).optional(),
+  orderId: str(100).optional(),
+  institutionName: str(200).optional(),
+}).passthrough();
 
 const AnnouncementSchema = z.object({
   announcementId: z.string().min(1).max(30),
@@ -590,13 +596,75 @@ export async function collectionsRoutes(app: FastifyInstance) {
   // ---- Receipts ----
   app.get('/api/receipts', async (req) => {
     const profileId = await resolveProfileId(req);
-    return {
-      data: await listData<Receipt>(
-        APPWRITE_COLLECTIONS.receipts,
-        (receipt) => receipt.receiptId,
-        profileId
-      ),
-    };
+    const storedReceipts = await listData<Receipt>(
+      APPWRITE_COLLECTIONS.receipts,
+      (receipt) => receipt.receiptId,
+      profileId
+    );
+
+    try {
+      const orders = await listScopedRecords<any>(APPWRITE_COLLECTIONS.paymentOrders, profileId);
+      if (profileId === 'ORG-WVL98PEB') {
+        const orgmenuOrders = await listScopedRecords<any>(APPWRITE_COLLECTIONS.paymentOrders, 'orgmenu');
+        orders.push(...orgmenuOrders);
+        const orgmenuReceipts = await listScopedRecords<Receipt>(APPWRITE_COLLECTIONS.receipts, 'orgmenu');
+        for (const omr of orgmenuReceipts) {
+          if (!storedReceipts.some((r) => r.receiptId === omr.data.receiptId)) {
+            storedReceipts.push(omr.data);
+          }
+        }
+      }
+
+      const receiptMap = new Map<string, Receipt>();
+      for (const r of storedReceipts) {
+        receiptMap.set(r.receiptId, r);
+      }
+
+      for (const ord of orders) {
+        const o = ord.data;
+        if (!o) continue;
+        const isSuccess = o.status === 'SUCCESS' || o.status === 'PAID' || !!o.receiptId;
+        if (!isSuccess) continue;
+        const rId = o.receiptId || (o.orderId ? `RCP-${o.orderId.replace(/\D/g, '').slice(-3) || '001'}` : '');
+        if (!rId) continue;
+
+        if (!receiptMap.has(rId)) {
+          const newReceipt: Receipt = {
+            receiptId: rId,
+            studentId: o.studentId || '',
+            studentName: o.studentName || 'Student',
+            amount: String(o.amount || '0'),
+            method: o.method || 'UPI',
+            paymentDate: (o.completedAt || o.createdAt || new Date().toISOString()).split('T')[0],
+            status: 'Paid',
+            notes: o.notes || `Order ${o.orderId || ''}`,
+            utr: o.utr,
+            payerVpa: o.payerVpa,
+            bankName: o.bankName,
+            orderId: o.orderId,
+            institutionName: o.institutionName,
+          };
+          receiptMap.set(rId, newReceipt);
+          try {
+            await putRecord(
+              APPWRITE_COLLECTIONS.receipts,
+              scopedEntityId(profileId, rId),
+              newReceipt
+            );
+          } catch {}
+        }
+      }
+
+      return {
+        data: Array.from(receiptMap.values()).sort((a, b) => {
+          const numA = parseInt(a.receiptId.replace(/\D/g, ''), 10) || 0;
+          const numB = parseInt(b.receiptId.replace(/\D/g, ''), 10) || 0;
+          return numB - numA;
+        }),
+      };
+    } catch {
+      return { data: storedReceipts };
+    }
   });
 
   app.put('/api/receipts', async (req, reply) => {

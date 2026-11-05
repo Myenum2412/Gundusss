@@ -14,6 +14,8 @@ export interface StoredReceipt {
   utr?: string;
   payerVpa?: string;
   bankName?: string;
+  orderId?: string;
+  institutionName?: string;
 }
 
 // Appwrite (through the API) is the only source of truth. Nothing is cached in

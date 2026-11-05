@@ -8,6 +8,10 @@ import {
   type DropdownMap,
 } from "@/lib/dropdown-store"
 import { loadBranches, type StoredBranch } from "@/lib/branches-store"
+import {
+  loadReceipts,
+  type StoredReceipt,
+} from "@/lib/receipts-store"
 import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
 import { StatusBadge } from "@/components/status-badge"
 import { EmptyState } from "@/components/empty-state"
@@ -57,13 +61,36 @@ const initialForm = {
   course: "",
   branch: "",
   joiningDate: "",
-  status: "Active",
+  status: "Unpaid",
 }
 
 type Student = typeof initialForm & { studentId: string }
 
 function nextStudentId(n: number) {
   return `STU-${String(n).padStart(3, "0")}`
+}
+
+function getStudentFeeStatus(
+  student: Student,
+  receiptsList: StoredReceipt[]
+): "Paid" | "Unpaid" {
+  const st = (student.status || "").toLowerCase().trim()
+  if (st === "paid") return "Paid"
+  if (st === "unpaid") return "Unpaid"
+
+  const hasPaid = receiptsList.some((r) => {
+    const isPaid = (r.status || "").toLowerCase() === "paid"
+    if (!isPaid) return false
+    if (r.studentId && r.studentId === student.studentId) return true
+    if (
+      r.studentName &&
+      student.studentName &&
+      r.studentName.trim().toLowerCase() === student.studentName.trim().toLowerCase()
+    )
+      return true
+    return false
+  })
+  return hasPaid ? "Paid" : "Unpaid"
 }
 
 export default function StudentsPage() {
@@ -73,27 +100,37 @@ export default function StudentsPage() {
   const [nextId, setNextId] = useState(1)
   const [hydrated, setHydrated] = useState(false)
   const [groups, setGroups] = useState<StoredGroup[]>([])
+  const [receipts, setReceipts] = useState<StoredReceipt[]>([])
   const [dropdowns, setDropdowns] = useState<DropdownMap | null>(null)
   const [branches, setBranches] = useState<StoredBranch[]>([])
   const [viewStudent, setViewStudent] = useState<Student | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
 
+  const reloadDependencies = useCallback(() => {
+    loadReceipts()
+      .then(setReceipts)
+      .catch((error) => console.error("Failed to load receipts", error))
+    loadDropdowns()
+      .then(setDropdowns)
+      .catch((error) => console.error("Failed to load dropdown options", error))
+    loadBranches()
+      .then(setBranches)
+      .catch((error) => console.error("Failed to load branches", error))
+    loadGroups()
+      .then(setGroups)
+      .catch((error) => console.error("Failed to load student groups", error))
+  }, [])
+
+  useEffect(() => {
+    reloadDependencies()
+  }, [reloadDependencies])
+
   useEffect(() => {
     if (open) {
-      loadDropdowns()
-        .then(setDropdowns)
-        .catch((error) =>
-          console.error("Failed to load dropdown options", error)
-        )
-      loadBranches()
-        .then(setBranches)
-        .catch((error) => console.error("Failed to load branches", error))
-      loadGroups()
-        .then(setGroups)
-        .catch((error) => console.error("Failed to load student groups", error))
+      reloadDependencies()
     }
-  }, [open])
+  }, [open, reloadDependencies])
 
   const reloadStudents = useCallback(() => {
     if (isSyncing()) return
@@ -121,10 +158,6 @@ export default function StudentsPage() {
 
   useLiveReload(reloadStudents)
 
-  useEffect(() => {
-    if (hydrated) void saveStudents(students)
-  }, [students, hydrated])
-
   function set(key: keyof typeof initialForm) {
     return (
       e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
@@ -145,18 +178,20 @@ export default function StudentsPage() {
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // Persisted to Appwrite via the save effect.
-    // Student ID is auto-generated (STU-001, STU-002, ...).
     let assignedId = ""
     if (editingIndex !== null) {
       assignedId = students[editingIndex]?.studentId ?? nextStudentId(nextId)
       const updated: Student = { ...form, studentId: assignedId }
-      setStudents((prev) => prev.map((s, i) => (i === editingIndex ? updated : s)))
+      const nextList = students.map((s, i) => (i === editingIndex ? updated : s))
+      setStudents(nextList)
+      void saveStudents(nextList)
       setEditingIndex(null)
     } else {
       assignedId = nextStudentId(nextId)
       const student: Student = { ...form, studentId: assignedId }
-      setStudents((s) => [...s, student])
+      const nextList = [...students, student]
+      setStudents(nextList)
+      void saveStudents(nextList)
       setNextId((n) => n + 1)
     }
 
@@ -213,7 +248,9 @@ export default function StudentsPage() {
         if (changed) void saveGroups(next)
       }).catch(console.error)
     }
-    setStudents((st) => st.filter((_, i) => i !== index))
+    const nextList = students.filter((_, i) => i !== index)
+    setStudents(nextList)
+    void saveStudents(nextList)
   }
 
   function onCancel() {
@@ -223,29 +260,32 @@ export default function StudentsPage() {
   }
 
   const nowKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`
-  const active = students.filter((s) => s.status === "Active")
-  const inactive = students.filter((s) => s.status !== "Active")
+  const paidStudents = students.filter((s) => getStudentFeeStatus(s, receipts) === "Paid")
+  const unpaidStudents = students.filter((s) => getStudentFeeStatus(s, receipts) === "Unpaid")
   const newThisMonth = students.filter((s) => (s.joiningDate ?? "").slice(0, 7) === nowKey).length
   const stats = [
     {
       name: "Total students",
       value: String(students.length),
-      ...momTrend(students.map((s) => ({ date: s.joiningDate }))),
+      change: `${paidStudents.length} paid · ${unpaidStudents.length} unpaid`,
+      changeType: "neutral" as const,
     },
     {
-      name: "Active students",
-      value: String(active.length),
-      ...momTrend(active.map((s) => ({ date: s.joiningDate }))),
+      name: "Paid students",
+      value: String(paidStudents.length),
+      change: "fees cleared",
+      changeType: "positive" as const,
+    },
+    {
+      name: "Unpaid students",
+      value: String(unpaidStudents.length),
+      change: "pending payment",
+      changeType: "neutral" as const,
     },
     {
       name: "Joined this month",
       value: String(newThisMonth),
       ...momTrend(students.map((s) => ({ date: s.joiningDate }))),
-    },
-    {
-      name: "Inactive students",
-      value: String(inactive.length),
-      ...momTrend(inactive.map((s) => ({ date: s.joiningDate })), { invert: true }),
     },
   ]
 
@@ -497,19 +537,16 @@ export default function StudentsPage() {
                         />
                       </Field>
                       <Field>
-                        <FieldLabel htmlFor="status">Student Status</FieldLabel>
+                        <FieldLabel htmlFor="status">Fee Status</FieldLabel>
                         <select
                           id="status"
                           className={selectClassName}
-                          value={form.status}
+                          value={form.status === "Active" ? "Paid" : form.status}
                           onChange={set("status")}
                           required
                         >
-                          {(dropdowns?.studentStatus ?? []).map((o) => (
-                            <option key={o} value={o}>
-                              {o}
-                            </option>
-                          ))}
+                          <option value="Paid">Paid</option>
+                          <option value="Unpaid">Unpaid</option>
                         </select>
                       </Field>
                     </div>
@@ -558,8 +595,8 @@ export default function StudentsPage() {
                     <DetailItem label="Course">{viewStudent.course || "—"}</DetailItem>
                     <DetailItem label="Branch">{viewStudent.branch || "—"}</DetailItem>
                     <DetailItem label="Joining Date">{viewStudent.joiningDate || "—"}</DetailItem>
-                    <DetailItem label="Status">
-                      <StatusBadge value={viewStudent.status} />
+                    <DetailItem label="Fee Status">
+                      <StatusBadge value={getStudentFeeStatus(viewStudent, receipts)} />
                     </DetailItem>
                   </DetailList>
                 </div>
@@ -623,7 +660,7 @@ export default function StudentsPage() {
                     <TableCell className="tabular-nums">{s.phone}</TableCell>
                     <TableCell className="tabular-nums">{s.joiningDate}</TableCell>
                     <TableCell>
-                      <StatusBadge value={s.status} />
+                      <StatusBadge value={getStudentFeeStatus(s, receipts)} />
                     </TableCell>
                     <TableCell className="text-right">
                       <RowActions
