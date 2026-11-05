@@ -597,7 +597,8 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              mobileNumber: clean
+              mobileNumber: clean,
+              paymentId: PAYMENT_ID
             })
           });
           const sendData = await sendRes.json();
@@ -626,7 +627,8 @@
             body: JSON.stringify({
               mobileNumber: clean,
               name: currentAuthName,
-              email: currentAuthEmail
+              email: currentAuthEmail,
+              paymentId: PAYMENT_ID
             })
           });
           const sendData = await sendRes.json();
@@ -689,7 +691,8 @@
             mobileNumber: currentAuthMobile,
             name,
             email,
-            isNewUser: true
+            isNewUser: true,
+            paymentId: PAYMENT_ID
           })
         });
         const data = await res.json();
@@ -784,7 +787,8 @@
           body: JSON.stringify({
             mobileNumber: currentAuthMobile,
             name: currentAuthName,
-            email: currentAuthEmail
+            email: currentAuthEmail,
+            paymentId: PAYMENT_ID
           })
         });
         const data = await res.json();
@@ -850,7 +854,8 @@
           body: JSON.stringify({
             mobileNumber: clean,
             name: currentAuthName,
-            email: currentAuthEmail
+            email: currentAuthEmail,
+            paymentId: PAYMENT_ID
           })
         });
         const data = await res.json();

@@ -29,6 +29,7 @@
 | `COIN_STORE_WEBHOOK_SECRET` | auto-generated | Webhook secret seeded for the default merchant and used by the demo coin store (`data/.secrets/coin_store_webhook_secret`) |
 | `FEES_WHATSAPP_BRIDGE_URL` | `http://127.0.0.1:4000` | Fees backend base URL used to deliver WhatsApp OTPs when this gateway's own WhatsApp session is not linked |
 | `FEES_WHATSAPP_BRIDGE_TOKEN` | falls back to `COIN_STORE_WEBHOOK_SECRET` | Shared secret sent as `X-WhatsApp-Bridge-Token`. Must match `WHATSAPP_BRIDGE_TOKEN` (or `YOUPI_WEBHOOK_SECRET`) on the fees backend |
+| `FEES_WHATSAPP_BRIDGE_USER_EMAIL` | unset | Fees app account email(s) whose connected WhatsApp session should deliver bridged OTPs. Comma-separated, tried in order. Without it the bridge uses the fees backend's system/super-admin session, which is usually not the workspace owner's linked number. The gateway also prefers the checkout session's `metadata.ownerEmail` when available |
 | `FEES_GATE_URL` | `http://127.0.0.1:4000/api/auth/gate` | Fees backend session-gate endpoint used by `POST /api/admin/session` to validate a `?fees_token=` exchange. Only sessions the gate confirms as active SUPER admins receive `ADMIN_API_TOKEN` |
 
 ##### Mounted deployments (nginx auth_request, e.g. `/youpi-admin/` under the fees API origin)
