@@ -44,9 +44,26 @@ function statusOf(err: unknown, fallback = 500): number {
 export async function authRoutes(app: FastifyInstance) {
   // GET /api/auth/setup — public. Tells the login screen whether the very first
   // administrator still needs to be created.
-  app.get('/api/auth/setup', async () => ({
-    data: { needsSetup: (await countUsers()) === 0 },
-  }));
+  app.get('/api/auth/setup', async (_req, reply) => {
+    try {
+      const userCount = await countUsers();
+      return { data: { needsSetup: userCount === 0 } };
+    } catch (err) {
+      const isPaused =
+        err instanceof Error &&
+        (err.message.toLowerCase().includes('paused due to inactivity') ||
+          err.message.toLowerCase().includes('project is paused'));
+      const message = isPaused
+        ? 'Appwrite project is paused due to inactivity. Please log in to https://cloud.appwrite.io and click Restore to resume operations.'
+        : err instanceof Error
+        ? err.message
+        : 'Could not connect to database.';
+      return reply.code(503).send({
+        error: message,
+        code: isPaused ? 'database_paused' : 'database_unavailable',
+      });
+    }
+  });
 
   // POST /api/auth/setup — public, but only works while no users exist.
   app.post('/api/auth/setup', async (req, reply) => {

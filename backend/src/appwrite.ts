@@ -119,15 +119,27 @@ async function assertOk(res: Response, action: string): Promise<void> {
   const detail = await responseDetail(res);
   let message = detail;
   try {
-    const parsed = JSON.parse(detail) as { message?: string };
+    const parsed = JSON.parse(detail) as { message?: string; type?: string };
     if (parsed.message) {
       message = parsed.message;
     }
   } catch {
     // Keep raw detail string if not JSON
   }
+
+  if (message.toLowerCase().includes('paused due to inactivity')) {
+    lastError =
+      'Appwrite project is paused due to inactivity. Please log in to https://cloud.appwrite.io and click Restore to resume operations.';
+    const err = new Error(lastError) as Error & { statusCode?: number; code?: string };
+    err.statusCode = 503;
+    err.code = 'PROJECT_PAUSED';
+    throw err;
+  }
+
   lastError = `${action} failed (HTTP ${res.status}): ${message}`;
-  throw new Error(lastError);
+  const err = new Error(lastError) as Error & { statusCode?: number };
+  err.statusCode = res.status;
+  throw err;
 }
 
 function query(method: string, values: unknown[]): string {

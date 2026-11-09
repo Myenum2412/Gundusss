@@ -125,15 +125,24 @@ app.addHook('onSend', async (_request, reply, payload) => {
 
 app.setErrorHandler((error, _request, reply) => {
   app.log.error(error);
+  const isPaused =
+    error instanceof Error &&
+    (error.message.toLowerCase().includes('paused due to inactivity') ||
+      error.message.toLowerCase().includes('project is paused'));
+
   const status =
-    typeof (error as { statusCode?: unknown }).statusCode === 'number'
+    isPaused
+      ? 503
+      : typeof (error as { statusCode?: unknown }).statusCode === 'number'
       ? (error as { statusCode: number }).statusCode
       : error instanceof Error && error.message.includes('HTTP 402')
       ? 402
       : 500;
   const isProd = process.env.NODE_ENV === 'production';
   const message =
-    status >= 500 && isProd
+    isPaused
+      ? 'Appwrite project is paused due to inactivity. Please log in to https://cloud.appwrite.io and click Restore to resume operations.'
+      : status >= 500 && isProd
       ? 'An unexpected error occurred. Please try again later.'
       : error instanceof Error
       ? error.message

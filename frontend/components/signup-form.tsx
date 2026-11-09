@@ -167,9 +167,21 @@ export function SignupForm({
         </div>
 
         {error && (
-          <p className="rounded-[10px] border border-destructive/20 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">
-            {error}
-          </p>
+          <div className="rounded-[10px] border border-destructive/20 bg-destructive/5 px-3 py-2 text-[13px] text-destructive leading-relaxed">
+            <p>{error}</p>
+            {error.includes("cloud.appwrite.io") && (
+              <div className="mt-2">
+                <a
+                  href="https://cloud.appwrite.io"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium underline underline-offset-2 hover:opacity-80"
+                >
+                  Open Appwrite Console to Restore ↗
+                </a>
+              </div>
+            )}
+          </div>
         )}
 
         <Button
@@ -265,9 +277,21 @@ export function SignupForm({
         </div>
 
         {error && (
-          <p className="rounded-[10px] border border-destructive/20 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">
-            {error}
-          </p>
+          <div className="rounded-[10px] border border-destructive/20 bg-destructive/5 px-3 py-2 text-[13px] text-destructive leading-relaxed">
+            <p>{error}</p>
+            {error.includes("cloud.appwrite.io") && (
+              <div className="mt-2">
+                <a
+                  href="https://cloud.appwrite.io"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium underline underline-offset-2 hover:opacity-80"
+                >
+                  Open Appwrite Console to Restore ↗
+                </a>
+              </div>
+            )}
+          </div>
         )}
 
         <Field>
