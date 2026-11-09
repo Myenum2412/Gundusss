@@ -124,14 +124,14 @@ describe('GND-INFO-001: Student PII Protection on Public Endpoints', () => {
 // 4. GND-SEC-001: Cryptographic Key Separation
 // ---------------------------------------------------------------------------
 describe('GND-SEC-001: Cryptographic Key Separation & Auth Secret', () => {
-  it('backend/src/auth.ts must not fall back to APPWRITE_API_KEY for session signing', () => {
+  it('backend/src/auth.ts must not fall back to external database keys for session signing', () => {
     const authFilePath = path.resolve(REPO_ROOT, 'backend/src/auth.ts');
     const content = fs.readFileSync(authFilePath, 'utf8');
 
     assert.strictEqual(
-      content.includes('process.env.APPWRITE_API_KEY?.trim()'),
+      content.toLowerCase().includes('appwrite'),
       false,
-      'Must not multiplex APPWRITE_API_KEY as session signing secret'
+      'Must not reference any Appwrite keys for session signing'
     );
     assert.ok(
       content.includes("NODE_ENV === 'production'"),

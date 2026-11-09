@@ -29,6 +29,16 @@ git reset --hard origin/main
 # --- fees backend (typescript -> dist/server.js, systemd: fees-backend)
 if echo "$CHANGED" | grep -qE '^backend/(src/|package(-lock)?\.json|tsconfig)'; then
   echo "-- backend changed"
+  if [ -f backend/.env ]; then
+    sed -i '/^APPWRITE_/d' backend/.env
+    if ! grep -q '^DATABASE_URL=' backend/.env; then
+      echo "DATABASE_URL=postgres://fees:fees@127.0.0.1:5432/fees" >> backend/.env
+    fi
+  fi
+  if command -v psql >/dev/null 2>&1; then
+    sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'fees'" 2>/dev/null | grep -q 1 || \
+      sudo -u postgres psql -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'fees') THEN CREATE ROLE fees WITH LOGIN PASSWORD 'fees'; END IF; END \$\$; CREATE DATABASE fees OWNER fees; GRANT ALL PRIVILEGES ON DATABASE fees TO fees;" 2>/dev/null || true
+  fi
   if echo "$CHANGED" | grep -q '^backend/package-lock.json'; then
     echo "   installing backend deps..."
     (cd backend && npm ci --no-audit --no-fund)

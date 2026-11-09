@@ -31,10 +31,6 @@ export const DB_TABLES = {
 export type DbTable = (typeof DB_TABLES)[keyof typeof DB_TABLES];
 export const DB_TABLE_NAMES = Object.values(DB_TABLES);
 
-// Aliases for compatibility
-export const APPWRITE_COLLECTIONS = DB_TABLES;
-export type AppwriteCollection = DbTable;
-
 const VALID_TABLES = new Set(DB_TABLE_NAMES as string[]);
 
 function getTable(collection: string): string {
@@ -59,8 +55,6 @@ export interface DatabaseStatus {
   missingTables: string[];
   lastError: string | null;
 }
-
-export type AppwriteStatus = DatabaseStatus;
 
 let rawUrl = (
   process.env.DATABASE_URL ?? 'postgres://fees:fees@127.0.0.1:5432/fees'
@@ -91,8 +85,6 @@ export function isDatabaseConfigured(): boolean {
   return Boolean(process.env.DATABASE_URL || rawUrl);
 }
 
-export const isAppwriteConfigured = isDatabaseConfigured;
-
 export function getDatabaseStatus(): DatabaseStatus {
   return {
     configured: isDatabaseConfigured(),
@@ -103,8 +95,6 @@ export function getDatabaseStatus(): DatabaseStatus {
     lastError,
   };
 }
-
-export const getAppwriteStatus = getDatabaseStatus;
 
 function mapRow<T>(row: Record<string, unknown>): StoredRecord<T> {
   let data: T;
@@ -373,8 +363,6 @@ export async function checkDatabaseSetup(): Promise<string[]> {
   }
 }
 
-export const checkAppwriteSetup = checkDatabaseSetup;
-
 /** Fail fast at boot with an actionable message when the schema is missing. */
 export async function assertDatabaseSetup(): Promise<void> {
   await initDatabase();
@@ -385,5 +373,3 @@ export async function assertDatabaseSetup(): Promise<void> {
     );
   }
 }
-
-export const assertAppwriteSetup = assertDatabaseSetup;
