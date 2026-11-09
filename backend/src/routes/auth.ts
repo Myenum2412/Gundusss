@@ -49,18 +49,11 @@ export async function authRoutes(app: FastifyInstance) {
       const userCount = await countUsers();
       return { data: { needsSetup: userCount === 0 } };
     } catch (err) {
-      const isPaused =
-        err instanceof Error &&
-        (err.message.toLowerCase().includes('paused due to inactivity') ||
-          err.message.toLowerCase().includes('project is paused'));
-      const message = isPaused
-        ? 'Appwrite project is paused due to inactivity. Please log in to https://cloud.appwrite.io and click Restore to resume operations.'
-        : err instanceof Error
-        ? err.message
-        : 'Could not connect to database.';
+      const message =
+        err instanceof Error ? err.message : 'Could not connect to database.';
       return reply.code(503).send({
         error: message,
-        code: isPaused ? 'database_paused' : 'database_unavailable',
+        code: 'database_unavailable',
       });
     }
   });

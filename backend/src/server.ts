@@ -3,10 +3,10 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { Readable } from 'node:stream';
 import {
-  assertAppwriteSetup,
-  getAppwriteStatus,
-  isAppwriteConfigured,
-} from './appwrite.js';
+  assertDatabaseSetup,
+  getDatabaseStatus,
+  isDatabaseConfigured,
+} from './db.js';
 import { authGuard } from './auth.js';
 import {
   ensureAccountsAndProfiles,
@@ -125,24 +125,16 @@ app.addHook('onSend', async (_request, reply, payload) => {
 
 app.setErrorHandler((error, _request, reply) => {
   app.log.error(error);
-  const isPaused =
-    error instanceof Error &&
-    (error.message.toLowerCase().includes('paused due to inactivity') ||
-      error.message.toLowerCase().includes('project is paused'));
 
   const status =
-    isPaused
-      ? 503
-      : typeof (error as { statusCode?: unknown }).statusCode === 'number'
+    typeof (error as { statusCode?: unknown }).statusCode === 'number'
       ? (error as { statusCode: number }).statusCode
       : error instanceof Error && error.message.includes('HTTP 402')
       ? 402
       : 500;
   const isProd = process.env.NODE_ENV === 'production';
   const message =
-    isPaused
-      ? 'Appwrite project is paused due to inactivity. Please log in to https://cloud.appwrite.io and click Restore to resume operations.'
-      : status >= 500 && isProd
+    status >= 500 && isProd
       ? 'An unexpected error occurred. Please try again later.'
       : error instanceof Error
       ? error.message
@@ -160,7 +152,8 @@ app.get('/api/health', async () => ({
   time: new Date().toISOString(),
 }));
 
-app.get('/api/appwrite/status', async () => ({ data: getAppwriteStatus() }));
+app.get('/api/db/status', async () => ({ data: getDatabaseStatus() }));
+app.get('/api/appwrite/status', async () => ({ data: getDatabaseStatus() }));
 
 await app.register(feeRoutes);
 await app.register(authRoutes);
@@ -174,8 +167,8 @@ await app.register(businessProfileRoutes);
 await app.register(reminderRoutes);
 await app.register(queueRoutes);
 
-async function ensureAppwriteSeed(): Promise<void> {
-  await assertAppwriteSetup();
+async function ensureDatabaseSeed(): Promise<void> {
+  await assertDatabaseSetup();
 
   // 1. Ensure the fixed super admin exists and owns the `orgmenu` profile.
   // 2. Give every pre-multi-tenant account its own workspace and backfill the
@@ -217,22 +210,22 @@ process.on('uncaughtException', (err) => {
 });
 
 try {
-  if (!isAppwriteConfigured()) {
+  if (!isDatabaseConfigured()) {
     throw new Error(
-      'APPWRITE_API_KEY is required. Add it to backend/.env and restart the backend.'
+      'DATABASE_URL is required. Add it to backend/.env and restart the backend.'
     );
   }
   await app.listen({ port, host });
   console.log(`Backend listening on http://${host}:${port}`);
 
   try {
-    await ensureAppwriteSeed();
+    await ensureDatabaseSeed();
     await hydrateQueue();
     console.log(
-      `Appwrite store connected: ${getAppwriteStatus().endpoint} | database ${getAppwriteStatus().databaseId}`
+      `PostgreSQL store connected: ${getDatabaseStatus().database}`
     );
   } catch (seedErr) {
-    app.log.error(seedErr, 'Appwrite seed/hydration deferred due to initialization error');
+    app.log.error(seedErr, 'Database seed/hydration deferred due to initialization error');
   }
 
   // Warm the WhatsApp engine at boot: inside startWa the Baileys WebSocket is

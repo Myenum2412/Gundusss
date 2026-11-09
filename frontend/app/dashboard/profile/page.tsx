@@ -148,7 +148,7 @@ export default function ProfilePage() {
         announcements={recentAnnouncements}
         system={{
           apiUrl: API_URL,
-          database: "Appwrite · fees",
+          database: "PostgreSQL · fees",
           sync: "Live · every 5s",
           whatsapp,
         }}

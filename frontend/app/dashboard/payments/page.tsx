@@ -881,7 +881,7 @@ function ConfirmPaymentDialog({
                 Confirm Payment &amp; Issue Receipt
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                Mark as PAID. Creates an official receipt and marks fee paid in Appwrite.
+                Mark as PAID. Creates an official receipt and marks fee paid in database.
               </DialogDescription>
             </div>
           </div>
@@ -1344,7 +1344,7 @@ export default function PaymentsPage() {
       })
     }
 
-    // 5. Standalone Appwrite receipts not already tied to an order or student
+    // 5. Standalone database receipts not already tied to an order or student
     for (const receipt of receipts) {
       const rcpId = receipt.receiptId.trim().toLowerCase()
       if (coveredReceiptIds.has(rcpId)) continue

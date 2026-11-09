@@ -1,16 +1,16 @@
 import bcrypt from 'bcryptjs';
 
 import {
-  APPWRITE_COLLECTIONS,
+  DB_TABLES,
   deleteRecord,
   getRecord,
   listRecords,
   putRecord,
-} from './appwrite.js';
+} from './db.js';
 import { SUPER_ADMIN_EMAIL } from './tenant.js';
 
 /**
- * Application users live in the Appwrite `users` table.
+ * Application users live in the PostgreSQL `users` table.
  *
  * A row's entity id is the normalized email address and the row payload holds
  * the account record. Role/name/active are optional so accounts created before
@@ -100,7 +100,7 @@ export function verifyPassword(password: string, hash: string): Promise<boolean>
 
 /** List every account, oldest first. */
 export async function listUsers(): Promise<UserRecord[]> {
-  const rows = await listRecords<UserRecord>(APPWRITE_COLLECTIONS.users);
+  const rows = await listRecords<UserRecord>(DB_TABLES.users);
   return rows
     .map((row) => row.data)
     .sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
@@ -123,7 +123,7 @@ export async function findUserByEmail(
   email: string
 ): Promise<UserRecord | null> {
   const record = await getRecord<UserRecord>(
-    APPWRITE_COLLECTIONS.users,
+    DB_TABLES.users,
     normalizeEmail(email)
   );
   return record?.data ?? null;
@@ -136,14 +136,14 @@ export async function findUserById(id: number): Promise<UserRecord | null> {
 
 export async function saveUser(user: UserRecord): Promise<void> {
   await putRecord<UserRecord>(
-    APPWRITE_COLLECTIONS.users,
+    DB_TABLES.users,
     normalizeEmail(user.email),
     { ...user, email: normalizeEmail(user.email) }
   );
 }
 
 export async function removeUser(email: string): Promise<void> {
-  await deleteRecord(APPWRITE_COLLECTIONS.users, normalizeEmail(email));
+  await deleteRecord(DB_TABLES.users, normalizeEmail(email));
 }
 
 // User creation reads the current list to pick the next numeric id. Serialize
@@ -213,7 +213,7 @@ export async function createUser(input: CreateUserInput): Promise<UserRecord> {
 
 // Every API request resolves the caller's current account so role changes and
 // disabled accounts take effect immediately. A short cache keeps the extra
-// Appwrite read off hot paths (polling endpoints).
+// database read off hot paths (polling endpoints).
 const USER_CACHE_TTL_MS = 30_000;
 const userCache = new Map<string, { user: PublicUser | null; at: number }>();
 

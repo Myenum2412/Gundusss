@@ -97,7 +97,7 @@ export async function sendWaMessage(input: {
   return json.data as { id: string | null; to: string };
 }
 
-// Generic collection sync used by the *-store modules. Appwrite (through the
+// Generic collection sync used by the *-store modules. Database (through the
 // backend API) is the only source of truth; nothing is cached in the browser.
 export async function getCollection<T>(name: string): Promise<T[]> {
   const res = await apiFetch(`/api/${name}`);

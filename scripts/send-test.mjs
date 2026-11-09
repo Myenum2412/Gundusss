@@ -1,7 +1,7 @@
 import '../backend/dist/env.js';
 import { startWa, getWaState, sendWaMessage, waSessionKeyFor } from '../backend/dist/whatsapp.js';
 import { listUsers } from '../backend/dist/users.js';
-import { listScopedRecords, APPWRITE_COLLECTIONS } from '../backend/dist/appwrite.js';
+import { listScopedRecords, DB_TABLES } from '../backend/dist/db.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -20,7 +20,7 @@ async function main() {
   }
   console.log(`User: ${user.name} (${user.email}), Workspace Profile: ${user.profile_id}`);
 
-  const students = await listScopedRecords(APPWRITE_COLLECTIONS.students, user.profile_id);
+  const students = await listScopedRecords(DB_TABLES.students, user.profile_id);
   const student = students.find(s => s.entityId === 'STU-001') || students[0];
   if (!student) {
     console.error(`No students found in workspace ${user.profile_id}`);

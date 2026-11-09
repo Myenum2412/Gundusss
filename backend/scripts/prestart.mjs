@@ -1,6 +1,6 @@
 import net from 'node:net';
 
-// Fail fast when another backend instance is already running. Appwrite is the
+// Fail fast when another backend instance is already running. PostgreSQL is the
 // primary data store now, so the old PGlite port is no longer required.
 const checks = [{ port: Number(process.env.PORT ?? 4000), label: 'backend API' }];
 

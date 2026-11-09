@@ -5,8 +5,6 @@ import './globals.css';
 import { cn } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
-// Initializes the Appwrite client and pings once when the app starts.
-import "@/lib/appwrite";
 
 // Expose the loaded family as a CSS variable so the Tailwind `font-sans`
 // token resolves to the actual next/font face instead of the literal name

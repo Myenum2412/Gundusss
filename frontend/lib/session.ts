@@ -187,7 +187,7 @@ export function canWriteStored(): boolean {
   return hasSessionCookie()
 }
 
-// Remove data written by older builds. Appwrite is now the only source of
+// Remove data written by older builds. Database is now the only source of
 // truth, so cached collections and account details must not linger in the
 // browser where a different account could read them. This also runs on boot
 // and on every sign-in so leftover keys from any previous release are purged.

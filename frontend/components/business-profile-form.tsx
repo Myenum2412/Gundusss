@@ -935,7 +935,7 @@ export default function BusinessProfileForm({
       setSaved(profile)
       setNotice({
         tone: "success",
-        text: `Saved to Appwrite${result.updatedAt ? ` · ${formatTimestamp(result.updatedAt)}` : ""}.`,
+        text: `Saved to database${result.updatedAt ? ` · ${formatTimestamp(result.updatedAt)}` : ""}.`,
       })
     } else {
       setNotice({
@@ -2172,7 +2172,7 @@ export default function BusinessProfileForm({
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
             <p className="text-xs text-muted-foreground">
               Fields marked <span className="text-destructive">*</span> are
-              required for a complete listing. Changes are saved to Appwrite and
+              required for a complete listing. Changes are saved to database and
               cached on this device.
             </p>
             <div className="flex items-center gap-2">

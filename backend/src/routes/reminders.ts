@@ -2,11 +2,11 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import {
-  APPWRITE_COLLECTIONS,
+  DB_TABLES,
   getRecord,
   listScopedRecords,
   putRecord,
-} from '../appwrite.js';
+} from '../db.js';
 import { getProfile, listProfiles, resolveProfileId } from '../profiles.js';
 import { scopedEntityId } from '../tenant.js';
 import {
@@ -268,7 +268,7 @@ async function findReusableCheckoutOrder(
       checkoutUrl?: string;
       createdAt?: string;
       updatedAt?: string;
-    }>(APPWRITE_COLLECTIONS.paymentOrders, profileId);
+    }>(DB_TABLES.paymentOrders, profileId);
     const candidates = records
       .map((r) => r.data)
       .filter(
@@ -521,7 +521,7 @@ async function executeMonthlyReminders(
 
   // 1. Load active students for this profile
   const studentRecords = await listScopedRecords<any>(
-    APPWRITE_COLLECTIONS.students,
+    DB_TABLES.students,
     profileId
   );
   const activeStudents = studentRecords
@@ -530,11 +530,11 @@ async function executeMonthlyReminders(
 
   // 2. Load fee structures & student groups to determine standard fee
   const feeRecords = await listScopedRecords<any>(
-    APPWRITE_COLLECTIONS.feeStructures,
+    DB_TABLES.feeStructures,
     profileId
   );
   const groupRecords = await listScopedRecords<any>(
-    APPWRITE_COLLECTIONS.studentGroups,
+    DB_TABLES.studentGroups,
     profileId
   );
   const feeMap = new Map<string, string>();
@@ -557,14 +557,14 @@ async function executeMonthlyReminders(
   // The student's actual outstanding bill drives both the amount and the due
   // date in the message.
   const feeBills: FeeBill[] = (
-    await listScopedRecords<FeeBill>(APPWRITE_COLLECTIONS.fees, profileId)
+    await listScopedRecords<FeeBill>(DB_TABLES.fees, profileId)
   ).map((r) => r.data);
 
   // Only unpaid students should receive a reminder. A receipt in the current
   // month (or a bill marked paid for this month) means the fee is settled;
   // students with older arrears still get reminded.
   const receiptRecords = await listScopedRecords<ReceiptRow>(
-    APPWRITE_COLLECTIONS.receipts,
+    DB_TABLES.receipts,
     profileId
   );
   const receipts = receiptRecords.map((record) => record.data);
@@ -586,7 +586,7 @@ async function executeMonthlyReminders(
   // Fallback due day: the workspace's configured schedule (no more hardcoded
   // "5th" when the fee structure says otherwise).
   const reminderSettingsRecord = await getRecord<StoredReminderSettings>(
-    APPWRITE_COLLECTIONS.paymentSettings,
+    DB_TABLES.paymentSettings,
     scopedEntityId(profileId, 'cron_reminders')
   );
   const scheduleDueDay =
@@ -880,7 +880,7 @@ export async function reminderRoutes(app: FastifyInstance) {
 
       for (const targetProfile of targetProfiles) {
         const record = await getRecord<StoredReminderSettings>(
-          APPWRITE_COLLECTIONS.paymentSettings,
+          DB_TABLES.paymentSettings,
           scopedEntityId(targetProfile.profileId, 'cron_reminders')
         );
         const settings = record?.data || defaultSettings();
@@ -897,7 +897,7 @@ export async function reminderRoutes(app: FastifyInstance) {
 
         // Load settings again (the run may have touched them) and append log
         const latestRecord = await getRecord<StoredReminderSettings>(
-          APPWRITE_COLLECTIONS.paymentSettings,
+          DB_TABLES.paymentSettings,
           scopedEntityId(targetProfile.profileId, 'cron_reminders')
         );
         const latestSettings = latestRecord?.data || defaultSettings();
@@ -906,7 +906,7 @@ export async function reminderRoutes(app: FastifyInstance) {
         latestSettings.logs = [runLog, ...(latestSettings.logs || [])].slice(0, 50);
 
         await putRecord(
-          APPWRITE_COLLECTIONS.paymentSettings,
+          DB_TABLES.paymentSettings,
           scopedEntityId(targetProfile.profileId, 'cron_reminders'),
           latestSettings
         );
@@ -950,7 +950,7 @@ export async function reminderRoutes(app: FastifyInstance) {
   app.get('/api/reminders/status', async (req) => {
     const profileId = await resolveProfileId(req);
     const record = await getRecord<StoredReminderSettings>(
-      APPWRITE_COLLECTIONS.paymentSettings,
+      DB_TABLES.paymentSettings,
       scopedEntityId(profileId, 'cron_reminders')
     );
     const settings = record?.data || defaultSettings();
@@ -1014,7 +1014,7 @@ export async function reminderRoutes(app: FastifyInstance) {
       });
 
       const record = await getRecord<StoredReminderSettings>(
-        APPWRITE_COLLECTIONS.paymentSettings,
+        DB_TABLES.paymentSettings,
         scopedEntityId(profileId, 'cron_reminders')
       );
       const settings = record?.data || defaultSettings();
@@ -1026,7 +1026,7 @@ export async function reminderRoutes(app: FastifyInstance) {
       settings.enabled = true;
 
       await putRecord(
-        APPWRITE_COLLECTIONS.paymentSettings,
+        DB_TABLES.paymentSettings,
         scopedEntityId(profileId, 'cron_reminders'),
         settings
       );
@@ -1053,7 +1053,7 @@ export async function reminderRoutes(app: FastifyInstance) {
       const runLog = await executeMonthlyReminders(profileId, 'manual', req.auth?.email);
 
       const record = await getRecord<StoredReminderSettings>(
-        APPWRITE_COLLECTIONS.paymentSettings,
+        DB_TABLES.paymentSettings,
         scopedEntityId(profileId, 'cron_reminders')
       );
       const settings = record?.data || defaultSettings();
@@ -1062,7 +1062,7 @@ export async function reminderRoutes(app: FastifyInstance) {
       settings.logs = [runLog, ...(settings.logs || [])].slice(0, 50);
 
       await putRecord(
-        APPWRITE_COLLECTIONS.paymentSettings,
+        DB_TABLES.paymentSettings,
         scopedEntityId(profileId, 'cron_reminders'),
         settings
       );
@@ -1088,7 +1088,7 @@ export async function reminderRoutes(app: FastifyInstance) {
     const { jobId } = req.params as { jobId: string };
 
     const record = await getRecord<StoredReminderSettings>(
-      APPWRITE_COLLECTIONS.paymentSettings,
+      DB_TABLES.paymentSettings,
       scopedEntityId(profileId, 'cron_reminders')
     );
     const settings = record?.data || defaultSettings();
@@ -1099,7 +1099,7 @@ export async function reminderRoutes(app: FastifyInstance) {
         settings.jobId = null;
         settings.enabled = false;
         await putRecord(
-          APPWRITE_COLLECTIONS.paymentSettings,
+          DB_TABLES.paymentSettings,
           scopedEntityId(profileId, 'cron_reminders'),
           settings
         );
@@ -1117,14 +1117,14 @@ export async function reminderRoutes(app: FastifyInstance) {
   app.delete('/api/reminders/logs', async (req, reply) => {
     const profileId = await resolveProfileId(req);
     const record = await getRecord<StoredReminderSettings>(
-      APPWRITE_COLLECTIONS.paymentSettings,
+      DB_TABLES.paymentSettings,
       scopedEntityId(profileId, 'cron_reminders')
     );
     const settings = record?.data || defaultSettings();
     settings.logs = [];
     settings.lastStatus = null;
     await putRecord(
-      APPWRITE_COLLECTIONS.paymentSettings,
+      DB_TABLES.paymentSettings,
       scopedEntityId(profileId, 'cron_reminders'),
       settings
     );

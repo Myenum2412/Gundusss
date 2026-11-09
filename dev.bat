@@ -15,7 +15,7 @@ if errorlevel 1 (
 if not exist "backend\.env" (
   echo [!] backend\.env is missing.
   echo     copy backend\.env.example backend\.env
-  echo     then set APPWRITE_API_KEY in backend\.env
+  echo     then set DATABASE_URL in backend\.env
   pause
   exit /b 1
 )

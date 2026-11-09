@@ -5,7 +5,7 @@ Monorepo with workspaces:
 ```
 fees/
   frontend/         Next.js 14 App Router (port 3000)
-  backend/          Fastify 5 + Appwrite (port 4000)
+  backend/          Fastify 5 + PostgreSQL (port 4000)
   payment-gateway/  YOUPI PG self-hosted UPI gateway (payment API on 6100,
                     checkout on 7000, merchant admin on 6001)
   docker-compose.yml  Optional container setup for frontend + backend
@@ -13,22 +13,21 @@ fees/
 
 ## Quick start (local dev)
 
-Appwrite is the app's primary database. Local development needs **no Postgres**
-and no Docker.
+PostgreSQL is the app's primary database.
 
 1. Install dependencies and create the env files:
 ```bash
 npm install
 copy backend\.env.example backend\.env
 copy payment-gateway\.env.example payment-gateway\.env
-# set APPWRITE_API_KEY in backend/.env (scopes listed below)
+# set DATABASE_URL in backend/.env
 # set ENCRYPTION_MASTER_KEY and JWT_SECRET in payment-gateway/.env
 npm run gateway:install
 ```
 
-2. Create the Appwrite database and tables:
+2. Initialize the PostgreSQL database and tables:
 ```bash
-npm run appwrite:setup --workspace=backend
+npm run db:setup --workspace=backend
 ```
 
 3. Put the **same** random token in both env files:
@@ -95,17 +94,10 @@ NEXT_PUBLIC_API_URL=http://192.168.1.10:4000
 Then restart the frontend. Use an IP address rather than `localhost`, because
 Windows may resolve `localhost` to IPv6 `::1` while the backend listens on IPv4.
 
-**`missing scopes (["tables.write"])` during `appwrite:setup`**
+**`PostgreSQL connection issues` when the backend starts**
 
-The Appwrite API key needs `databases.read`, `databases.write`, `tables.read`,
-`tables.write`, `columns.read`, `columns.write`, `rows.read`, and `rows.write`.
-Edit the key in the Appwrite console, then run
-`npm run appwrite:setup --workspace=backend` again.
-
-**`Appwrite tables are missing` when the backend starts**
-
-The database or tables have not been created for this project. Run
-`npm run appwrite:setup --workspace=backend`, then restart the backend.
+Ensure PostgreSQL is running and `DATABASE_URL` in `backend/.env` is set:
+`DATABASE_URL=postgres://fees:fees@127.0.0.1:5432/fees`
 
 **`/dashboard/...` returns 500 after a production build**
 
@@ -115,8 +107,7 @@ dev server is running; restart `npm run dev --workspace=frontend` afterwards.
 ### Data storage
 
 All application data — profiles, students, fees, receipts, payment orders,
-payment settings, reminder logs, and the WhatsApp reminder queue — is stored in
-**Appwrite**. The backend keeps no local database or JSON data store, and the
+payment settings, reminder logs, and the WhatsApp reminder queue — is stored in **PostgreSQL**. The backend keeps no local database or JSON data store, and the
 frontend stores no business data in the browser. Deleting or redeploying the
 server does not lose application data; only the WhatsApp pairing session
 (`backend/.baileys_auth/`) is local, and it can be re-paired at any time.
@@ -238,9 +229,9 @@ The gateway's real verification engine runs, then delivers the signed webhook to
 the backend. The payment row should become `SUCCESS`, a receipt should appear,
 and the matching fee should become `paid`.
 
-## Appwrite data store
+## PostgreSQL data store
 
-Appwrite is the primary store for all app data: fees, users, students, student
+PostgreSQL is the primary store for all app data: fees, users, students, student
 groups, fee structures, receipts, announcements, dropdown options, payment
 orders, payment events, payment settings, and the business profile.
 
@@ -262,27 +253,19 @@ key.
 
 The browser never stores app data or account details in `localStorage`. A
 first-party session cookie holds the signed token (used only as a page gate),
-the signed-in account is kept in memory, and every page loads its data from
-Appwrite through the API. Old browser caches are cleared when the app starts.
+the signed-in account is kept in memory, and every page loads its data from the database through the API. Old browser caches are cleared when the app starts.
 
-1. In the Appwrite console, create a server API key for project
-   `6ae5c669000e75f3ad50` with these scopes:
-   `databases.read`, `databases.write`, `tables.read`, `tables.write`,
-   `columns.read`, `columns.write`, `rows.read`, `rows.write`.
-2. Add the key to `backend/.env`:
+1. Configure `DATABASE_URL` in `backend/.env`:
    ```bash
-   APPWRITE_ENDPOINT=https://fra.cloud.appwrite.io/v1
-   APPWRITE_PROJECT_ID=6ae5c669000e75f3ad50
-   APPWRITE_API_KEY=<server API key>
-   APPWRITE_DATABASE_ID=fees
+   DATABASE_URL=postgres://fees:fees@127.0.0.1:5432/fees
    ```
-3. Create the database, tables, and columns:
+2. Initialize the tables and indexes:
    ```bash
-   npm run appwrite:setup --workspace=backend
+   npm run db:setup --workspace=backend
    ```
-4. Restart the backend and check the connection:
+3. Restart the backend and check the connection:
    ```bash
-   curl http://localhost:4000/api/appwrite/status
+   curl http://localhost:4000/api/db/status
    ```
 
 The backend seeds demo fees and dropdown options only when their tables are
@@ -292,7 +275,7 @@ first-run setup form. Additional accounts are created by an administrator on
 **Dashboard → Users**.
 
 Sessions are signed with `AUTH_SECRET` (add a long random value to
-`backend/.env`; if unset the Appwrite API key is used as a fallback). Every
+`backend/.env`; stored in backend/.env). Every
 `/api/*` route except health, login, setup, logout, and the payment webhook
 requires `Authorization: Bearer <token>`.
 
@@ -308,12 +291,11 @@ Role changes apply without a re-login (user lookups are cached for 30 seconds).
 
 ## Docker (frontend + backend)
 
-The backend container talks to the same Appwrite project. YOUPI PG is expected
+The backend container connects to the PostgreSQL database. YOUPI PG is expected
 to run on the host; Compose points the backend at `host.docker.internal:6100`.
 
 ```bash
 # PowerShell: export the secrets for Compose
-$env:APPWRITE_API_KEY="<server API key>"
 $env:YOUPI_ADMIN_TOKEN="<shared admin token>"
 $env:YOUPI_WEBHOOK_SECRET="<webhook secret>"
 docker compose up --build
@@ -346,4 +328,4 @@ docker compose up --build
 - `GET /api/payments/settings/qr?upiId=&payeeName=&amount=` (live QR preview)
 - `POST /api/payments/settings/sync` (retry a pending YOUPI PG UPI sync)
 - `POST /api/payments/webhook` (YOUPI PG -> backend, HMAC-SHA256 verified)
-- `GET /api/appwrite/status` (Appwrite connection and tables)
+- `GET /api/db/status` (PostgreSQL connection and tables)

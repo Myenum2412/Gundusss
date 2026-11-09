@@ -4,12 +4,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const REPO_ROOT = path.resolve(__dirname, '../../..');
+
 // ---------------------------------------------------------------------------
 // 1. GND-AUTH-001: Super-Admin Fallback Password & Persistence
 // ---------------------------------------------------------------------------
 describe('GND-AUTH-001: Super-Admin Credentials & Persistence', () => {
   it('SUPER_ADMIN_PASSWORD must not default to hardcoded @Meenu2412 in source', () => {
-    const tenantFilePath = path.resolve('D:/Gundusss/backend/src/tenant.ts');
+    const tenantFilePath = path.resolve(REPO_ROOT, 'backend/src/tenant.ts');
     const content = fs.readFileSync(tenantFilePath, 'utf8');
     assert.strictEqual(
       content.includes('@Meenu2412'),
@@ -19,7 +23,7 @@ describe('GND-AUTH-001: Super-Admin Credentials & Persistence', () => {
   });
 
   it('ensureDeveloperAccount must preserve existing administrator password hash on reboot', () => {
-    const profilesFilePath = path.resolve('D:/Gundusss/backend/src/profiles.ts');
+    const profilesFilePath = path.resolve(REPO_ROOT, 'backend/src/profiles.ts');
     const content = fs.readFileSync(profilesFilePath, 'utf8');
 
     // Verify it doesn't unconditionally overwrite hash or test verifyPassword against default
@@ -40,7 +44,7 @@ describe('GND-AUTH-001: Super-Admin Credentials & Persistence', () => {
 // ---------------------------------------------------------------------------
 describe('GND-AUTH-002: Gateway Admin Authorization Gate & Token Protection', () => {
   it('GET /api/auth/gate route must enforce user.super === true and reject non-super users with 403', () => {
-    const authRouteFilePath = path.resolve('D:/Gundusss/backend/src/routes/auth.ts');
+    const authRouteFilePath = path.resolve(REPO_ROOT, 'backend/src/routes/auth.ts');
     const content = fs.readFileSync(authRouteFilePath, 'utf8');
 
     assert.ok(
@@ -102,7 +106,7 @@ describe('GND-INFO-001: Student PII Protection on Public Endpoints', () => {
   });
 
   it('payments.ts routes must use maskPhone and maskEmail on public student records', () => {
-    const paymentsFilePath = path.resolve('D:/Gundusss/backend/src/routes/payments.ts');
+    const paymentsFilePath = path.resolve(REPO_ROOT, 'backend/src/routes/payments.ts');
     const content = fs.readFileSync(paymentsFilePath, 'utf8');
 
     assert.ok(
@@ -121,7 +125,7 @@ describe('GND-INFO-001: Student PII Protection on Public Endpoints', () => {
 // ---------------------------------------------------------------------------
 describe('GND-SEC-001: Cryptographic Key Separation & Auth Secret', () => {
   it('backend/src/auth.ts must not fall back to APPWRITE_API_KEY for session signing', () => {
-    const authFilePath = path.resolve('D:/Gundusss/backend/src/auth.ts');
+    const authFilePath = path.resolve(REPO_ROOT, 'backend/src/auth.ts');
     const content = fs.readFileSync(authFilePath, 'utf8');
 
     assert.strictEqual(
@@ -141,8 +145,8 @@ describe('GND-SEC-001: Cryptographic Key Separation & Auth Secret', () => {
 // ---------------------------------------------------------------------------
 describe('GND-SUPP-001: Dependency Lockfile Integrity & Deploy Enforcement', () => {
   it('backend/package-lock.json and frontend/package-lock.json must exist and be valid JSON', () => {
-    const backendLock = path.resolve('D:/Gundusss/backend/package-lock.json');
-    const frontendLock = path.resolve('D:/Gundusss/frontend/package-lock.json');
+    const backendLock = path.resolve(REPO_ROOT, 'backend/package-lock.json');
+    const frontendLock = path.resolve(REPO_ROOT, 'frontend/package-lock.json');
 
     assert.ok(fs.existsSync(backendLock), 'backend/package-lock.json must exist');
     assert.ok(fs.existsSync(frontendLock), 'frontend/package-lock.json must exist');
@@ -155,7 +159,7 @@ describe('GND-SUPP-001: Dependency Lockfile Integrity & Deploy Enforcement', () 
   });
 
   it('deploy.sh must strictly use npm ci without falling back to unpinned npm install', () => {
-    const deployShPath = path.resolve('D:/Gundusss/deploy.sh');
+    const deployShPath = path.resolve(REPO_ROOT, 'deploy.sh');
     const content = fs.readFileSync(deployShPath, 'utf8');
 
     assert.strictEqual(
@@ -180,7 +184,7 @@ describe('GND-SUPP-001: Dependency Lockfile Integrity & Deploy Enforcement', () 
 // ---------------------------------------------------------------------------
 describe('Cross-Tenant Isolation & Access Protection', () => {
   it('resolveProfileId must reject profile-switching for non-super users', () => {
-    const profilesFilePath = path.resolve('D:/Gundusss/backend/src/profiles.ts');
+    const profilesFilePath = path.resolve(REPO_ROOT, 'backend/src/profiles.ts');
     const content = fs.readFileSync(profilesFilePath, 'utf8');
 
     assert.ok(
@@ -190,7 +194,7 @@ describe('Cross-Tenant Isolation & Access Protection', () => {
   });
 
   it('server.ts must enforce security headers on all responses', () => {
-    const serverFilePath = path.resolve('D:/Gundusss/backend/src/server.ts');
+    const serverFilePath = path.resolve(REPO_ROOT, 'backend/src/server.ts');
     const content = fs.readFileSync(serverFilePath, 'utf8');
 
     assert.ok(content.includes('X-Content-Type-Options'), 'Must set nosniff header');

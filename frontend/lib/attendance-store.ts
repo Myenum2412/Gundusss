@@ -18,7 +18,7 @@ export interface AttendanceDay {
   updatedAt?: string;
 }
 
-// Appwrite (through the API) is the only source of truth. Nothing is cached in
+// Database (through the API) is the only source of truth. Nothing is cached in
 // the browser, so a signed-in account can never read another account's copy.
 export function loadAttendance(): Promise<AttendanceDay[]> {
   return getCollection<AttendanceDay>("attendance");
@@ -29,7 +29,7 @@ export function loadAttendance(): Promise<AttendanceDay[]> {
 let saveQueue: Promise<void> = Promise.resolve();
 let pendingWrites = 0;
 
-/** True while a local attendance change is still waiting to reach Appwrite. */
+/** True while a local attendance change is still waiting to reach the database. */
 export function isAttendanceSavePending(): boolean {
   return pendingWrites > 0;
 }

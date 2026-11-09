@@ -10,10 +10,7 @@ services:
       PORT: 4000
       HOST: 0.0.0.0
       FRONTEND_URL: http://localhost:3000
-      APPWRITE_ENDPOINT: ${APPWRITE_ENDPOINT:-https://fra.cloud.appwrite.io/v1}
-      APPWRITE_PROJECT_ID: ${APPWRITE_PROJECT_ID:-6ae5c669000e75f3ad50}
-      APPWRITE_API_KEY: ${APPWRITE_API_KEY:?Set APPWRITE_API_KEY before starting Compose}
-      APPWRITE_DATABASE_ID: ${APPWRITE_DATABASE_ID:-fees}
+      DATABASE_URL: ${DATABASE_URL:-postgres://fees:fees@host.docker.internal:5432/fees}
       AUTH_SECRET: ${AUTH_SECRET:-}
       AUTH_TOKEN_TTL_HOURS: ${AUTH_TOKEN_TTL_HOURS:-12}
       # cron-job.org REST API key for the monthly reminder cron
