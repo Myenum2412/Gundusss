@@ -170,6 +170,7 @@ function requestPath(req: FastifyRequest): string {
 function isPublicRoute(method: string, path: string): boolean {
   if (method === 'OPTIONS') return true;
   if (path === '/api/health') return true;
+  if (path === '/api/db/status') return true;
   if (path === '/api/auth/login' && method === 'POST') return true;
   if (path === '/api/auth/signup' && method === 'POST') return true;
   if (path === '/api/auth/setup') return true;
