@@ -3,13 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
-  ArrowRightIcon,
   Building2Icon,
   CheckIcon,
   CopyIcon,
   EllipsisIcon,
   ExternalLinkIcon,
-  LayoutDashboardIcon,
   Loader2Icon,
   RefreshCwIcon,
   SearchIcon,
@@ -40,10 +38,7 @@ import {
 } from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
 import { listProfiles, type ProfileSummary } from "@/lib/profiles"
-import {
-  clearActiveProfileId,
-  setActiveProfileId,
-} from "@/lib/session"
+import { clearActiveProfileId } from "@/lib/session"
 import { cn } from "cn"
 
 function formatDate(value: string) {
@@ -117,16 +112,6 @@ export default function OrgMenuDashboardPage() {
     filteredProfiles.length > 0 &&
     filteredProfiles.every((item) => selectedIds.has(item.profileId))
 
-  function openWorkspace(profileId: string) {
-    setActiveProfileId(profileId)
-    router.push("/dashboard")
-  }
-
-  function openMyWorkspace() {
-    clearActiveProfileId()
-    router.push("/dashboard")
-  }
-
   function exitView() {
     clearActiveProfileId()
     if (typeof window !== "undefined") window.location.reload()
@@ -191,16 +176,7 @@ export default function OrgMenuDashboardPage() {
 
   return (
     <DashboardShell
-      trail={[
-        { label: "Workspace", href: "/dashboard" },
-        { label: "Organization console" },
-      ]}
-      actions={
-        <Button variant="outline" size="sm" onClick={openMyWorkspace}>
-          <LayoutDashboardIcon />
-          My workspace
-        </Button>
-      }
+      trail={[{ label: "Organization console" }]}
     >
       {/* Hero */}
       <section className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-primary/10 via-card to-card p-5 md:p-6">
@@ -227,8 +203,9 @@ export default function OrgMenuDashboardPage() {
               Every workspace, one control room
             </h1>
             <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-muted-foreground">
-              Open any organization to inspect its students, fees, receipts, and
-              settings. Regular accounts only ever see their own workspace.
+              Review every organization, its owner, and its public payment link.
+              This console is isolated from workspace dashboards and the
+              workspace sidebar.
             </p>
           </div>
 
@@ -399,8 +376,6 @@ export default function OrgMenuDashboardPage() {
                 </TableRow>
               ) : (
                 filteredProfiles.map((item) => {
-                  const isViewing =
-                    activeProfile.profileId === item.profileId && viewingOther
                   return (
                     <TableRow
                       key={item.profileId}
@@ -512,12 +487,15 @@ export default function OrgMenuDashboardPage() {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" side="bottom" className="w-48">
                               <DropdownMenuItem
-                                onClick={() => openWorkspace(item.profileId)}
+                                onClick={() =>
+                                  void copyText(
+                                    item.profileId,
+                                    `id:${item.profileId}`
+                                  )
+                                }
                               >
-                                <ArrowRightIcon className="size-4 text-primary" />
-                                <span>
-                                  {isViewing ? "Viewing Workspace" : "Open Workspace"}
-                                </span>
+                                <CopyIcon className="size-4 text-muted-foreground" />
+                                <span>Copy Workspace ID</span>
                               </DropdownMenuItem>
                               {item.paymentUrl && (
                                 <>

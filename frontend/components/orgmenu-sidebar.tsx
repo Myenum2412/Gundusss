@@ -1,7 +1,5 @@
 "use client"
 
-import Link from "next/link"
-
 import { NavMain } from "@/components/nav-main"
 import { NavUser } from "@/components/nav-user"
 import { useAuth } from "@/components/auth-provider"
@@ -16,17 +14,10 @@ import {
   SidebarRail,
   SidebarSeparator,
 } from "@/components/ui/sidebar"
-import {
-  Building2Icon,
-  LayoutDashboardIcon,
-  LayersIcon,
-  SettingsIcon,
-  ShieldCheckIcon,
-} from "lucide-react"
+import { Building2Icon, LayersIcon, ShieldCheckIcon } from "lucide-react"
 
-// The organization console has its own chrome so the super-admin area never
-// shares the workspace sidebar. Workspace-only destinations stay one click away
-// under "Your workspace".
+// The organization console has its own chrome and deliberately exposes no
+// workspace-dashboard or settings destinations. It is a standalone console.
 const navigation = {
   navMain: [
     {
@@ -38,18 +29,6 @@ const navigation = {
       title: "Workspaces",
       url: "/orgmenu/dashboard#workspaces",
       icon: <LayersIcon />,
-    },
-  ],
-  navBottom: [
-    {
-      title: "My workspace",
-      url: "/dashboard",
-      icon: <LayoutDashboardIcon />,
-    },
-    {
-      title: "Payment setup",
-      url: "/dashboard/settings",
-      icon: <SettingsIcon />,
     },
   ],
 }
@@ -81,10 +60,6 @@ export function OrgMenuSidebar({ ...props }: React.ComponentProps<typeof Sidebar
       <SidebarSeparator className="my-1" />
       <SidebarContent className="flex flex-col gap-2 px-2">
         <NavMain items={navigation.navMain} label="Console" />
-        <div className="mt-auto">
-          <SidebarSeparator className="mx-0 mb-2" />
-          <NavMain items={navigation.navBottom} label="Your workspace" />
-        </div>
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border p-2">
         <NavUser user={user} />
