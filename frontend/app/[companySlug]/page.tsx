@@ -167,7 +167,10 @@ export default function PublicPaymentPage() {
   // address that does not exist. If the office has not saved a merchant VPA,
   // the page must say so and offer the counter instead.
   const upiId = isUsableUpiVpa(profile?.upiId) ? profile.upiId.trim() : ""
-  const upiConfigured = Boolean(upiId)
+  // The workspace's uploaded QR is the merchant's real bank QR and always wins
+  // over a generated one. A workspace can run QR-only without a saved VPA.
+  const uploadedQr = profile?.qrCodeDataUrl?.trim() || ""
+  const upiConfigured = Boolean(upiId || uploadedQr)
   const payeeName = profile?.payeeName || profile?.name || "Institution Office"
   const numAmount = parseFloat(fixedAmount) || 0
   const amountFormatted = numAmount.toFixed(2)
@@ -373,7 +376,7 @@ export default function PublicPaymentPage() {
            ========================================================================= */}
         {order && (order.status === "SUCCESS" || order.status === "COMPLETED") ? (
           <section className="overflow-hidden rounded-[26px] border bg-card shadow-xl shadow-black/[0.04] animate-in fade-in zoom-in-95 duration-200">
-            {/* YOUPI PG Header */}
+            {/* MyFees Header */}
             <div className="flex items-center justify-between bg-slate-900 px-4 py-3 text-white dark:bg-slate-950 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <span className="grid size-6 place-items-center rounded-lg bg-white/10 overflow-hidden">
@@ -574,7 +577,7 @@ export default function PublicPaymentPage() {
               MAIN SHORT & SWEET CHECKOUT CARD
              ========================================================================= */
           <div className="overflow-hidden rounded-[26px] border border-slate-200/80 bg-card shadow-xl shadow-black/[0.05] dark:border-zinc-800">
-            {/* 1. YOUPI PG Banner */}
+            {/* 1. MyFees Banner */}
             <div className="flex items-center justify-between bg-slate-900 px-4 py-3 text-white dark:bg-slate-950 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <span className="grid size-6 place-items-center rounded-lg bg-white/10 overflow-hidden">
@@ -709,9 +712,15 @@ export default function PublicPaymentPage() {
                   </div>
                 ) : (
                 <div className="flex flex-col items-center space-y-3.5">
-                  {/* Dynamic QR Box */}
+                  {/* QR Box — uploaded merchant QR first, generated QR fallback */}
                   <div className="relative flex size-[195px] items-center justify-center rounded-2xl border bg-white p-2 shadow-inner">
-                    {generatingQr || !qrDataUrl ? (
+                    {uploadedQr ? (
+                      <img
+                        src={uploadedQr}
+                        alt={`Scan UPI QR to pay ${formatInr(fixedAmount)}`}
+                        className="size-full object-contain"
+                      />
+                    ) : generatingQr || !qrDataUrl ? (
                       <div className="flex size-full items-center justify-center">
                         <Loader2Icon className="size-6 animate-spin text-primary" />
                       </div>
@@ -740,6 +749,8 @@ export default function PublicPaymentPage() {
                     </span>
                   </div>
 
+                  {upiId ? (
+                    <>
                   {/* UPI ID + Copy */}
                   <div className="flex w-full items-center justify-between rounded-xl border bg-muted/30 px-3 py-1.5 text-xs">
                     <span className="font-mono text-[11px] font-semibold text-foreground">
@@ -806,6 +817,13 @@ export default function PublicPaymentPage() {
                       <span>Paytm</span>
                     </Button>
                   </div>
+                    </>
+                  ) : (
+                    <p className="px-2 text-center text-[11px] leading-snug text-muted-foreground">
+                      Scan the QR above with any UPI app to pay{" "}
+                      {formatInr(fixedAmount)}.
+                    </p>
+                  )}
                 </div>
                 )
               ) : (
@@ -853,7 +871,7 @@ export default function PublicPaymentPage() {
             {/* 4. Compact Footer */}
             <div className="border-t bg-muted/10 px-4 py-2.5 text-center text-[10px] text-muted-foreground flex items-center justify-center gap-1.5 font-medium">
               <ShieldCheckIcon className="size-3 text-emerald-600 dark:text-emerald-400" />
-              <span>256-bit Encrypted Official UPI Gateway</span>
+              <span>256-bit Encrypted Official UPI Payment</span>
             </div>
           </div>
         )}

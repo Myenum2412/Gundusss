@@ -9,11 +9,11 @@ import { resolveProfileId } from '../profiles.js';
 import { scopedEntityId } from '../tenant.js';
 
 /**
- * Merchant UPI profile for the in-app checkout preview.
+ * Per-workspace merchant UPI profile for the in-app checkout preview.
  *
- * The uploaded QR is stored in this app. YOUPI PG still issues a fresh,
- * amount-specific QR at checkout so its banking observers can verify the
- * transfer; the UPI ID is synced to the gateway's active receiving account.
+ * Everything here is scoped to the active profile (`profileId:1`). The fees app
+ * never reads or writes a shared gateway account, so one workspace can never
+ * overwrite another workspace's UPI ID or QR code.
  */
 
 const DEFAULT_PAYEE_NAME = 'Fees';
@@ -50,32 +50,6 @@ interface SettingsBody {
   qrCodeDataUrl?: string;
 }
 
-interface GatewayInfo {
-  connected: boolean;
-  synced?: boolean;
-  pendingSync?: boolean;
-  upiId?: string;
-  payeeName?: string;
-  error?: string;
-}
-
-interface GatewayAccountResponse {
-  upiId?: string;
-  payeeName?: string;
-  receivingAccount?: { upiId?: string; payeeName?: string };
-  account?: { upiId?: string; payeeName?: string };
-  error?: string;
-  message?: string;
-}
-
-function gatewayBaseUrl() {
-  return (process.env.YOUPI_PAYMENT_API_URL ?? 'http://localhost:6100').replace(/\/+$/, '');
-}
-
-function adminToken() {
-  return (process.env.YOUPI_ADMIN_TOKEN ?? '').trim();
-}
-
 const COLLECTION = DB_TABLES.paymentSettings;
 
 async function readLocalSettings(
@@ -95,143 +69,17 @@ export function isUsableUpiId(value: unknown): value is string {
   return VPA_RE.test(clean) && !PLACEHOLDER_VPAS.has(clean.toLowerCase());
 }
 
-async function fetchGatewayWithRetry(
-  url: string,
-  options: RequestInit,
-  maxAttempts = 3,
-  baseDelayMs = 500
-): Promise<Response> {
-  let lastErr: unknown;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await fetch(url, options);
-    } catch (err) {
-      lastErr = err;
-      if (attempt < maxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, attempt * baseDelayMs));
-      }
-    }
-  }
-  throw lastErr;
-}
-
-export async function fetchGatewaySettings(
-  timeoutMs = 6000
-): Promise<GatewayInfo> {
-  const token = adminToken();
-  if (!token) {
-    return {
-      connected: false,
-      error: 'YOUPI_ADMIN_TOKEN is not configured for the fees backend.',
-    };
-  }
-
-  try {
-    const res = await fetchGatewayWithRetry(`${gatewayBaseUrl()}/api/v1/admin/upi-settings`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    const json = (await res.json().catch(() => null)) as GatewayAccountResponse | null;
-    if (!res.ok) {
-      return {
-        connected: true,
-        error: json?.error ?? json?.message ?? `Gateway returned HTTP ${res.status}.`,
-      };
-    }
-    return {
-      connected: true,
-      upiId: json?.upiId ?? '',
-      payeeName: json?.payeeName ?? '',
-    };
-  } catch {
-    return {
-      connected: false,
-      pendingSync: true,
-      error: 'YOUPI PG is not reachable. Start the gateway to sync the checkout UPI ID.',
-    };
-  }
-}
-
-async function syncGatewaySettings(upiId: string, payeeName: string): Promise<GatewayInfo> {
-  const token = adminToken();
-  if (!token) {
-    return {
-      connected: false,
-      synced: false,
-      error: 'YOUPI_ADMIN_TOKEN is not configured for the fees backend.',
-    };
-  }
-
-  try {
-    const res = await fetch(`${gatewayBaseUrl()}/api/v1/admin/upi-settings`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ upiId, payeeName }),
-      signal: AbortSignal.timeout(8000),
-    });
-    const json = (await res.json().catch(() => null)) as GatewayAccountResponse | null;
-    if (!res.ok) {
-      return {
-        connected: true,
-        synced: false,
-        error: json?.error ?? json?.message ?? `Gateway returned HTTP ${res.status}.`,
-      };
-    }
-    const account = json?.receivingAccount ?? json?.account;
-    return {
-      connected: true,
-      synced: true,
-      upiId: account?.upiId ?? json?.upiId ?? upiId,
-      payeeName: account?.payeeName ?? json?.payeeName ?? payeeName,
-    };
-  } catch {
-    return {
-      connected: false,
-      synced: false,
-      pendingSync: true,
-      error: 'YOUPI PG is offline right now. The UPI ID is saved and will sync before the next checkout.',
-    };
-  }
-}
-
-/**
- * Make sure a saved UPI ID reaches the gateway before a new checkout starts.
- * This closes the gap where a save happened while YOUPI PG was offline.
- */
-export async function ensureGatewayUpiSynced(
-  profileId: string
-): Promise<GatewayInfo | null> {
-  const local = await readLocalSettings(profileId);
-  const upiId = local?.upi_id?.trim() ?? '';
-  if (!isUsableUpiId(upiId)) return null;
-
-  const payeeName = local?.payee_name?.trim() || DEFAULT_PAYEE_NAME;
-  const current = await fetchGatewaySettings();
-  if (!current.connected) return current;
-
-  if (current.upiId === upiId && (current.payeeName ?? '') === payeeName) {
-    return { ...current, synced: true };
-  }
-  return syncGatewaySettings(upiId, payeeName);
-}
-
 export interface CheckoutUpiState {
   ready: boolean;
   upiId: string;
   payeeName: string;
-  source: 'settings' | 'gateway' | 'none';
+  source: 'settings' | 'none';
   error?: string;
 }
 
 /**
- * Resolves the VPA that a public checkout will actually use.
- *
- * Preference order: the workspace's saved UPI ID (synced to the gateway), then
- * the gateway's active receiving account. A placeholder or missing VPA is
- * reported as not ready instead of silently creating an unpayable order.
+ * Resolves the VPA a public checkout will actually use. Only this workspace's
+ * saved UPI is considered — there is deliberately no shared-gateway fallback.
  */
 export async function getEffectiveCheckoutUpi(
   profileId: string
@@ -241,17 +89,6 @@ export async function getEffectiveCheckoutUpi(
   const localPayee = local?.payee_name?.trim() || DEFAULT_PAYEE_NAME;
 
   if (isUsableUpiId(localUpi)) {
-    const gateway = await ensureGatewayUpiSynced(profileId);
-    // A reachable gateway that refused the sync would charge the wrong VPA.
-    if (gateway?.connected && gateway.synced === false && gateway.error) {
-      return {
-        ready: false,
-        upiId: localUpi,
-        payeeName: localPayee,
-        source: 'settings',
-        error: gateway.error,
-      };
-    }
     return {
       ready: true,
       upiId: localUpi,
@@ -260,32 +97,13 @@ export async function getEffectiveCheckoutUpi(
     };
   }
 
-  const gateway = await fetchGatewaySettings();
-  if (!gateway.connected) {
-    return {
-      ready: false,
-      upiId: '',
-      payeeName: localPayee,
-      source: 'none',
-      error: gateway.error || 'YOUPI PG is unreachable.',
-    };
-  }
-  if (!isUsableUpiId(gateway.upiId)) {
-    return {
-      ready: false,
-      upiId: '',
-      payeeName: gateway.payeeName || localPayee,
-      source: 'none',
-      error:
-        gateway.error ||
-        'No merchant UPI ID is configured in YOUPI PG. Save one under Payments → UPI setup.',
-    };
-  }
   return {
-    ready: true,
-    upiId: gateway.upiId,
-    payeeName: gateway.payeeName || localPayee,
-    source: 'gateway',
+    ready: false,
+    upiId: '',
+    payeeName: localPayee,
+    source: 'none',
+    error:
+      'No UPI ID is saved for this workspace. Add your own UPI under Settings → UPI payment setup.',
   };
 }
 
@@ -379,19 +197,11 @@ async function generateQrDataUrl(
   }
 }
 
-async function presentSettings(local: SettingsRow | null, gateway: GatewayInfo) {
-  const localUpi = local?.upi_id?.trim() ?? '';
-  const localPayee = local?.payee_name?.trim() ?? '';
-  const upiId = localUpi || gateway.upiId || '';
-  const payeeName = localPayee || gateway.payeeName || DEFAULT_PAYEE_NAME;
+async function presentSettings(local: SettingsRow | null) {
+  const upiId = local?.upi_id?.trim() ?? '';
+  const payeeName = local?.payee_name?.trim() || DEFAULT_PAYEE_NAME;
   const savedQr = local?.qr_code_data_url ?? '';
   const generatedQrDataUrl = savedQr ? '' : await generateQrDataUrl(upiId, payeeName);
-
-  const gatewaySynced =
-    Boolean(localUpi) &&
-    gateway.connected &&
-    gateway.upiId === localUpi &&
-    (gateway.payeeName ?? '') === localPayee;
 
   return {
     upiId,
@@ -399,20 +209,15 @@ async function presentSettings(local: SettingsRow | null, gateway: GatewayInfo) 
     qrCodeDataUrl: savedQr,
     generatedQrDataUrl,
     updatedAt: local?.updated_at ?? null,
-    gateway: {
-      ...gateway,
-      synced: gatewaySynced,
-    },
   };
 }
 
 export async function paymentSettingsRoutes(app: FastifyInstance) {
-  // GET /api/payments/settings — local merchant profile plus gateway sync state.
+  // GET /api/payments/settings — this workspace's saved merchant profile.
   app.get('/api/payments/settings', async (req) => {
     const profileId = await resolveProfileId(req);
     const local = await readLocalSettings(profileId);
-    const gateway = await fetchGatewaySettings();
-    return { data: await presentSettings(local, gateway) };
+    return { data: await presentSettings(local) };
   });
 
   // GET /api/payments/settings/qr — live QR preview for unsaved form values.
@@ -431,18 +236,15 @@ export async function paymentSettingsRoutes(app: FastifyInstance) {
     };
   });
 
-  // POST /api/payments/settings/sync — retry a pending gateway sync.
+  // POST /api/payments/settings/sync — kept for older clients; settings are
+  // already local to this workspace, so this simply returns them unchanged.
   app.post('/api/payments/settings/sync', async (req) => {
     const profileId = await resolveProfileId(req);
     const local = await readLocalSettings(profileId);
-    const upiId = local?.upi_id?.trim() ?? '';
-    const gateway = upiId
-      ? await syncGatewaySettings(upiId, local?.payee_name?.trim() || DEFAULT_PAYEE_NAME)
-      : await fetchGatewaySettings();
-    return { data: await presentSettings(local, gateway) };
+    return { data: await presentSettings(local) };
   });
 
-  // PUT /api/payments/settings — save UPI ID / payee / QR and sync the VPA.
+  // PUT /api/payments/settings — save this workspace's UPI ID / payee / QR.
   app.put('/api/payments/settings', async (req, reply) => {
     const body = (req.body ?? {}) as SettingsBody;
     const upiId = (body.upiId ?? '').trim();
@@ -477,15 +279,7 @@ export async function paymentSettingsRoutes(app: FastifyInstance) {
       }
     );
 
-    const gateway = await syncGatewaySettings(upiId, payeeName);
-    if (!gateway.synced) {
-      app.log.warn(
-        { gatewayError: gateway.error, profileId },
-        'UPI settings saved locally but could not be synced to YOUPI PG'
-      );
-    }
-
     const saved = await readLocalSettings(profileId);
-    return { data: await presentSettings(saved, gateway) };
+    return { data: await presentSettings(saved) };
   });
 }

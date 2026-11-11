@@ -21,7 +21,6 @@ import {
   paymentUrlFor,
 } from '../tenant.js';
 import {
-  fetchGatewaySettings,
   getEffectiveCheckoutUpi,
   isUsableUpiId,
 } from './payment-settings.js';
@@ -42,7 +41,7 @@ const YOUPI_WEBHOOK_SECRET = process.env.YOUPI_WEBHOOK_SECRET ?? '';
 const YOUPI_ADMIN_TOKEN = (process.env.YOUPI_ADMIN_TOKEN ?? '').trim();
 
 /**
- * Executes a fetch against YOUPI PG with automatic retry on transient connection / network failures.
+ * Executes a fetch against MyFees with automatic retry on transient connection / network failures.
  * During deploys or server restarts, gateway services take 2-5 seconds to bind to ports.
  * Automatic retry prevents transient 502 GATEWAY_UNREACHABLE errors.
  */
@@ -706,7 +705,7 @@ async function settleSuccessPayment(
       const receiptUtr = detail.utr || latest.utr;
       const receiptBank = detail.bankName || latest.bankName || '';
       const receiptPayer = detail.payerVpa || latest.payerVpa || '';
-      const notes = `YOUPI PG · Method: ${receiptMethodName}${receiptUpi ? ` · UPI: ${receiptUpi}` : ''}${receiptBank ? ` · Bank: ${receiptBank}` : ''}${receiptUtr ? ` · UTR: ${receiptUtr}` : ''}${receiptPayer ? ` · Payer: ${receiptPayer}` : ''} · Order: ${orderId}${overpaid ? ' · OVERPAID: fee already settled by another payment' : ''}`;
+      const notes = `MyFees · Method: ${receiptMethodName}${receiptUpi ? ` · UPI: ${receiptUpi}` : ''}${receiptBank ? ` · Bank: ${receiptBank}` : ''}${receiptUtr ? ` · UTR: ${receiptUtr}` : ''}${receiptPayer ? ` · Payer: ${receiptPayer}` : ''} · Order: ${orderId}${overpaid ? ' · OVERPAID: fee already settled by another payment' : ''}`;
       const receipt: ReceiptRecord = {
         profileId,
         receiptId,
@@ -827,7 +826,7 @@ export interface GatewayCheckoutResult {
 }
 
 /**
- * Create (or idempotently reuse) a real YOUPI PG checkout for a fee and persist
+ * Create (or idempotently reuse) a real MyFees checkout for a fee and persist
  * the local order. Both the dashboard and the public portal go through this so
  * every link handed to a student is an actual payable gateway session — never a
  * hand-built workspace URL.
@@ -871,7 +870,7 @@ export async function createGatewayCheckout(
     );
   }
 
-  // A save made while YOUPI PG was offline is retried here, so the new checkout
+  // UPI checkouts use only this workspace's own saved UPI ID.
   let effectiveUpiId = '';
   if (method === 'UPI') {
     const upi = await getEffectiveCheckoutUpi(input.profileId);
@@ -957,7 +956,7 @@ export async function createGatewayCheckout(
     });
   } catch (err) {
     throw new GatewayCheckoutError(
-      `Payment gateway unreachable. Is YOUPI PG running at ${YOUPI_API}?`,
+      `Payment gateway unreachable. Is MyFees running at ${YOUPI_API}?`,
       502,
       'GATEWAY_UNREACHABLE',
       err instanceof Error ? err.message : err
@@ -1067,7 +1066,7 @@ function checkoutErrorReply(
 }
 
 export async function paymentRoutes(app: FastifyInstance) {
-  // POST /api/payments/create — open a YOUPI PG checkout session for a fee.
+  // POST /api/payments/create — open a MyFees checkout session for a fee.
   app.post('/api/payments/create', async (req, reply) => {
     const body = (req.body ?? {}) as CreatePaymentBody;
     const profileId = await resolveProfileId(req);
@@ -1104,7 +1103,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       if (err instanceof GatewayCheckoutError) {
         app.log.warn(
           { err: err.message, code: err.code, profileId },
-          'Could not create a YOUPI PG checkout'
+          'Could not create a MyFees checkout'
         );
       }
       return checkoutErrorReply(reply, err);
@@ -1302,7 +1301,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       } else {
         receiptId = await nextReceiptId(profileId);
         const receiptUpi = order.upiId || '';
-        const notes = `YOUPI PG · Method: ${confirmedMethod}${receiptUpi ? ` · UPI: ${receiptUpi}` : ''}${confirmedBankName ? ` · Bank: ${confirmedBankName}` : ''}${confirmedUtr ? ` · UTR: ${confirmedUtr}` : ''}${confirmedPayerVpa ? ` · Payer: ${confirmedPayerVpa}` : ''} · Order: ${order.orderId}${overpaid ? ' · OVERPAID: fee already settled by another payment' : ''}`;
+        const notes = `MyFees · Method: ${confirmedMethod}${receiptUpi ? ` · UPI: ${receiptUpi}` : ''}${confirmedBankName ? ` · Bank: ${confirmedBankName}` : ''}${confirmedUtr ? ` · UTR: ${confirmedUtr}` : ''}${confirmedPayerVpa ? ` · Payer: ${confirmedPayerVpa}` : ''} · Order: ${order.orderId}${overpaid ? ' · OVERPAID: fee already settled by another payment' : ''}`;
         const receipt: ReceiptRecord = {
           profileId,
           receiptId,
@@ -1457,9 +1456,9 @@ export async function paymentRoutes(app: FastifyInstance) {
         signal: AbortSignal.timeout(10000),
       });
     } catch (err) {
-      app.log.error({ err }, 'YOUPI PG counter decline unreachable');
+      app.log.error({ err }, 'MyFees counter decline unreachable');
       return reply.code(502).send({
-        error: `Payment gateway unreachable. Is YOUPI PG running at ${YOUPI_API}?`,
+        error: `Payment gateway unreachable. Is MyFees running at ${YOUPI_API}?`,
       });
     }
 
@@ -1493,7 +1492,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     };
   });
 
-  // POST /api/payments/webhook — authoritative YOUPI PG webhook receiver.
+  // POST /api/payments/webhook — authoritative MyFees webhook receiver.
   app.post('/api/payments/webhook', async (req, reply) => {
     const raw = req.rawBody;
     if (!raw || raw.length === 0) {
@@ -1598,7 +1597,7 @@ export async function paymentRoutes(app: FastifyInstance) {
           studentName: existing.studentName || metaStudentName,
           amount: existing.amount || payload.amount || '',
           completedAt: payload.completedAt || existing.completedAt || timestamp,
-          notes: `YOUPI PG · Method: ${method || existing.method || 'UPI'}${effectiveBankName ? ` · Bank: ${effectiveBankName}` : ''}${effectivePayerVpa ? ` · Payer: ${effectivePayerVpa}` : ''} · UTR: ${utr || existing.utr || 'N/A'}`,
+          notes: `MyFees · Method: ${method || existing.method || 'UPI'}${effectiveBankName ? ` · Bank: ${effectiveBankName}` : ''}${effectivePayerVpa ? ` · Payer: ${effectivePayerVpa}` : ''} · UTR: ${utr || existing.utr || 'N/A'}`,
           updatedAt: timestamp,
         }
       : {
@@ -1620,7 +1619,7 @@ export async function paymentRoutes(app: FastifyInstance) {
           checkoutUrl: '',
           receiptId: null,
           completedAt: payload.completedAt || timestamp,
-          notes: `YOUPI PG · Method: ${method || 'UPI'}${effectiveBankName ? ` · Bank: ${effectiveBankName}` : ''}${effectivePayerVpa ? ` · Payer: ${effectivePayerVpa}` : ''} · UTR: ${utr || 'N/A'}`,
+          notes: `MyFees · Method: ${method || 'UPI'}${effectiveBankName ? ` · Bank: ${effectiveBankName}` : ''}${effectivePayerVpa ? ` · Payer: ${effectivePayerVpa}` : ''} · UTR: ${utr || 'N/A'}`,
           createdAt: timestamp,
           updatedAt: timestamp,
         };
@@ -1835,22 +1834,13 @@ export async function paymentRoutes(app: FastifyInstance) {
         feeAmount: getStudentFeeAmount(s),
       }));
 
-    // A phone number is not a UPI handle. Only a saved, usable merchant VPA may
-    // reach the public page; otherwise it must offer the counter. If the office
-    // configured the VPA in YOUPI PG rather than in this workspace, reuse it so
-    // the public link does not falsely report that UPI is unavailable.
+    // A phone number is not a UPI handle. Only this workspace's saved, usable
+    // merchant VPA may reach the public page. There is no shared gateway
+    // fallback, so every workspace shows its own UPI or the counter option.
     const savedUpi = settingsRecord?.data?.upi_id ?? '';
-    let publicUpiId = isUsableUpiId(savedUpi) ? savedUpi.trim() : '';
-    let publicPayeeName =
+    const publicUpiId = isUsableUpiId(savedUpi) ? savedUpi.trim() : '';
+    const publicPayeeName =
       settingsRecord?.data?.payee_name?.trim() || profile.name;
-
-    if (!publicUpiId) {
-      const gateway = await fetchGatewaySettings(2000);
-      if (gateway.connected && isUsableUpiId(gateway.upiId)) {
-        publicUpiId = gateway.upiId.trim();
-        publicPayeeName = gateway.payeeName?.trim() || publicPayeeName;
-      }
-    }
 
     return {
       data: {

@@ -66,21 +66,12 @@ export function paymentMethodLabel(method: string): string {
   return PAYMENT_METHOD_LABELS[method] ?? (method || "UPI")
 }
 
-export interface PaymentGatewayInfo {
-  connected: boolean
-  synced?: boolean
-  upiId?: string
-  payeeName?: string
-  error?: string
-}
-
 export interface PaymentSettings {
   upiId: string
   payeeName: string
   qrCodeDataUrl: string
   generatedQrDataUrl: string
   updatedAt: string | null
-  gateway: PaymentGatewayInfo
 }
 
 export interface PaymentSettingsInput {
@@ -161,7 +152,7 @@ export function isGatewayCheckoutUrl(url: string | null | undefined): boolean {
 }
 
 /**
- * Open a real YOUPI PG checkout for a student and return its payable URL.
+ * Open a real MyFees checkout for a student and return its payable URL.
  * Throws when the gateway does not hand back a checkout link so callers never
  * send a hand-built or expired workspace URL in a reminder.
  */
@@ -266,12 +257,6 @@ export function getPreviewQr(
   return request<{ qrDataUrl: string }>(
     `/api/payments/settings/qr?${params.toString()}`
   )
-}
-
-export function syncPaymentSettings(): Promise<PaymentSettings> {
-  return request<PaymentSettings>("/api/payments/settings/sync", {
-    method: "POST",
-  })
 }
 
 export interface PublicStudentOption {

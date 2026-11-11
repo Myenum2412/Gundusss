@@ -26,9 +26,9 @@ import {
   getPaymentSettings,
   getPreviewQr,
   savePaymentSettings,
-  syncPaymentSettings,
   type PaymentSettings,
 } from "@/lib/payments"
+import { useAuth } from "@/components/auth-provider"
 import { cn } from "cn"
 import {
   CircleCheckIcon,
@@ -63,6 +63,7 @@ function formatAmount(value: number) {
 }
 
 export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
+  const { activeProfile } = useAuth()
   const [settings, setSettings] = useState<PaymentSettings | null>(null)
   const [upiId, setUpiId] = useState("")
   const [payeeName, setPayeeName] = useState("")
@@ -71,7 +72,6 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
   const [previewAmount, setPreviewAmount] = useState("2500")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [syncing, setSyncing] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -188,20 +188,10 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
       setUpiId(next.upiId)
       setPayeeName(next.payeeName)
       setQr(next.qrCodeDataUrl)
-      if (next.gateway?.synced) {
-        setNoticeTone("success")
-        setNotice("Saved and synced to MyFees. New checkouts will use this UPI ID.")
-      } else if (next.gateway?.connected) {
-        setNoticeTone("warning")
-        setNotice(
-          "Saved in the fees app. MyFees did not confirm the sync yet. Retry sync once the gateway is available."
-        )
-      } else {
-        setNoticeTone("warning")
-        setNotice(
-          "Saved in the fees app. MyFees is offline, so the sync is pending. It will be applied automatically before the next checkout."
-        )
-      }
+      setNoticeTone("success")
+      setNotice(
+        `Saved for ${activeProfile.name}. Your public payment page now shows this UPI ID and QR.`
+      )
       onSaved?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save UPI settings.")
@@ -210,41 +200,9 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
     }
   }
 
-  async function retrySync() {
-    setSyncing(true)
-    setError(null)
-    try {
-      const next = await syncPaymentSettings()
-      setSettings(next)
-      setUpiId(next.upiId)
-      setPayeeName(next.payeeName)
-      setQr(next.qrCodeDataUrl)
-      if (next.gateway?.synced) {
-        setNoticeTone("success")
-        setNotice("Synced to MyFees. New checkouts will use this UPI ID.")
-      } else {
-        setNoticeTone("warning")
-        setNotice(
-          "MyFees is still offline. The UPI ID stays saved and will sync before the next checkout."
-        )
-      }
-    } catch (err) {
-      setNotice(null)
-      setError(
-        err instanceof Error ? err.message : "Could not sync the UPI settings."
-      )
-    } finally {
-      setSyncing(false)
-    }
-  }
-
   const displayQr = qr || previewQr || settings?.generatedQrDataUrl || ""
   const amount = Number(previewAmount)
   const previewAmountLabel = Number.isFinite(amount) ? formatAmount(amount) : "0.00"
-  const gatewayConnected = settings?.gateway?.connected ?? false
-  const gatewaySynced = settings?.gateway?.synced ?? false
-  const gatewayError = settings?.gateway?.error
-  const gatewayOk = gatewayConnected && !gatewayError
 
   return (
     <Card className="overflow-visible">
@@ -258,31 +216,15 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
               UPI payment setup
             </CardTitle>
             <CardDescription className="mt-1">
-              Add the UPI ID students pay to and upload the QR you want shown in
-              the checkout preview.
+              Add the UPI ID and QR code for {activeProfile.name}. This setup is
+              private to your workspace and is never shared with other
+              organizations.
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <span
-              className={cn(
-                "inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium",
-                gatewayOk
-                  ? "border-emerald-600/15 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
-                  : "border-amber-600/20 bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400"
-              )}
-            >
-              {gatewayOk ? (
-                <CircleCheckIcon className="size-3.5" />
-              ) : (
-                <TriangleAlertIcon className="size-3.5" />
-              )}
-              {gatewayOk
-                ? gatewaySynced
-                  ? "Gateway synced"
-                  : "Gateway connected"
-                : gatewayConnected
-                  ? "Gateway error"
-                  : "Gateway offline"}
+            <span className="inline-flex h-6 items-center gap-1.5 rounded-full border border-emerald-600/15 bg-emerald-50 px-2.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
+              <ShieldCheckIcon className="size-3.5" />
+              Only {activeProfile.name}
             </span>
             <Button
               type="button"
@@ -318,8 +260,7 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
                 aria-invalid={Boolean(upiId) && !VPA_RE.test(upiId.trim())}
               />
               <FieldDescription>
-                The VPA that receives fee payments. This is synced to the
-                gateway&apos;s active receiving account.
+                The UPI ID that receives fee payments for this workspace only.
               </FieldDescription>
             </Field>
 
@@ -412,10 +353,9 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
               />
             </div>
             <FieldDescription>
-              The gateway still creates a fresh amount-specific QR at checkout
-              so its banking observers can match the transfer automatically. The
-              uploaded image is your preferred merchant QR for preview and
-              display.
+              Upload your bank or merchant QR. It appears as-is on this
+              workspace&apos;s public payment page. If you skip it, a QR is
+              generated from the UPI ID above.
             </FieldDescription>
           </Field>
 
@@ -456,8 +396,8 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
               ))}
             </div>
             <p className="mt-3 text-[11px] leading-snug text-muted-foreground">
-              Any other UPI app can also scan the generated QR. The gateway still
-              verifies every transfer from the bank notification.
+              Students can pay from any UPI app by scanning the QR or using the
+              UPI ID. Your uploaded QR is shown to payers exactly as provided.
             </p>
           </div>
 
@@ -466,12 +406,6 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
               {saving ? <Loader2Icon className="animate-spin" /> : <ShieldCheckIcon />}
               {saving ? "Saving…" : "Save payment setup"}
             </Button>
-            {settings?.gateway?.upiId &&
-              settings.gateway.upiId !== upiId.trim() && (
-                <span className="text-xs text-amber-700 dark:text-amber-400">
-                  Gateway currently uses {settings.gateway.upiId}. Save to sync.
-                </span>
-              )}
           </div>
 
           {error && (
@@ -498,39 +432,16 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
                 <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
               )}
               <span className="min-w-0 flex-1">{notice}</span>
-              {settings?.gateway && !settings.gateway.synced && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void retrySync()}
-                  disabled={syncing}
-                >
-                  {syncing ? (
-                    <Loader2Icon className="animate-spin" />
-                  ) : (
-                    <RefreshCwIcon />
-                  )}
-                  Retry sync
-                </Button>
-              )}
             </div>
-          )}
-          {!error && !notice && settings?.gateway && !settings.gateway.synced && (
-            <p className="text-xs text-muted-foreground">
-              {settings.gateway.connected
-                ? "MyFees has not confirmed this UPI ID yet. Save the setup or use Retry sync."
-                : "MyFees is offline. The saved UPI ID will sync before the next checkout."}
-            </p>
           )}
         </form>
 
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-foreground">Checkout preview</p>
+              <p className="text-sm font-medium text-foreground">Payment page preview</p>
               <p className="text-xs text-muted-foreground">
-                What students see in the UPI dialog.
+                What students see on your public payment page.
               </p>
             </div>
             <span className="inline-flex h-6 items-center rounded-full border bg-background px-2.5 text-[10px] font-semibold tracking-wide text-muted-foreground">
@@ -619,7 +530,7 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
               </div>
               <div className="flex items-center justify-center gap-1.5 text-[10px] text-muted-foreground">
                 <ShieldCheckIcon className="size-3.5" />
-                Verified by bank observations · no card details
+                Scan with any UPI app · no card details
               </div>
             </div>
           </div>
@@ -649,8 +560,8 @@ export function PaymentSetup({ onSaved }: { onSaved?: () => void }) {
             <ImageIcon className="mt-0.5 size-3.5 shrink-0" />
             <span>
               {qr
-                ? "Your uploaded QR is shown here. Checkout still uses a dynamic amount QR for automatic verification."
-                : "This QR is generated from your UPI ID. Upload your bank QR to use your own artwork in the preview."}
+                ? "This is your uploaded QR. It is shown as-is to students paying this workspace."
+                : "This QR is generated from your UPI ID. Upload your bank QR to use your own artwork."}
             </span>
           </div>
         </div>

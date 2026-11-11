@@ -196,16 +196,16 @@ export default function SettingsPage() {
     <DashboardShell trail={[{ label: "Dashboard", href: "/dashboard" }, { label: "Settings" }]}>
       <PageHeader
         title="Settings"
-        description="Configure UPI payment gateway, WhatsApp notifications, and custom dropdown options used across all forms."
+        description="Configure your workspace's UPI and QR code, WhatsApp notifications, and custom dropdown options used across all forms."
         meta={<LiveBadge />}
       />
 
       <Stats01
         stats={[
           {
-            name: "UPI Gateway",
-            value: "Online",
-            change: "instant payments",
+            name: "UPI payments",
+            value: "Own UPI",
+            change: "per workspace",
             changeType: "positive",
           },
           {
