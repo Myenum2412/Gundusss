@@ -37,6 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   confirmCounterPayment,
   confirmPayment,
@@ -1031,6 +1032,7 @@ export default function PaymentsPage() {
   const [collectRecord, setCollectRecord] = useState<UnifiedPaymentRecord | null>(null)
   const [confirmModalRecord, setConfirmModalRecord] = useState<UnifiedPaymentRecord | null>(null)
   const [bulkReminderOpen, setBulkReminderOpen] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const [actionId, setActionId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -1835,6 +1837,23 @@ export default function PaymentsPage() {
           <Table className="w-full min-w-[960px] border-collapse text-sm">
             <TableHeader className="sticky top-0 z-20 bg-card/95 backdrop-blur-xs">
               <TableRow className="border-b hover:bg-transparent">
+                <TableHead className="w-10 px-3 whitespace-nowrap">
+                  <Checkbox
+                    checked={filteredRecords.length > 0 && filteredRecords.every((r) => selectedIds.has(r.id))}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        const next = new Set(selectedIds)
+                        filteredRecords.forEach((r) => next.add(r.id))
+                        setSelectedIds(next)
+                      } else {
+                        const next = new Set(selectedIds)
+                        filteredRecords.forEach((r) => next.delete(r.id))
+                        setSelectedIds(next)
+                      }
+                    }}
+                    aria-label="Select all payments"
+                  />
+                </TableHead>
                 <TableHead className="w-12 whitespace-nowrap">#</TableHead>
                 <TableHead className="min-w-[150px] whitespace-nowrap">Order / Ref</TableHead>
                 <TableHead className="min-w-[200px] whitespace-nowrap">Student</TableHead>
@@ -1853,7 +1872,7 @@ export default function PaymentsPage() {
             <TableBody>
               {!hydrated ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={11} className="p-0">
+                  <TableCell colSpan={12} className="p-0">
                     <EmptyState
                       icon={QrCodeIcon}
                       title="Loading student payments…"
@@ -1863,7 +1882,7 @@ export default function PaymentsPage() {
                 </TableRow>
               ) : unifiedRecords.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={11} className="p-0">
+                  <TableCell colSpan={12} className="p-0">
                     <EmptyState
                       icon={QrCodeIcon}
                       title="No payment records found"
@@ -1873,7 +1892,7 @@ export default function PaymentsPage() {
                 </TableRow>
               ) : filteredRecords.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={11} className="p-0">
+                  <TableCell colSpan={12} className="p-0">
                     <EmptyState
                       icon={QrCodeIcon}
                       title="No records match this filter"
@@ -1889,7 +1908,23 @@ export default function PaymentsPage() {
                   const isCopied = copiedKey === record.orderId
 
                   return (
-                    <TableRow key={record.id} className="group hover:bg-muted/30">
+                    <TableRow
+                      key={record.id}
+                      className="group hover:bg-muted/30"
+                      data-state={selectedIds.has(record.id) ? "selected" : undefined}
+                    >
+                      <TableCell className="w-10 px-3 whitespace-nowrap">
+                        <Checkbox
+                          checked={selectedIds.has(record.id)}
+                          onCheckedChange={(checked) => {
+                            const next = new Set(selectedIds)
+                            if (checked) next.add(record.id)
+                            else next.delete(record.id)
+                            setSelectedIds(next)
+                          }}
+                          aria-label={`Select order ${record.orderId}`}
+                        />
+                      </TableCell>
                       <TableCell className="w-12 whitespace-nowrap text-muted-foreground">
                         {index + 1}
                       </TableCell>
@@ -2172,6 +2207,7 @@ export default function PaymentsPage() {
           <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
             <span>
               {unifiedRecords.length} total records across {students.length} students
+              {selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
             </span>
             <span className="hidden sm:block">
               Payments, receipts, and interactive WhatsApp reminders update in real-time.

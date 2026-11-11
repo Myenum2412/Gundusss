@@ -32,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 import { loadStudents, type StoredStudent } from "@/lib/students-store"
 import { loadGroups, type StoredGroup } from "@/lib/groups-store"
 import {
@@ -98,6 +99,9 @@ export default function ReceiptsPage() {
   const [sendingWaPdf, setSendingWaPdf] = useState<string | null>(null)
   const [autoSendWa, setAutoSendWa] = useState(true)
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false)
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
 
   const reloadReceipts = useCallback(() => {
     if (isSyncing()) return
@@ -294,9 +298,28 @@ export default function ReceiptsPage() {
   }
 
   function onDelete(index: number) {
+    const r = receipts[index]
     const nextList = receipts.filter((_, i) => i !== index)
     setReceipts(nextList)
     void saveReceipts(nextList)
+    if (r?.receiptId && selectedIds.has(r.receiptId)) {
+      const nextSel = new Set(selectedIds)
+      nextSel.delete(r.receiptId)
+      setSelectedIds(nextSel)
+    }
+  }
+
+  function onDeleteSelected() {
+    const nextList = receipts.filter((r) => !selectedIds.has(r.receiptId))
+    setReceipts(nextList)
+    void saveReceipts(nextList)
+    setSelectedIds(new Set())
+  }
+
+  function onDeleteAll() {
+    setReceipts([])
+    void saveReceipts([])
+    setSelectedIds(new Set())
   }
 
   function onCancel() {
@@ -349,7 +372,26 @@ export default function ReceiptsPage() {
           </span>
         }
         actions={
-          <>
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedIds.size > 0 && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setConfirmDeleteSelected(true)}
+              >
+                Delete Selected ({selectedIds.size})
+              </Button>
+            )}
+            {receipts.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmDeleteAll(true)}
+                className="text-destructive hover:bg-destructive/10"
+              >
+                Delete All
+              </Button>
+            )}
           <Dialog
             open={open}
             onOpenChange={(v) => {
@@ -615,7 +657,23 @@ export default function ReceiptsPage() {
               setDeleteIndex(null)
             }}
           />
-          </>
+
+          <DeleteConfirmDialog
+            open={confirmDeleteSelected}
+            onOpenChange={setConfirmDeleteSelected}
+            title={`Delete ${selectedIds.size} receipt${selectedIds.size === 1 ? "" : "s"}?`}
+            description={`The ${selectedIds.size} selected receipt(s) will be permanently removed from the database. This action cannot be undone.`}
+            onConfirm={onDeleteSelected}
+          />
+
+          <DeleteConfirmDialog
+            open={confirmDeleteAll}
+            onOpenChange={setConfirmDeleteAll}
+            title="Delete ALL receipts?"
+            description="Every receipt in this workspace will be permanently removed from the database. This action cannot be undone."
+            onConfirm={onDeleteAll}
+          />
+          </div>
         }
       />
 
@@ -648,7 +706,18 @@ export default function ReceiptsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-14">#</TableHead>
+                <TableHead className="w-10 px-3">
+                  <Checkbox
+                    checked={receipts.length > 0 && selectedIds.size === receipts.length}
+                    onCheckedChange={(checked) =>
+                      setSelectedIds(
+                        checked ? new Set(receipts.map((r) => r.receiptId)) : new Set()
+                      )
+                    }
+                    aria-label="Select all receipts"
+                  />
+                </TableHead>
+                <TableHead className="w-12">#</TableHead>
                 <TableHead>Receipt ID</TableHead>
                 <TableHead>Student</TableHead>
                 <TableHead>Amount (₹)</TableHead>
@@ -661,7 +730,7 @@ export default function ReceiptsPage() {
             <TableBody>
               {receipts.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={8} className="p-0">
+                  <TableCell colSpan={9} className="p-0">
                     <EmptyState
                       icon={ReceiptIcon}
                       title="No receipts yet"
@@ -671,7 +740,22 @@ export default function ReceiptsPage() {
                 </TableRow>
               ) : (
                 receipts.map((r, i) => (
-                  <TableRow key={`${r.receiptId}-${i}`}>
+                  <TableRow
+                    key={`${r.receiptId}-${i}`}
+                    data-state={selectedIds.has(r.receiptId) ? "selected" : undefined}
+                  >
+                    <TableCell className="w-10 px-3">
+                      <Checkbox
+                        checked={selectedIds.has(r.receiptId)}
+                        onCheckedChange={(checked) => {
+                          const next = new Set(selectedIds)
+                          if (checked) next.add(r.receiptId)
+                          else next.delete(r.receiptId)
+                          setSelectedIds(next)
+                        }}
+                        aria-label={`Select ${r.receiptId}`}
+                      />
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">
                       <div>{r.receiptId}</div>
@@ -741,7 +825,10 @@ export default function ReceiptsPage() {
         </div>
         {receipts.length > 0 && (
           <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
-            <span>{receipts.length} receipt{receipts.length === 1 ? "" : "s"}</span>
+            <span>
+              {receipts.length} receipt{receipts.length === 1 ? "" : "s"}
+              {selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
+            </span>
             <span className="hidden sm:block">IDs auto-generate as RCP-001, RCP-002…</span>
           </div>
         )}

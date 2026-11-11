@@ -38,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 import { listProfiles, type ProfileSummary } from "@/lib/profiles"
 import {
   clearActiveProfileId,
@@ -110,6 +111,7 @@ export default function OrgMenuDashboardPage() {
   const [profiles, setProfiles] = useState<ProfileSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   // Session token (first-party cookie) — read safely.
   const [sessionToken, setSessionToken] = useState<string | null>(() => (typeof window !== "undefined" ? getToken() : null))
   const [gatewaySection, setGatewaySection] = useState<GatewaySection>("control-center")
@@ -307,6 +309,19 @@ export default function OrgMenuDashboardPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10 px-3">
+                    <Checkbox
+                      checked={profiles.length > 0 && profiles.every((p) => selectedIds.has(p.profileId))}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          setSelectedIds(new Set(profiles.map((p) => p.profileId)))
+                        } else {
+                          setSelectedIds(new Set())
+                        }
+                      }}
+                      aria-label="Select all workspaces"
+                    />
+                  </TableHead>
                   <TableHead>Organization</TableHead>
                   <TableHead>Profile ID</TableHead>
                   <TableHead>Owner</TableHead>
@@ -319,7 +334,7 @@ export default function OrgMenuDashboardPage() {
               <TableBody>
                 {!loading && profiles.length === 0 ? (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={7} className="px-6 py-12 text-center">
+                    <TableCell colSpan={8} className="px-6 py-12 text-center">
                       <p className="text-sm font-medium">No workspaces yet</p>
                       <p className="mx-auto mt-1 max-w-sm text-[13px] text-muted-foreground">
                         Workspaces appear here as soon as someone signs up.
@@ -332,7 +347,22 @@ export default function OrgMenuDashboardPage() {
                       activeProfile.profileId === item.profileId &&
                       viewingOther
                     return (
-                      <TableRow key={item.profileId}>
+                      <TableRow
+                        key={item.profileId}
+                        data-state={selectedIds.has(item.profileId) ? "selected" : undefined}
+                      >
+                        <TableCell className="w-10 px-3">
+                          <Checkbox
+                            checked={selectedIds.has(item.profileId)}
+                            onCheckedChange={(checked) => {
+                              const next = new Set(selectedIds)
+                              if (checked) next.add(item.profileId)
+                              else next.delete(item.profileId)
+                              setSelectedIds(next)
+                            }}
+                            aria-label={`Select ${item.name}`}
+                          />
+                        </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/60 text-muted-foreground">
@@ -431,6 +461,15 @@ export default function OrgMenuDashboardPage() {
                 )}
               </TableBody>
             </Table>
+            {profiles.length > 0 && (
+              <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
+                <span>
+                  {profiles.length} workspace{profiles.length === 1 ? "" : "s"}
+                  {selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
+                </span>
+                <span className="hidden sm:block">Multi-tenant institution hierarchy</span>
+              </div>
+            )}
           </div>
         </div>
 

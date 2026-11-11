@@ -38,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 import { LayersIcon, PlusIcon } from "lucide-react"
 
 const selectClassName =
@@ -114,6 +115,9 @@ export default function StudentGroupsPage() {
   const [viewGroup, setViewGroup] = useState<StudentGroup | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false)
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
 
   useEffect(() => {
     if (open) {
@@ -193,7 +197,23 @@ export default function StudentGroupsPage() {
   }
 
   function onDelete(index: number) {
-    setGroups((g) => g.filter((_, i) => i !== index))
+    const g = groups[index]
+    setGroups((prev) => prev.filter((_, i) => i !== index))
+    if (g?.groupId && selectedIds.has(g.groupId)) {
+      const nextSel = new Set(selectedIds)
+      nextSel.delete(g.groupId)
+      setSelectedIds(nextSel)
+    }
+  }
+
+  function onDeleteSelected() {
+    setGroups((prev) => prev.filter((g) => !selectedIds.has(g.groupId)))
+    setSelectedIds(new Set())
+  }
+
+  function onDeleteAll() {
+    setGroups([])
+    setSelectedIds(new Set())
   }
 
   function onCancel() {
@@ -254,7 +274,26 @@ export default function StudentGroupsPage() {
           </span>
         }
         actions={
-          <>
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedIds.size > 0 && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setConfirmDeleteSelected(true)}
+              >
+                Delete Selected ({selectedIds.size})
+              </Button>
+            )}
+            {groups.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmDeleteAll(true)}
+                className="text-destructive hover:bg-destructive/10"
+              >
+                Delete All
+              </Button>
+            )}
           <Dialog
             open={open}
             onOpenChange={(v) => {
@@ -529,7 +568,23 @@ export default function StudentGroupsPage() {
               setDeleteIndex(null)
             }}
           />
-          </>
+
+          <DeleteConfirmDialog
+            open={confirmDeleteSelected}
+            onOpenChange={setConfirmDeleteSelected}
+            title={`Delete ${selectedIds.size} group${selectedIds.size === 1 ? "" : "s"}?`}
+            description={`The ${selectedIds.size} selected group(s) will be permanently removed from the database. This action cannot be undone.`}
+            onConfirm={onDeleteSelected}
+          />
+
+          <DeleteConfirmDialog
+            open={confirmDeleteAll}
+            onOpenChange={setConfirmDeleteAll}
+            title="Delete ALL groups?"
+            description="Every group in this workspace will be permanently removed from the database. This action cannot be undone."
+            onConfirm={onDeleteAll}
+          />
+          </div>
         }
       />
 
@@ -540,7 +595,18 @@ export default function StudentGroupsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-14">#</TableHead>
+                <TableHead className="w-10 px-3">
+                  <Checkbox
+                    checked={groups.length > 0 && selectedIds.size === groups.length}
+                    onCheckedChange={(checked) =>
+                      setSelectedIds(
+                        checked ? new Set(groups.map((g) => g.groupId)) : new Set()
+                      )
+                    }
+                    aria-label="Select all groups"
+                  />
+                </TableHead>
+                <TableHead className="w-12">#</TableHead>
                 <TableHead>Group ID</TableHead>
                 <TableHead>Group Name</TableHead>
                 <TableHead>Course</TableHead>
@@ -556,7 +622,7 @@ export default function StudentGroupsPage() {
             <TableBody>
               {groups.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={11} className="p-0">
+                  <TableCell colSpan={12} className="p-0">
                     <EmptyState
                       icon={LayersIcon}
                       title="No groups yet"
@@ -566,7 +632,22 @@ export default function StudentGroupsPage() {
                 </TableRow>
               ) : (
                 groups.map((g, i) => (
-                  <TableRow key={`${g.groupId}-${i}`}>
+                  <TableRow
+                    key={`${g.groupId}-${i}`}
+                    data-state={selectedIds.has(g.groupId) ? "selected" : undefined}
+                  >
+                    <TableCell className="w-10 px-3">
+                      <Checkbox
+                        checked={selectedIds.has(g.groupId)}
+                        onCheckedChange={(checked) => {
+                          const next = new Set(selectedIds)
+                          if (checked) next.add(g.groupId)
+                          else next.delete(g.groupId)
+                          setSelectedIds(next)
+                        }}
+                        aria-label={`Select ${g.groupName}`}
+                      />
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">{g.groupId}</TableCell>
                     <TableCell className="font-medium text-foreground">{g.groupName}</TableCell>
@@ -594,7 +675,10 @@ export default function StudentGroupsPage() {
         </div>
         {groups.length > 0 && (
           <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
-            <span>{groups.length} group{groups.length === 1 ? "" : "s"}</span>
+            <span>
+              {groups.length} group{groups.length === 1 ? "" : "s"}
+              {selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
+            </span>
             <span className="hidden sm:block">Assign groups when creating fee structures</span>
           </div>
         )}

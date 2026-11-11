@@ -16,6 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 import { loadStudents, type StoredStudent } from "@/lib/students-store"
 import { loadGroups, type StoredGroup } from "@/lib/groups-store"
 import {
@@ -78,6 +79,7 @@ export default function AttendancePage() {
   const [groups, setGroups] = useState<StoredGroup[]>([])
   const [days, setDays] = useState<AttendanceDay[]>([])
   const [selectedDate, setSelectedDate] = useState(todayIso)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [selectedGroup, setSelectedGroup] = useState("all")
   const [query, setQuery] = useState("")
   const [sortBy, setSortBy] = useState<"name" | "absent-desc" | "present-desc" | "id">("name")
@@ -295,6 +297,13 @@ export default function AttendancePage() {
     setDirty(true)
   }
 
+  function markSelected(status: AttendanceStatus) {
+    if (!canWrite || selectedIds.size === 0) return
+    const targets = sortedStudents.filter((s) => selectedIds.has(s.studentId))
+    setDays((prev) => markStudents(prev, selectedDate, targets, status))
+    setDirty(true)
+  }
+
   return (
     <DashboardShell
       trail={[
@@ -316,6 +325,21 @@ export default function AttendancePage() {
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {selectedIds.size > 0 && (
+              <div className="flex items-center gap-1.5 border-r pr-2 mr-1">
+                <span className="text-xs font-semibold text-primary">Selected ({selectedIds.size}):</span>
+                {ATTENDANCE_STATUSES.map((status) => (
+                  <Button
+                    key={`sel-${status}`}
+                    type="button"
+                    size="sm"
+                    onClick={() => markSelected(status)}
+                  >
+                    Mark {status}
+                  </Button>
+                ))}
+              </div>
+            )}
             {ATTENDANCE_STATUSES.map((status) => (
               <Button
                 key={status}
@@ -399,6 +423,23 @@ export default function AttendancePage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10 px-3">
+                  <Checkbox
+                    checked={sortedStudents.length > 0 && sortedStudents.every((s) => selectedIds.has(s.studentId))}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        const next = new Set(selectedIds)
+                        sortedStudents.forEach((s) => next.add(s.studentId))
+                        setSelectedIds(next)
+                      } else {
+                        const next = new Set(selectedIds)
+                        sortedStudents.forEach((s) => next.delete(s.studentId))
+                        setSelectedIds(next)
+                      }
+                    }}
+                    aria-label="Select all students for attendance"
+                  />
+                </TableHead>
                 <TableHead>Student</TableHead>
                 <TableHead>Group</TableHead>
                 <TableHead>Course</TableHead>
@@ -414,7 +455,7 @@ export default function AttendancePage() {
             <TableBody>
               {visibleStudents.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={6} className="p-0">
+                  <TableCell colSpan={7} className="p-0">
                     <EmptyState
                       icon={activeStudents.length === 0 ? UsersIcon : SearchIcon}
                       title={
@@ -441,7 +482,22 @@ export default function AttendancePage() {
                     rate: 0,
                   }
                   return (
-                    <TableRow key={student.studentId}>
+                    <TableRow
+                      key={student.studentId}
+                      data-state={selectedIds.has(student.studentId) ? "selected" : undefined}
+                    >
+                      <TableCell className="w-10 px-3">
+                        <Checkbox
+                          checked={selectedIds.has(student.studentId)}
+                          onCheckedChange={(checked) => {
+                            const next = new Set(selectedIds)
+                            if (checked) next.add(student.studentId)
+                            else next.delete(student.studentId)
+                            setSelectedIds(next)
+                          }}
+                          aria-label={`Select ${student.studentName}`}
+                        />
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2.5">
                           <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground">
@@ -536,6 +592,15 @@ export default function AttendancePage() {
             </TableBody>
           </Table>
         </div>
+        {sortedStudents.length > 0 && (
+          <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
+            <span>
+              {sortedStudents.length} student{sortedStudents.length === 1 ? "" : "s"}
+              {selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
+            </span>
+            <span className="hidden sm:block">Select rows to batch mark Present / Absent</span>
+          </div>
+        )}
       </div>
 
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">

@@ -32,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 import { loadStudents, type StoredStudent } from "@/lib/students-store"
 import { loadGroups, type StoredGroup } from "@/lib/groups-store"
 import {
@@ -73,6 +74,9 @@ export default function AnnouncementsPage() {
   const [viewItem, setViewItem] = useState<StoredAnnouncement | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false)
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
   const [files, setFiles] = useState<File[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -270,7 +274,23 @@ export default function AnnouncementsPage() {
   }
 
   function onDelete(index: number) {
+    const a = items[index]
     setItems((prev) => prev.filter((_, i) => i !== index))
+    if (a?.announcementId && selectedIds.has(a.announcementId)) {
+      const nextSel = new Set(selectedIds)
+      nextSel.delete(a.announcementId)
+      setSelectedIds(nextSel)
+    }
+  }
+
+  function onDeleteSelected() {
+    setItems((prev) => prev.filter((a) => !selectedIds.has(a.announcementId)))
+    setSelectedIds(new Set())
+  }
+
+  function onDeleteAll() {
+    setItems([])
+    setSelectedIds(new Set())
   }
 
   function onCancel() {
@@ -323,7 +343,26 @@ export default function AnnouncementsPage() {
           </span>
         }
         actions={
-          <>
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedIds.size > 0 && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setConfirmDeleteSelected(true)}
+              >
+                Delete Selected ({selectedIds.size})
+              </Button>
+            )}
+            {items.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmDeleteAll(true)}
+                className="text-destructive hover:bg-destructive/10"
+              >
+                Delete All
+              </Button>
+            )}
           <Dialog
             open={open}
             onOpenChange={(v) => {
@@ -598,7 +637,23 @@ export default function AnnouncementsPage() {
               setDeleteIndex(null)
             }}
           />
-          </>
+
+          <DeleteConfirmDialog
+            open={confirmDeleteSelected}
+            onOpenChange={setConfirmDeleteSelected}
+            title={`Delete ${selectedIds.size} announcement${selectedIds.size === 1 ? "" : "s"}?`}
+            description={`The ${selectedIds.size} selected announcement(s) will be permanently removed from the database. This action cannot be undone.`}
+            onConfirm={onDeleteSelected}
+          />
+
+          <DeleteConfirmDialog
+            open={confirmDeleteAll}
+            onOpenChange={setConfirmDeleteAll}
+            title="Delete ALL announcements?"
+            description="Every announcement in this workspace will be permanently removed from the database. This action cannot be undone."
+            onConfirm={onDeleteAll}
+          />
+          </div>
         }
       />
 
@@ -609,7 +664,18 @@ export default function AnnouncementsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-14">#</TableHead>
+                <TableHead className="w-10 px-3">
+                  <Checkbox
+                    checked={items.length > 0 && selectedIds.size === items.length}
+                    onCheckedChange={(checked) =>
+                      setSelectedIds(
+                        checked ? new Set(items.map((a) => a.announcementId)) : new Set()
+                      )
+                    }
+                    aria-label="Select all announcements"
+                  />
+                </TableHead>
+                <TableHead className="w-12">#</TableHead>
                 <TableHead>ID</TableHead>
                 <TableHead>Title</TableHead>
                 <TableHead>Message</TableHead>
@@ -623,7 +689,7 @@ export default function AnnouncementsPage() {
             <TableBody>
               {items.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={9} className="p-0">
+                  <TableCell colSpan={10} className="p-0">
                     <EmptyState
                       icon={MegaphoneIcon}
                       title="No announcements yet"
@@ -633,7 +699,22 @@ export default function AnnouncementsPage() {
                 </TableRow>
               ) : (
                 items.map((a, i) => (
-                  <TableRow key={`${a.announcementId}-${i}`}>
+                  <TableRow
+                    key={`${a.announcementId}-${i}`}
+                    data-state={selectedIds.has(a.announcementId) ? "selected" : undefined}
+                  >
+                    <TableCell className="w-10 px-3">
+                      <Checkbox
+                        checked={selectedIds.has(a.announcementId)}
+                        onCheckedChange={(checked) => {
+                          const next = new Set(selectedIds)
+                          if (checked) next.add(a.announcementId)
+                          else next.delete(a.announcementId)
+                          setSelectedIds(next)
+                        }}
+                        aria-label={`Select ${a.title}`}
+                      />
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">{a.announcementId}</TableCell>
                     <TableCell className="font-medium text-foreground">{a.title}</TableCell>
@@ -674,7 +755,10 @@ export default function AnnouncementsPage() {
         </div>
         {items.length > 0 && (
           <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
-            <span>{items.length} announcement{items.length === 1 ? "" : "s"}</span>
+            <span>
+              {items.length} announcement{items.length === 1 ? "" : "s"}
+              {selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
+            </span>
             <span className="hidden sm:block">Sent one-by-one in list order</span>
           </div>
         )}

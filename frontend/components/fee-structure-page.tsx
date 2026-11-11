@@ -31,6 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 import { loadStudents, type StoredStudent } from "@/lib/students-store"
 import { loadGroups, type StoredGroup } from "@/lib/groups-store"
 import {
@@ -110,6 +111,9 @@ export function FeeStructurePage() {
   const [viewStructure, setViewStructure] = useState<FeeStructure | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false)
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
 
   const reloadStructures = useCallback(() => {
     if (isSyncing()) return
@@ -250,9 +254,28 @@ export function FeeStructurePage() {
   }
 
   function onDelete(index: number) {
+    const s = structures[index]
     const nextList = structures.filter((_, i) => i !== index)
     setStructures(nextList)
     void saveFeeStructures(nextList)
+    if (s?.structureId && selectedIds.has(s.structureId)) {
+      const nextSel = new Set(selectedIds)
+      nextSel.delete(s.structureId)
+      setSelectedIds(nextSel)
+    }
+  }
+
+  function onDeleteSelected() {
+    const nextList = structures.filter((s) => !selectedIds.has(s.structureId))
+    setStructures(nextList)
+    void saveFeeStructures(nextList)
+    setSelectedIds(new Set())
+  }
+
+  function onDeleteAll() {
+    setStructures([])
+    void saveFeeStructures([])
+    setSelectedIds(new Set())
   }
 
   function onCancel() {
@@ -307,7 +330,26 @@ export function FeeStructurePage() {
           </span>
         }
         actions={
-          <>
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedIds.size > 0 && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setConfirmDeleteSelected(true)}
+              >
+                Delete Selected ({selectedIds.size})
+              </Button>
+            )}
+            {structures.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmDeleteAll(true)}
+                className="text-destructive hover:bg-destructive/10"
+              >
+                Delete All
+              </Button>
+            )}
           <Dialog
             open={open}
             onOpenChange={(v) => {
@@ -665,7 +707,23 @@ export function FeeStructurePage() {
               setDeleteIndex(null)
             }}
           />
-          </>
+
+          <DeleteConfirmDialog
+            open={confirmDeleteSelected}
+            onOpenChange={setConfirmDeleteSelected}
+            title={`Delete ${selectedIds.size} fee structure${selectedIds.size === 1 ? "" : "s"}?`}
+            description={`The ${selectedIds.size} selected fee structure(s) will be permanently removed from the database. This action cannot be undone.`}
+            onConfirm={onDeleteSelected}
+          />
+
+          <DeleteConfirmDialog
+            open={confirmDeleteAll}
+            onOpenChange={setConfirmDeleteAll}
+            title="Delete ALL fee structures?"
+            description="Every fee structure in this workspace will be permanently removed from the database. This action cannot be undone."
+            onConfirm={onDeleteAll}
+          />
+          </div>
         }
       />
 
@@ -676,7 +734,18 @@ export function FeeStructurePage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-14">#</TableHead>
+                <TableHead className="w-10 px-3">
+                  <Checkbox
+                    checked={structures.length > 0 && selectedIds.size === structures.length}
+                    onCheckedChange={(checked) =>
+                      setSelectedIds(
+                        checked ? new Set(structures.map((s) => s.structureId)) : new Set()
+                      )
+                    }
+                    aria-label="Select all fee structures"
+                  />
+                </TableHead>
+                <TableHead className="w-12">#</TableHead>
                 <TableHead>Structure ID</TableHead>
                 <TableHead>Structure Name</TableHead>
                 <TableHead>Course / Group</TableHead>
@@ -689,7 +758,7 @@ export function FeeStructurePage() {
             <TableBody>
               {structures.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={8} className="p-0">
+                  <TableCell colSpan={9} className="p-0">
                     <EmptyState
                       icon={ClipboardListIcon}
                       title="No fee structures yet"
@@ -699,7 +768,22 @@ export function FeeStructurePage() {
                 </TableRow>
               ) : (
                 structures.map((s, i) => (
-                  <TableRow key={`${s.structureId}-${i}`}>
+                  <TableRow
+                    key={`${s.structureId}-${i}`}
+                    data-state={selectedIds.has(s.structureId) ? "selected" : undefined}
+                  >
+                    <TableCell className="w-10 px-3">
+                      <Checkbox
+                        checked={selectedIds.has(s.structureId)}
+                        onCheckedChange={(checked) => {
+                          const next = new Set(selectedIds)
+                          if (checked) next.add(s.structureId)
+                          else next.delete(s.structureId)
+                          setSelectedIds(next)
+                        }}
+                        aria-label={`Select ${s.structureName}`}
+                      />
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">{s.structureId}</TableCell>
                     <TableCell className="font-medium text-foreground">{s.structureName}</TableCell>
@@ -724,7 +808,10 @@ export function FeeStructurePage() {
         </div>
         {structures.length > 0 && (
           <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
-            <span>{structures.length} structure{structures.length === 1 ? "" : "s"}</span>
+            <span>
+              {structures.length} structure{structures.length === 1 ? "" : "s"}
+              {selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
+            </span>
             <span className="hidden sm:block">IDs auto-generate as FEE-001, FEE-002…</span>
           </div>
         )}

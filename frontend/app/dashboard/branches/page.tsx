@@ -34,6 +34,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Building2Icon,
   CheckCircle2Icon,
@@ -87,6 +88,9 @@ export default function BranchesPage() {
   const [viewBranch, setViewBranch] = useState<Branch | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false)
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
 
   const reloadBranches = useCallback(() => {
     if (isSyncing()) return
@@ -176,7 +180,23 @@ export default function BranchesPage() {
   }
 
   function onDelete(index: number) {
-    setBranches((b) => b.filter((_, i) => i !== index))
+    const b = branches[index]
+    setBranches((prev) => prev.filter((_, i) => i !== index))
+    if (b?.branchId && selectedIds.has(b.branchId)) {
+      const nextSel = new Set(selectedIds)
+      nextSel.delete(b.branchId)
+      setSelectedIds(nextSel)
+    }
+  }
+
+  function onDeleteSelected() {
+    setBranches((prev) => prev.filter((b) => !selectedIds.has(b.branchId)))
+    setSelectedIds(new Set())
+  }
+
+  function onDeleteAll() {
+    setBranches([])
+    setSelectedIds(new Set())
   }
 
   function onCancel() {
@@ -251,6 +271,26 @@ export default function BranchesPage() {
           </span>
         }
         actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedIds.size > 0 && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setConfirmDeleteSelected(true)}
+              >
+                Delete Selected ({selectedIds.size})
+              </Button>
+            )}
+            {branches.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmDeleteAll(true)}
+                className="text-destructive hover:bg-destructive/10"
+              >
+                Delete All
+              </Button>
+            )}
           <Dialog
             open={open}
             onOpenChange={(v) => {
@@ -422,6 +462,7 @@ export default function BranchesPage() {
               </form>
             </DialogContent>
           </Dialog>
+          </div>
         }
       />
 
@@ -474,6 +515,23 @@ export default function BranchesPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10 px-3">
+                  <Checkbox
+                    checked={filtered.length > 0 && filtered.every((b) => selectedIds.has(b.branchId))}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        const next = new Set(selectedIds)
+                        filtered.forEach((b) => next.add(b.branchId))
+                        setSelectedIds(next)
+                      } else {
+                        const next = new Set(selectedIds)
+                        filtered.forEach((b) => next.delete(b.branchId))
+                        setSelectedIds(next)
+                      }
+                    }}
+                    aria-label="Select all branches"
+                  />
+                </TableHead>
                 <TableHead>Branch Details</TableHead>
                 <TableHead>Branch ID / Code</TableHead>
                 <TableHead>Location</TableHead>
@@ -489,7 +547,22 @@ export default function BranchesPage() {
                   (x) => x.branchId === b.branchId
                 )
                 return (
-                  <TableRow key={b.branchId}>
+                  <TableRow
+                    key={b.branchId}
+                    data-state={selectedIds.has(b.branchId) ? "selected" : undefined}
+                  >
+                    <TableCell className="w-10 px-3">
+                      <Checkbox
+                        checked={selectedIds.has(b.branchId)}
+                        onCheckedChange={(checked) => {
+                          const next = new Set(selectedIds)
+                          if (checked) next.add(b.branchId)
+                          else next.delete(b.branchId)
+                          setSelectedIds(next)
+                        }}
+                        aria-label={`Select ${b.branchName}`}
+                      />
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2.5">
                         <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -589,6 +662,15 @@ export default function BranchesPage() {
               })}
             </TableBody>
           </Table>
+          {filtered.length > 0 && (
+            <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
+              <span>
+                {filtered.length} branch{filtered.length === 1 ? "" : "es"}
+                {selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
+              </span>
+              <span className="hidden sm:block">Campus & office registry</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -671,6 +753,22 @@ export default function BranchesPage() {
             setDeleteIndex(null)
           }
         }}
+      />
+
+      <DeleteConfirmDialog
+        open={confirmDeleteSelected}
+        onOpenChange={setConfirmDeleteSelected}
+        title={`Delete ${selectedIds.size} branch${selectedIds.size === 1 ? "" : "es"}?`}
+        description={`The ${selectedIds.size} selected branch(es) will be permanently removed from the database. This action cannot be undone.`}
+        onConfirm={onDeleteSelected}
+      />
+
+      <DeleteConfirmDialog
+        open={confirmDeleteAll}
+        onOpenChange={setConfirmDeleteAll}
+        title="Delete ALL branches?"
+        description="Every branch in this workspace will be permanently removed from the database. This action cannot be undone."
+        onConfirm={onDeleteAll}
       />
     </DashboardShell>
   )

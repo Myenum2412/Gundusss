@@ -44,7 +44,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { PlusIcon, UsersIcon } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
+import { PlusIcon, Trash2Icon, UsersIcon } from "lucide-react"
 
 const selectClassName =
   "h-9 w-full min-w-0 rounded-[10px] border border-input bg-card px-3 py-1 text-sm shadow-[0_1px_2px_rgba(16,24,40,0.04)] outline-none transition-[border-color,box-shadow] duration-200 hover:border-foreground/20 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
@@ -106,6 +107,9 @@ export default function StudentsPage() {
   const [viewStudent, setViewStudent] = useState<Student | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false)
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
 
   const reloadDependencies = useCallback(() => {
     loadReceipts()
@@ -251,6 +255,24 @@ export default function StudentsPage() {
     const nextList = students.filter((_, i) => i !== index)
     setStudents(nextList)
     void saveStudents(nextList)
+    if (s?.studentId && selectedIds.has(s.studentId)) {
+      const nextSel = new Set(selectedIds)
+      nextSel.delete(s.studentId)
+      setSelectedIds(nextSel)
+    }
+  }
+
+  function onDeleteSelected() {
+    const nextList = students.filter((s) => !selectedIds.has(s.studentId))
+    setStudents(nextList)
+    void saveStudents(nextList)
+    setSelectedIds(new Set())
+  }
+
+  function onDeleteAll() {
+    setStudents([])
+    void saveStudents([])
+    setSelectedIds(new Set())
   }
 
   function onCancel() {
@@ -303,7 +325,26 @@ export default function StudentsPage() {
           </span>
         }
         actions={
-          <>
+          <div className="flex flex-wrap items-center gap-2">
+          {selectedIds.size > 0 && (
+            <Button
+              variant="destructive"
+              onClick={() => setConfirmDeleteSelected(true)}
+            >
+              <Trash2Icon />
+              Delete Selected ({selectedIds.size})
+            </Button>
+          )}
+          {students.length > 0 && (
+            <Button
+              variant="outline"
+              className="text-destructive hover:bg-destructive/10"
+              onClick={() => setConfirmDeleteAll(true)}
+            >
+              <Trash2Icon />
+              Delete All
+            </Button>
+          )}
           <Dialog
             open={open}
             onOpenChange={(v) => {
@@ -616,7 +657,23 @@ export default function StudentsPage() {
               setDeleteIndex(null)
             }}
           />
-          </>
+
+          <DeleteConfirmDialog
+            open={confirmDeleteSelected}
+            onOpenChange={setConfirmDeleteSelected}
+            title={`Delete ${selectedIds.size} student${selectedIds.size === 1 ? "" : "s"}?`}
+            description={`The ${selectedIds.size} selected student(s) will be permanently removed from the database. This action cannot be undone.`}
+            onConfirm={onDeleteSelected}
+          />
+
+          <DeleteConfirmDialog
+            open={confirmDeleteAll}
+            onOpenChange={setConfirmDeleteAll}
+            title="Delete ALL students?"
+            description="Every student in this workspace will be permanently removed from the database. This action cannot be undone."
+            onConfirm={onDeleteAll}
+          />
+          </div>
         }
       />
 
@@ -627,7 +684,18 @@ export default function StudentsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-14">#</TableHead>
+                <TableHead className="w-10 px-3">
+                  <Checkbox
+                    checked={students.length > 0 && selectedIds.size === students.length}
+                    onCheckedChange={(checked) =>
+                      setSelectedIds(
+                        checked ? new Set(students.map((s) => s.studentId)) : new Set()
+                      )
+                    }
+                    aria-label="Select all students"
+                  />
+                </TableHead>
+                <TableHead className="w-12">#</TableHead>
                 <TableHead>Student</TableHead>
                 <TableHead>Student ID</TableHead>
                 <TableHead>Group / Class</TableHead>
@@ -641,7 +709,7 @@ export default function StudentsPage() {
             <TableBody>
               {students.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={9} className="p-0">
+                  <TableCell colSpan={10} className="p-0">
                     <EmptyState
                       icon={UsersIcon}
                       title="No students yet"
@@ -651,7 +719,22 @@ export default function StudentsPage() {
                 </TableRow>
               ) : (
                 students.map((s, i) => (
-                  <TableRow key={`${s.studentId}-${i}`}>
+                  <TableRow
+                    key={`${s.studentId}-${i}`}
+                    data-state={selectedIds.has(s.studentId) ? "selected" : undefined}
+                  >
+                    <TableCell className="w-10 px-3">
+                      <Checkbox
+                        checked={selectedIds.has(s.studentId)}
+                        onCheckedChange={(checked) => {
+                          const next = new Set(selectedIds)
+                          if (checked) next.add(s.studentId)
+                          else next.delete(s.studentId)
+                          setSelectedIds(next)
+                        }}
+                        aria-label={`Select ${s.studentName}`}
+                      />
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                     <TableCell className="font-medium text-foreground">{s.studentName}</TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">{s.studentId}</TableCell>
@@ -677,7 +760,11 @@ export default function StudentsPage() {
         </div>
         {students.length > 0 && (
           <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
-            <span>{students.length} student{students.length === 1 ? "" : "s"}</span>
+            <span>
+              {selectedIds.size > 0 ? `${selectedIds.size} of ` : ""}
+              {students.length} student{students.length === 1 ? "" : "s"}
+              {selectedIds.size > 0 ? " selected" : ""}
+            </span>
             <span className="hidden sm:block">IDs auto-generate as STU-001, STU-002…</span>
           </div>
         )}

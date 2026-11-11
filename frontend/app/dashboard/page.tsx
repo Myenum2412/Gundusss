@@ -14,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 import { loadStudents, type StoredStudent } from "@/lib/students-store"
 import { loadReceipts, type StoredReceipt } from "@/lib/receipts-store"
 import { loadAnnouncements, type StoredAnnouncement } from "@/lib/announcements-store"
@@ -62,6 +63,7 @@ export default function Page() {
   const [orders, setOrders] = useState<PaymentOrder[]>([])
   const [wa, setWa] = useState<WaState | null>(null)
   const [viewReceipt, setViewReceipt] = useState<StoredReceipt | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const reloadOverview = useCallback(() => {
     if (isSyncing()) return
@@ -245,6 +247,19 @@ export default function Page() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10 px-3">
+                  <Checkbox
+                    checked={recentReceipts.length > 0 && recentReceipts.every((r) => selectedIds.has(r.receiptId))}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setSelectedIds(new Set(recentReceipts.map((r) => r.receiptId)))
+                      } else {
+                        setSelectedIds(new Set())
+                      }
+                    }}
+                    aria-label="Select all recent receipts"
+                  />
+                </TableHead>
                 <TableHead>Receipt ID</TableHead>
                 <TableHead>Student</TableHead>
                 <TableHead>Amount (₹)</TableHead>
@@ -257,7 +272,7 @@ export default function Page() {
             <TableBody>
               {recentReceipts.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={7} className="px-6 py-12 text-center">
+                  <TableCell colSpan={8} className="px-6 py-12 text-center">
                     <p className="text-sm font-medium">No receipts yet</p>
                     <p className="mx-auto mt-1 max-w-sm text-[13px] text-muted-foreground">
                       Add students, then record a payment from the Receipts page. It will show up here.
@@ -269,7 +284,22 @@ export default function Page() {
                 </TableRow>
               ) : (
                 recentReceipts.map((r) => (
-                  <TableRow key={r.receiptId}>
+                  <TableRow
+                    key={r.receiptId}
+                    data-state={selectedIds.has(r.receiptId) ? "selected" : undefined}
+                  >
+                    <TableCell className="w-10 px-3">
+                      <Checkbox
+                        checked={selectedIds.has(r.receiptId)}
+                        onCheckedChange={(checked) => {
+                          const next = new Set(selectedIds)
+                          if (checked) next.add(r.receiptId)
+                          else next.delete(r.receiptId)
+                          setSelectedIds(next)
+                        }}
+                        aria-label={`Select ${r.receiptId}`}
+                      />
+                    </TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">{r.receiptId}</TableCell>
                     <TableCell className="font-medium text-foreground">
                       {r.studentName} <span className="font-mono text-xs font-normal text-muted-foreground">({r.studentId})</span>
@@ -292,6 +322,17 @@ export default function Page() {
             </TableBody>
           </Table>
         </div>
+        {recentReceipts.length > 0 && (
+          <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
+            <span>
+              {recentReceipts.length} recent receipt{recentReceipts.length === 1 ? "" : "s"}
+              {selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
+            </span>
+            <Link href="/dashboard/receipts" className="text-primary hover:underline">
+              View all receipts →
+            </Link>
+          </div>
+        )}
       </div>
 
       <Dialog

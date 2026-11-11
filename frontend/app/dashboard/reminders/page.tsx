@@ -27,6 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   loadRemindersStatus,
   syncCronJob,
@@ -108,6 +109,7 @@ export default function RemindersPage() {
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [selectedStudentId, setSelectedStudentId] = useState<string>("")
+  const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set())
 
   // Form state for Cron Schedule
   const [apiKey, setApiKey] = useState("")
@@ -1005,6 +1007,17 @@ export default function RemindersPage() {
               <Table className="w-full text-xs">
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-10 px-3">
+                      <Checkbox
+                        checked={students.length > 0 && selectedStudentIds.size === students.length}
+                        onCheckedChange={(checked) =>
+                          setSelectedStudentIds(
+                            checked ? new Set(students.map((s) => s.studentId)) : new Set()
+                          )
+                        }
+                        aria-label="Select all students"
+                      />
+                    </TableHead>
                     <TableHead>Student</TableHead>
                     <TableHead>Course & Group</TableHead>
                     <TableHead>Phone / WhatsApp</TableHead>
@@ -1015,7 +1028,7 @@ export default function RemindersPage() {
                 <TableBody>
                   {students.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                      <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                         No enrolled students found.
                       </TableCell>
                     </TableRow>
@@ -1029,8 +1042,21 @@ export default function RemindersPage() {
                         <TableRow
                           key={stu.studentId}
                           onClick={() => setSelectedStudentId(stu.studentId)}
-                          className={cn("cursor-pointer", isSelected && "bg-muted/50")}
+                          className={cn("cursor-pointer", (isSelected || selectedStudentIds.has(stu.studentId)) && "bg-muted/50")}
+                          data-state={selectedStudentIds.has(stu.studentId) ? "selected" : undefined}
                         >
+                          <TableCell className="w-10 px-3" onClick={(e) => e.stopPropagation()}>
+                            <Checkbox
+                              checked={selectedStudentIds.has(stu.studentId)}
+                              onCheckedChange={(checked) => {
+                                const next = new Set(selectedStudentIds)
+                                if (checked) next.add(stu.studentId)
+                                else next.delete(stu.studentId)
+                                setSelectedStudentIds(next)
+                              }}
+                              aria-label={`Select ${stu.studentName}`}
+                            />
+                          </TableCell>
                           <TableCell className="font-medium">
                             <div>
                               <span className="font-semibold">{stu.studentName}</span>
@@ -1077,6 +1103,15 @@ export default function RemindersPage() {
                   )}
                 </TableBody>
               </Table>
+              {students.length > 0 && (
+                <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                  <span>
+                    {students.length} student{students.length === 1 ? "" : "s"}
+                    {selectedStudentIds.size > 0 && ` · ${selectedStudentIds.size} selected`}
+                  </span>
+                  <span className="hidden sm:block">Automated WhatsApp cron reminders</span>
+                </div>
+              )}
             </div>
           </div>
         </div>

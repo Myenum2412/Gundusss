@@ -40,6 +40,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   createUser,
   deleteUser,
@@ -87,6 +88,7 @@ export default function UsersPage() {
   const [formError, setFormError] = useState("")
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
 
   const isAdmin = can("users:manage")
   const editingSelf = Boolean(editing && user && editing.id === user.id)
@@ -201,6 +203,24 @@ export default function UsersPage() {
     }
   }
 
+  async function onDeleteSelected() {
+    if (selectedIds.size === 0) return
+    const idsToDelete = Array.from(selectedIds).filter((id) => id !== user?.id)
+    if (idsToDelete.length === 0) return
+    const confirmed = window.confirm(`Delete ${idsToDelete.length} selected user(s)? This action cannot be undone.`)
+    if (!confirmed) return
+    setError("")
+    for (const id of idsToDelete) {
+      try {
+        await deleteUser(id)
+      } catch (err) {
+        console.error("Failed to delete user", id, err)
+      }
+    }
+    setSelectedIds(new Set())
+    await reload()
+  }
+
   if (!isAdmin) {
     return (
       <DashboardShell trail={[{ label: "Dashboard", href: "/dashboard" }, { label: "Users" }]}>
@@ -224,10 +244,22 @@ export default function UsersPage() {
     <DashboardShell
       trail={[{ label: "Dashboard", href: "/dashboard" }, { label: "Users" }]}
       actions={
-        <Button size="sm" onClick={openCreate} className="h-8 rounded-[10px]">
-          <PlusIcon />
-          Add user
-        </Button>
+        <div className="flex items-center gap-2">
+          {selectedIds.size > 0 && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={onDeleteSelected}
+              className="h-8 rounded-[10px]"
+            >
+              Delete Selected ({selectedIds.size})
+            </Button>
+          )}
+          <Button size="sm" onClick={openCreate} className="h-8 rounded-[10px]">
+            <PlusIcon />
+            Add user
+          </Button>
+        </div>
       }
     >
       <PageHeader
@@ -267,10 +299,24 @@ export default function UsersPage() {
               No accounts yet.
             </div>
           ) : (
+            <>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="pl-4">User</TableHead>
+                  <TableHead className="w-10 px-3">
+                    <Checkbox
+                      checked={users.length > 0 && users.every((u) => selectedIds.has(u.id))}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          setSelectedIds(new Set(users.map((u) => u.id)))
+                        } else {
+                          setSelectedIds(new Set())
+                        }
+                      }}
+                      aria-label="Select all users"
+                    />
+                  </TableHead>
+                  <TableHead className="pl-2">User</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Added</TableHead>
@@ -281,8 +327,23 @@ export default function UsersPage() {
                 {users.map((row) => {
                   const self = row.id === user.id
                   return (
-                    <TableRow key={row.id}>
-                      <TableCell className="pl-4">
+                    <TableRow
+                      key={row.id}
+                      data-state={selectedIds.has(row.id) ? "selected" : undefined}
+                    >
+                      <TableCell className="w-10 px-3">
+                        <Checkbox
+                          checked={selectedIds.has(row.id)}
+                          onCheckedChange={(checked) => {
+                            const next = new Set(selectedIds)
+                            if (checked) next.add(row.id)
+                            else next.delete(row.id)
+                            setSelectedIds(next)
+                          }}
+                          aria-label={`Select ${row.name}`}
+                        />
+                      </TableCell>
+                      <TableCell className="pl-2">
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
                             <span className="truncate text-[13px] font-medium">
@@ -341,6 +402,16 @@ export default function UsersPage() {
                 })}
               </TableBody>
             </Table>
+            {users.length > 0 && (
+              <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
+                <span>
+                  {users.length} account{users.length === 1 ? "" : "s"}
+                  {selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
+                </span>
+                <span className="hidden sm:block">Role-based access control</span>
+              </div>
+            )}
+            </>
           )}
         </CardContent>
       </Card>

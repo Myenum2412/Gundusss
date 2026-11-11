@@ -14,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 import { loadStudents, type StoredStudent } from "@/lib/students-store"
 import { loadAttendance, type AttendanceDay } from "@/lib/attendance-store"
 import { loadGroups, type StoredGroup } from "@/lib/groups-store"
@@ -87,6 +88,7 @@ export default function ReportsPage() {
   const [groupFilter, setGroupFilter] = useState("all")
   const [performanceFilter, setPerformanceFilter] = useState("all")
   const [sortBy, setSortBy] = useState("lowest")
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const reload = useCallback(() => {
     if (isSyncing()) return
@@ -295,6 +297,19 @@ export default function ReportsPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10 px-3">
+                  <Checkbox
+                    checked={visibleRows.length > 0 && visibleRows.every((r) => selectedIds.has(r.student.studentId))}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setSelectedIds(new Set(visibleRows.map((r) => r.student.studentId)))
+                      } else {
+                        setSelectedIds(new Set())
+                      }
+                    }}
+                    aria-label="Select all students in reports"
+                  />
+                </TableHead>
                 <TableHead>Student</TableHead>
                 <TableHead>Group</TableHead>
                 <TableHead>Attendance</TableHead>
@@ -308,7 +323,7 @@ export default function ReportsPage() {
               {!hydrated ? (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={8}
                     className="py-16 text-center text-sm text-muted-foreground"
                   >
                     Loading student performance…
@@ -316,7 +331,7 @@ export default function ReportsPage() {
                 </TableRow>
               ) : visibleRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="p-0">
+                  <TableCell colSpan={8} className="p-0">
                     <EmptyState
                       icon={students.length === 0 ? BarChart3Icon : SearchIcon}
                       title={
@@ -336,7 +351,22 @@ export default function ReportsPage() {
                 visibleRows.map((row) => {
                   const student = row.student
                   return (
-                    <TableRow key={student.studentId}>
+                    <TableRow
+                      key={student.studentId}
+                      data-state={selectedIds.has(student.studentId) ? "selected" : undefined}
+                    >
+                      <TableCell className="w-10 px-3">
+                        <Checkbox
+                          checked={selectedIds.has(student.studentId)}
+                          onCheckedChange={(checked) => {
+                            const next = new Set(selectedIds)
+                            if (checked) next.add(student.studentId)
+                            else next.delete(student.studentId)
+                            setSelectedIds(next)
+                          }}
+                          aria-label={`Select ${student.studentName}`}
+                        />
+                      </TableCell>
                       <TableCell>
                         <div className="min-w-0">
                           <div className="font-medium text-foreground">
@@ -441,6 +471,15 @@ export default function ReportsPage() {
             </TableBody>
           </Table>
         </div>
+        {visibleRows.length > 0 && (
+          <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
+            <span>
+              {visibleRows.length} student{visibleRows.length === 1 ? "" : "s"} evaluated
+              {selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
+            </span>
+            <span className="hidden sm:block">Attendance & fee health performance index</span>
+          </div>
+        )}
       </div>
 
       <p className="text-xs text-muted-foreground">
