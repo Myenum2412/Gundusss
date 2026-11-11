@@ -110,6 +110,24 @@ describe('Merchant Admin Integration Tests', () => {
     assert.ok(resMa.text.includes('Daily Merchant Operations'));
   });
 
+  test('Dashboard enforces orgmenu frame ancestors and direct access restriction script', async () => {
+    const res = await get('/');
+    assert.equal(res.status, 200);
+    const csp = res.headers['content-security-policy'] || '';
+    assert.ok(csp.includes("frame-ancestors 'self' https://myfees.myenum.in"));
+    assert.equal(res.headers['x-frame-options'], undefined);
+    assert.ok(res.text.includes('Direct access restriction: this console is only permitted inside the Orgmenu dashboard.'));
+  });
+
+  test('Direct browser address bar navigation redirects to orgmenu dashboard', async () => {
+    const res = await get('/?section=control-center', {
+      'sec-fetch-dest': 'document',
+      'sec-fetch-mode': 'navigate'
+    });
+    assert.equal(res.status, 302);
+    assert.ok(res.headers.location.includes('/orgmenu/dashboard#control-center'));
+  });
+
   test('GET /api/admin/tickets requires the admin token', async () => {
     const anonymous = await get('/api/admin/tickets');
     assert.equal(anonymous.status, 401);

@@ -12,6 +12,8 @@ import {
   RefreshCwIcon,
   SearchIcon,
   ShieldCheckIcon,
+  StoreIcon,
+  TerminalIcon,
   UsersIcon,
   WalletIcon,
 } from "lucide-react"
@@ -38,8 +40,31 @@ import {
 } from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
 import { listProfiles, type ProfileSummary } from "@/lib/profiles"
-import { clearActiveProfileId } from "@/lib/session"
+import { clearActiveProfileId, getToken } from "@/lib/session"
 import { cn } from "cn"
+
+type GatewaySection = "operations" | "control-center"
+
+// The gateway console (Operations Hub & Control Center / Logs) is served privately under the fees API origin
+// (https://api.myenum.in/youpi-admin/) and is gated per-request by the fees
+// session JWT — not by any public URL. The console appends its own session
+// token; the panel exchanges it once for the gateway admin token (verified
+// against /api/auth/gate for super-admin sessions only), so no admin-token
+// prompt ever appears. Super-admin (orgmenu) only: regular workspaces never
+// get this panel, and standalone URL access outside orgmenu is disallowed.
+function gatewayConsoleUrl(token: string | null, section: GatewaySection = "operations"): string {
+  if (typeof window === "undefined") return ""
+  const resolvedToken = token || getToken()
+  const params = new URLSearchParams()
+  if (resolvedToken) params.set("fees_token", resolvedToken)
+  params.set("section", section === "control-center" ? "control-center" : "operations")
+  const hash = section === "control-center" ? "#supervisor" : "#operations"
+  const query = `?${params.toString()}${hash}`
+  if (/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
+    return `http://127.0.0.1:6001/${query}`
+  }
+  return resolvedToken ? `https://api.myenum.in/youpi-admin/${query}` : ""
+}
 
 function formatDate(value: string) {
   if (!value) return "—"
@@ -61,6 +86,25 @@ export default function OrgMenuDashboardPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState("")
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const [sessionToken, setSessionToken] = useState<string | null>(null)
+  const [gatewaySection, setGatewaySection] = useState<GatewaySection>("operations")
+
+  useEffect(() => {
+    setSessionToken(getToken())
+    const applyHash = () => {
+      const hash = window.location.hash.replace("#", "").toLowerCase()
+      if (hash === "control-center" || hash === "logs" || hash === "supervisor") {
+        setGatewaySection("control-center")
+      } else if (hash === "operations" || hash === "merchant-admin" || hash === "cashier") {
+        setGatewaySection("operations")
+      }
+    }
+    applyHash()
+    window.addEventListener("hashchange", applyHash)
+    return () => window.removeEventListener("hashchange", applyHash)
+  }, [])
+
+  const gatewayConsoleSrc = gatewayConsoleUrl(sessionToken, gatewaySection)
 
   const viewingOther = activeProfile.profileId !== profile.profileId
 
@@ -546,6 +590,113 @@ export default function OrgMenuDashboardPage() {
           </span>
           <span className="hidden sm:block">Multi-tenant institution hierarchy</span>
         </div>
+      </section>
+
+      {/* Payment Gateway Console (Operations & Control Center) — private, session-gated super-admin console.
+          Only shown in orgmenu; direct access to the standalone URL outside orgmenu is disallowed. */}
+      <section
+        id="operations"
+        className="overflow-hidden rounded-2xl border bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="flex size-7 items-center justify-center rounded-lg bg-slate-700 text-white">
+                {gatewaySection === "control-center" ? (
+                  <TerminalIcon className="size-3.5" />
+                ) : (
+                  <StoreIcon className="size-3.5" />
+                )}
+              </span>
+              <h2 className="text-[13px] font-semibold tracking-tight">
+                {gatewaySection === "control-center"
+                  ? "Payment Gateway Control Center"
+                  : "Payment Gateway Operations Hub"}
+              </h2>
+              <Badge variant="outline" className="text-[10px] font-medium">
+                {gatewaySection === "control-center"
+                  ? "Host Processes & Logs"
+                  : "VPAs, Cashier & Ledger"}
+              </Badge>
+              <Badge variant="secondary" className="gap-1 text-[10px] font-medium">
+                <ShieldCheckIcon className="size-3 text-emerald-600" />
+                Orgmenu only
+              </Badge>
+            </div>
+            <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
+              {gatewaySection === "control-center"
+                ? "Real-time process supervisor (ports 6100, 7000, 6001, etc.), service health, and aggregate live terminal logs."
+                : "Receiving accounts (VPAs), slots, live payment observers, POS cashier till desk, and payment ledger."}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center rounded-lg border bg-muted/50 p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setGatewaySection("operations")
+                  window.location.hash = "#operations"
+                }}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition",
+                  gatewaySection === "operations"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <StoreIcon className="size-3.5" />
+                <span>Daily Operations</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setGatewaySection("control-center")
+                  window.location.hash = "#control-center"
+                }}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition",
+                  gatewaySection === "control-center"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <TerminalIcon className="size-3.5" />
+                <span>Control Center (Logs)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-b border-emerald-500/20 bg-emerald-500/5 px-4 py-2 text-xs text-emerald-700 dark:text-emerald-400">
+          <CheckIcon className="size-3.5 shrink-0" />
+          <span className="min-w-0 flex-1">
+            {gatewaySection === "control-center"
+              ? "The Control Center streams live logs via Server-Sent Events (SSE) and supervises local gateway daemons. Authenticated automatically via your super-admin session."
+              : "The Operations Hub provides complete operational control over receiving accounts, slots, cashier counter desk, and payment verification."}
+          </span>
+          <span className="hidden font-mono text-[10px] opacity-75 sm:inline">
+            Embedded Console · Standalone Access Disabled
+          </span>
+        </div>
+
+        {gatewayConsoleSrc ? (
+          <iframe
+            key={gatewaySection}
+            src={gatewayConsoleSrc}
+            title={
+              gatewaySection === "control-center"
+                ? "Payment Gateway Control Center (Logs)"
+                : "Payment Gateway Merchant Operations"
+            }
+            className="h-[780px] w-full border-0"
+            loading="lazy"
+          />
+        ) : (
+          <p className="p-6 text-sm text-muted-foreground">
+            Sign in as super admin to load the payment gateway console.
+          </p>
+        )}
       </section>
     </DashboardShell>
   )

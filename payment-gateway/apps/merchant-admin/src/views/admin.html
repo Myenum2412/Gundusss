@@ -6,6 +6,41 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Merchant & Supervisor Hub - YOUPI PG</title>
   <script>
+    /* Direct access restriction: this console is only permitted inside the Orgmenu dashboard. */
+    (function () {
+      var isFramed = false;
+      try {
+        isFramed = window.self !== window.top;
+      } catch (e) {
+        isFramed = true; // Cross-origin framing throws or is restricted
+      }
+      if (!isFramed) {
+        var isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        var orgmenuUrl = isLocal
+          ? 'http://localhost:3000/orgmenu/dashboard#operations'
+          : 'https://myfees.myenum.in/orgmenu/dashboard#operations';
+        
+        // Hide entire page content immediately
+        if (document.documentElement) {
+          document.documentElement.style.display = 'none';
+        }
+
+        // Redirect to orgmenu
+        try {
+          window.location.replace(orgmenuUrl);
+        } catch (e) {
+          window.location.href = orgmenuUrl;
+        }
+
+        // Fallback display if redirect is blocked or delayed
+        window.addEventListener('DOMContentLoaded', function () {
+          if (document.documentElement) document.documentElement.style.display = 'block';
+          document.body.innerHTML = '<div style="margin:0;min-height:100vh;background:#0b0f19;color:#f8fafc;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;box-sizing:border-box;"><div style="max-width:460px;background:#111827;border:1px solid #1f2937;border-radius:16px;padding:32px 24px;box-shadow:0 10px 25px rgba(0,0,0,0.5);"><div style="font-size:40px;margin-bottom:12px;">🔒</div><h2 style="font-size:18px;font-weight:600;margin:0 0 8px;">Direct Access Restricted</h2><p style="font-size:13px;color:#94a3b8;line-height:1.5;margin:0 0 20px;">This payment gateway console is only accessible inside the Organization Console (Orgmenu). Standalone access is not allowed.</p><a href="' + orgmenuUrl + '" style="display:inline-block;background:#2563eb;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:500;text-decoration:none;">Open in Orgmenu</a></div></div>';
+        });
+      }
+    })();
+  </script>
+  <script>
     /* Apply saved theme pref (system | light | dark) before first paint to avoid a flash. */
     (function () {
       var p = 'system';
@@ -3795,6 +3830,11 @@
       return {
         token: read,
         ensure: async () => {
+          var isFramed = false;
+          try { isFramed = window.self !== window.top; } catch (e) { isFramed = true; }
+          if (!isFramed) {
+            return Promise.reject(new Error('Direct access not permitted — only accessible inside orgmenu.'));
+          }
           await seedFromFeesToken();
           return read() ? Promise.resolve() : prompt(rejectionHint());
         }

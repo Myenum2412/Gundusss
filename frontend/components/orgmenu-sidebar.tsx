@@ -14,7 +14,13 @@ import {
   SidebarRail,
   SidebarSeparator,
 } from "@/components/ui/sidebar"
-import { Building2Icon, LayersIcon, ShieldCheckIcon } from "lucide-react"
+import {
+  Building2Icon,
+  LayersIcon,
+  ShieldCheckIcon,
+  StoreIcon,
+  TerminalIcon,
+} from "lucide-react"
 
 // The organization console has its own chrome and deliberately exposes no
 // workspace-dashboard or settings destinations. It is a standalone console.
@@ -29,6 +35,16 @@ const navigation = {
       title: "Workspaces",
       url: "/orgmenu/dashboard#workspaces",
       icon: <LayersIcon />,
+    },
+    {
+      title: "Operations Hub",
+      url: "/orgmenu/dashboard#operations",
+      icon: <StoreIcon />,
+    },
+    {
+      title: "Control Center (Logs)",
+      url: "/orgmenu/dashboard#control-center",
+      icon: <TerminalIcon />,
     },
   ],
 }

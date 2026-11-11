@@ -9,12 +9,19 @@ import { getAdminToken, safeEqual } from '@youpi/common';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const ALLOWED_FRAME_ANCESTORS = [
+  "'self'",
+  "https://myfees.myenum.in",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  process.env.ADMIN_FRAME_ANCESTORS || ''
+].filter(Boolean).join(' ');
+
 /** Security headers applied to every response served by the merchant admin. */
 const BASE_SECURITY_HEADERS = Object.freeze({
   'X-Content-Type-Options': 'nosniff',
-  'X-Frame-Options': 'SAMEORIGIN',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
-  'Content-Security-Policy': "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'; object-src 'none'"
+  'Content-Security-Policy': `default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors ${ALLOWED_FRAME_ANCESTORS}; base-uri 'none'; form-action 'self'; object-src 'none'`
 });
 
 /** True when the caller presented the admin bearer token in constant time (or ?token= on GET SSE). */
@@ -336,6 +343,30 @@ export class AdminServer {
 
       // Dashboard View: GET / or GET /admin or GET /control-center or GET /logs or GET /merchant-admin or GET /hub
       if (pathname === '/' || pathname === '/admin' || pathname === '/control-center' || pathname === '/logs' || pathname === '/merchant-admin' || pathname === '/hub') {
+        const dest = String(req.headers['sec-fetch-dest'] || '').toLowerCase();
+        const mode = String(req.headers['sec-fetch-mode'] || '').toLowerCase();
+        const isDocumentNav = dest === 'document' || mode === 'navigate';
+        const isIframe = dest === 'iframe';
+        const referer = String(req.headers['referer'] || '');
+        const isFromOrgmenu = referer.includes('/orgmenu') || referer.includes('myfees.myenum.in') || referer.includes('localhost:3000') || referer.includes('127.0.0.1:3000');
+
+        // Direct browser address bar navigation to this URL is disallowed.
+        // The console must only be rendered inside the Orgmenu dashboard frame.
+        if (isDocumentNav && !isIframe && !isFromOrgmenu) {
+          const isLocal = !String(req.headers.host || '').includes('myenum.in');
+          const targetSection = url.searchParams.get('section') === 'control-center' ? 'control-center' : 'operations';
+          const orgmenuUrl = isLocal
+            ? `http://localhost:3000/orgmenu/dashboard#${targetSection}`
+            : `https://myfees.myenum.in/orgmenu/dashboard#${targetSection}`;
+          res.writeHead(302, {
+            'Location': orgmenuUrl,
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+            'Content-Type': 'text/plain; charset=utf-8'
+          });
+          res.end(`Redirecting to Organization Console: ${orgmenuUrl}`);
+          return;
+        }
+
         const feesToken = (url.searchParams.get('fees_token') || '').trim();
         const headers = {
           'Content-Type': 'text/html; charset=utf-8',
