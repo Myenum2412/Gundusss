@@ -2,7 +2,7 @@ import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 
 import { AuthProvider } from "@/components/auth-provider"
-import { DashboardFrame } from "@/components/dashboard-frame"
+import { OrgMenuFrame } from "@/components/orgmenu-frame"
 import { SIDEBAR_COOKIE_NAME } from "@/lib/sidebar-cookie"
 import { SESSION_COOKIE } from "@/lib/session-constants"
 
@@ -18,14 +18,12 @@ export default function OrgMenuLayout({
     redirect("/login")
   }
 
-  // Share the same persistent sidebar chrome as the workspace dashboard, so
-  // moving between /dashboard and /orgmenu/dashboard never remounts the rail.
   const stored = cookies().get(SIDEBAR_COOKIE_NAME)?.value
   const defaultOpen = stored !== "false"
 
   return (
     <AuthProvider>
-      <DashboardFrame defaultOpen={defaultOpen}>{children}</DashboardFrame>
+      <OrgMenuFrame defaultOpen={defaultOpen}>{children}</OrgMenuFrame>
     </AuthProvider>
   )
 }
