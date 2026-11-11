@@ -1,12 +1,16 @@
 import { randomBytes } from 'node:crypto';
+import { rmSync, existsSync, readdirSync } from 'node:fs';
+import path from 'node:path';
 import type { FastifyRequest } from 'fastify';
 
 import {
   DB_TABLES,
+  DB_TABLE_NAMES,
   deleteRecord,
   getRecord,
   listRecords,
   listScopedRecords,
+  pool,
   putRecord,
 } from './db.js';
 import {
@@ -27,12 +31,14 @@ import {
   invalidateUserCache,
   isSuperUser,
   listUsers,
+  listUsersForProfile,
   normalizeEmail,
   removeUser,
   saveUser,
   verifyPassword,
   type UserRecord,
 } from './users.js';
+import { waSessionKeyFor } from './whatsapp.js';
 
 /**
  * A workspace ("profile"). The profile id is both the PostgreSQL row id and the
@@ -654,4 +660,134 @@ export async function getSessionProfiles(
       : await getProfileOrDefault(activeId, email);
 
   return { profile: home, activeProfile: active };
+}
+
+/**
+ * Delete a workspace profile, its enrolled users, all scoped table data, and its WhatsApp auth session.
+ */
+export async function deleteWorkspaceAndData(profileId: string): Promise<{
+  deletedProfile: boolean;
+  deletedUsers: string[];
+  deletedRecords: number;
+}> {
+  if (profileId === SUPER_PROFILE_ID) {
+    throw new Error('The super-admin workspace (orgmenu) cannot be deleted.');
+  }
+
+  // 1. Delete all users belonging to this profile
+  const users = await listUsersForProfile(profileId);
+  const deletedUsers: string[] = [];
+  for (const u of users) {
+    if (normalizeEmail(u.email) === SUPER_ADMIN_EMAIL || u.super) continue;
+    await removeUser(u.email);
+    invalidateUserCache(u.email);
+    deletedUsers.push(u.email);
+  }
+
+  // 2. Delete all scoped records for this profile across ALL tables
+  const prefix = `${profileId}:`;
+  let deletedRecords = 0;
+  for (const table of DB_TABLE_NAMES) {
+    if (table === DB_TABLES.profiles || table === DB_TABLES.users) continue;
+    try {
+      const res = await pool.query(
+        `DELETE FROM ${table} WHERE entity_id LIKE $1 || '%'`,
+        [prefix]
+      );
+      deletedRecords += res.rowCount ?? 0;
+    } catch (err) {
+      console.error(`Failed to delete scoped records from ${table} for ${profileId}:`, err);
+    }
+  }
+
+  // 3. Delete the profile record itself
+  await deleteRecord(DB_TABLES.profiles, profileId);
+
+  // 4. Purge any associated WhatsApp session directories
+  const authBase = process.env.WA_AUTH_DIR || path.resolve(process.cwd(), '.baileys_auth');
+  for (const email of deletedUsers) {
+    try {
+      const waKey = waSessionKeyFor(email);
+      const dir = path.join(authBase, waKey);
+      if (existsSync(dir)) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return { deletedProfile: true, deletedUsers, deletedRecords };
+}
+
+/**
+ * Purge ALL users, workspaces, and data EXCEPT the developer@myenum.in super-admin account and orgmenu workspace.
+ */
+export async function purgeAllExceptSuper(): Promise<{
+  deletedProfiles: string[];
+  deletedUsers: string[];
+  totalRecordsDeleted: number;
+}> {
+  const profiles = await listProfiles();
+  const nonSuperProfiles = profiles.filter((p) => p.profileId !== SUPER_PROFILE_ID);
+
+  let totalRecordsDeleted = 0;
+  const deletedProfiles: string[] = [];
+  const deletedUsers: string[] = [];
+
+  for (const p of nonSuperProfiles) {
+    const res = await deleteWorkspaceAndData(p.profileId);
+    deletedProfiles.push(p.profileId);
+    deletedUsers.push(...res.deletedUsers);
+    totalRecordsDeleted += res.deletedRecords;
+  }
+
+  // Check any remaining users who aren't developer@myenum.in
+  const allUsers = await listUsers();
+  for (const u of allUsers) {
+    const email = normalizeEmail(u.email);
+    if (email !== SUPER_ADMIN_EMAIL && !u.super) {
+      await removeUser(u.email);
+      invalidateUserCache(u.email);
+      if (!deletedUsers.includes(u.email)) {
+        deletedUsers.push(u.email);
+      }
+    }
+  }
+
+  // Clean up any stray scoped records across all tables that don't belong to orgmenu
+  for (const table of DB_TABLE_NAMES) {
+    if (table === DB_TABLES.profiles || table === DB_TABLES.users) continue;
+    try {
+      const res = await pool.query(
+        `DELETE FROM ${table} WHERE NOT (entity_id LIKE '${SUPER_PROFILE_ID}:%')`
+      );
+      totalRecordsDeleted += res.rowCount ?? 0;
+    } catch (err) {
+      console.error(`Failed to clean stray records from ${table}:`, err);
+    }
+  }
+
+  // Purge any non-developer auth folders on disk
+  const authBase = process.env.WA_AUTH_DIR || path.resolve(process.cwd(), '.baileys_auth');
+  const developerKey = waSessionKeyFor(SUPER_ADMIN_EMAIL);
+  try {
+    if (existsSync(authBase)) {
+      const entries = readdirSync(authBase);
+      for (const entry of entries) {
+        if (entry !== developerKey && entry !== 'creds.json') {
+          const dir = path.join(authBase, entry);
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return {
+    deletedProfiles,
+    deletedUsers,
+    totalRecordsDeleted,
+  };
 }

@@ -14,12 +14,14 @@ import {
   ShieldCheckIcon,
   StoreIcon,
   TerminalIcon,
+  Trash2Icon,
   UsersIcon,
   WalletIcon,
 } from "lucide-react"
 
 import { useAuth } from "@/components/auth-provider"
 import { DashboardShell } from "@/components/dashboard-shell"
+import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -88,6 +90,9 @@ export default function OrgMenuDashboardPage() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [sessionToken, setSessionToken] = useState<string | null>(null)
   const [gatewaySection, setGatewaySection] = useState<GatewaySection>("operations")
+  const [confirmDeleteProfile, setConfirmDeleteProfile] = useState<ProfileSummary | null>(null)
+  const [confirmPurgeAll, setConfirmPurgeAll] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     setSessionToken(getToken())
@@ -178,6 +183,50 @@ export default function OrgMenuDashboardPage() {
       .filter(Boolean)
     if (links.length === 0) return
     await copyText(links.join("\n"), "__selected__")
+  }
+
+  async function handleDeleteProfile(profileId: string) {
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/profiles/${encodeURIComponent(profileId)}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${getToken()}`,
+        },
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || "Failed to delete workspace")
+      }
+      setConfirmDeleteProfile(null)
+      await load()
+    } catch (err: any) {
+      alert(err.message || "Failed to delete workspace")
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  async function handlePurgeAll() {
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/profiles/purge-all-except-super`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${getToken()}`,
+        },
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || "Failed to purge users and data")
+      }
+      setConfirmPurgeAll(false)
+      await load()
+    } catch (err: any) {
+      alert(err.message || "Failed to purge data")
+    } finally {
+      setDeleting(false)
+    }
   }
 
   if (!isSuper) {
@@ -357,6 +406,18 @@ export default function OrgMenuDashboardPage() {
               >
                 {copiedKey === "__selected__" ? <CheckIcon /> : <CopyIcon />}
                 Copy links ({selectedIds.size})
+              </Button>
+            )}
+            {profiles.some((p) => !p.super) && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => setConfirmPurgeAll(true)}
+                disabled={deleting}
+              >
+                <Trash2Icon className="size-3.5" />
+                Purge All Non-Super Data
               </Button>
             )}
             {loading && (
@@ -565,6 +626,18 @@ export default function OrgMenuDashboardPage() {
                                   </DropdownMenuItem>
                                 </>
                               )}
+                              {!item.super && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => setConfirmDeleteProfile(item)}
+                                    className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+                                  >
+                                    <Trash2Icon className="size-4 text-destructive" />
+                                    <span>Delete Workspace & Data</span>
+                                  </DropdownMenuItem>
+                                </>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
@@ -698,6 +771,28 @@ export default function OrgMenuDashboardPage() {
           </p>
         )}
       </section>
+
+      <DeleteConfirmDialog
+        open={confirmDeleteProfile !== null}
+        onOpenChange={(v) => {
+          if (!v) setConfirmDeleteProfile(null)
+        }}
+        title={`Delete "${confirmDeleteProfile?.name}" workspace?`}
+        description={`This will permanently delete the workspace (${confirmDeleteProfile?.profileId}), all its enrolled users, and all its student, fee, receipt, and payment records. This action cannot be undone.`}
+        confirmLabel={deleting ? "Deleting…" : "Delete Workspace & Data"}
+        onConfirm={() => {
+          if (confirmDeleteProfile) void handleDeleteProfile(confirmDeleteProfile.profileId)
+        }}
+      />
+
+      <DeleteConfirmDialog
+        open={confirmPurgeAll}
+        onOpenChange={setConfirmPurgeAll}
+        title="Purge ALL users and data (except developer)?"
+        description="This will permanently delete all organizations, workspaces, enrolled users, students, fee structures, receipts, and payment data EXCEPT the developer@myenum.in super administrator account and the orgmenu workspace. This action cannot be undone."
+        confirmLabel={deleting ? "Purging…" : "Purge Everything"}
+        onConfirm={() => void handlePurgeAll()}
+      />
     </DashboardShell>
   )
 }

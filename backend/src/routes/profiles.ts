@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 
 import {
+  deleteWorkspaceAndData,
   getProfileOrDefault,
   listProfiles,
+  purgeAllExceptSuper,
   resolveProfileId,
 } from '../profiles.js';
 import { SUPER_PROFILE_ID } from '../tenant.js';
@@ -43,5 +45,44 @@ export async function profileRoutes(app: FastifyInstance) {
           String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
         ),
     };
+  });
+
+  // DELETE /api/profiles/:profileId — deletes a workspace profile, its enrolled users, and all scoped data
+  app.delete<{ Params: { profileId: string } }>(
+    '/api/profiles/:profileId',
+    async (req, reply) => {
+      if (req.auth?.super !== true) {
+        return reply.code(403).send({ error: 'Super-admin access required.' });
+      }
+      const { profileId } = req.params;
+      if (profileId === SUPER_PROFILE_ID) {
+        return reply
+          .code(400)
+          .send({ error: 'The super-admin workspace cannot be deleted.' });
+      }
+      try {
+        const result = await deleteWorkspaceAndData(profileId);
+        return { data: result };
+      } catch (err: any) {
+        return reply
+          .code(500)
+          .send({ error: err?.message || 'Failed to delete workspace' });
+      }
+    }
+  );
+
+  // POST /api/profiles/purge-all-except-super — deletes all users, data, and profiles except developer@myenum.in
+  app.post('/api/profiles/purge-all-except-super', async (req, reply) => {
+    if (req.auth?.super !== true) {
+      return reply.code(403).send({ error: 'Super-admin access required.' });
+    }
+    try {
+      const result = await purgeAllExceptSuper();
+      return { data: result };
+    } catch (err: any) {
+      return reply
+        .code(500)
+        .send({ error: err?.message || 'Failed to purge users and data' });
+    }
   });
 }
