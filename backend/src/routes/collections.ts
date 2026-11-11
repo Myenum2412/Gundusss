@@ -22,7 +22,7 @@ import { generateReceiptPdf, type ReceiptPdfData } from '../receipt-pdf.js';
 const str = (max = 500) => z.string().max(max).default('');
 const strArray = z.array(z.string().max(200)).default([]);
 
-const StudentSchema = z.object({
+export const StudentSchema = z.object({
   studentId: z.string().min(1).max(50),
   studentName: z.string().min(1).max(200),
   dob: str(50),
@@ -33,7 +33,11 @@ const StudentSchema = z.object({
   address: str(500),
   group: str(100),
   course: str(100),
-  branch: str(100),
+  branch: z
+    .string({ required_error: 'Branch is required' })
+    .trim()
+    .min(1, 'Branch is required. A student cannot be created without a branch.')
+    .max(100),
   joiningDate: str(50),
   status: str(50),
 }).passthrough();
@@ -526,7 +530,14 @@ export async function collectionsRoutes(app: FastifyInstance) {
 
   app.put('/api/students', async (req, reply) => {
     const parsed = itemsSchema(StudentSchema).safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const errorMsg = issue?.message || 'Invalid body';
+      return reply.code(400).send({
+        error: errorMsg,
+        details: parsed.error.flatten(),
+      });
+    }
     const profileId = await resolveProfileId(req);
     await replaceScopedRecords(
       DB_TABLES.students,

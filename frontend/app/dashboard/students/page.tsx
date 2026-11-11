@@ -110,6 +110,7 @@ export default function StudentsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false)
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
+  const [formError, setFormError] = useState("")
 
   const reloadDependencies = useCallback(() => {
     loadReceipts()
@@ -182,17 +183,23 @@ export default function StudentsPage() {
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
+    const trimmedBranch = (form.branch || "").trim()
+    if (!trimmedBranch) {
+      setFormError("Branch is required. A student cannot be created without a branch.")
+      return
+    }
+    setFormError("")
     let assignedId = ""
     if (editingIndex !== null) {
       assignedId = students[editingIndex]?.studentId ?? nextStudentId(nextId)
-      const updated: Student = { ...form, studentId: assignedId }
+      const updated: Student = { ...form, branch: trimmedBranch, studentId: assignedId }
       const nextList = students.map((s, i) => (i === editingIndex ? updated : s))
       setStudents(nextList)
       void saveStudents(nextList)
       setEditingIndex(null)
     } else {
       assignedId = nextStudentId(nextId)
-      const student: Student = { ...form, studentId: assignedId }
+      const student: Student = { ...form, branch: trimmedBranch, studentId: assignedId }
       const nextList = [...students, student]
       setStudents(nextList)
       void saveStudents(nextList)
@@ -231,6 +238,7 @@ export default function StudentsPage() {
     void studentId
     setForm(rest)
     setEditingIndex(index)
+    setFormError("")
     setOpen(true)
   }
 
@@ -351,6 +359,12 @@ export default function StudentsPage() {
               if (!v) {
                 setForm(initialForm)
                 setEditingIndex(null)
+                setFormError("")
+              } else if (editingIndex === null) {
+                const activeBranches = branches.filter((b) => b.status === "Active")
+                if (activeBranches.length === 1 && !form.branch) {
+                  setForm((f) => ({ ...f, branch: activeBranches[0].branchName }))
+                }
               }
               setOpen(v)
             }}
@@ -373,6 +387,11 @@ export default function StudentsPage() {
 
               <form onSubmit={onSubmit} className="flex flex-col">
                 <div className="flex flex-col gap-6 px-6 py-5">
+                  {formError && (
+                    <div className="rounded-[10px] border border-destructive/20 bg-destructive/5 px-3.5 py-2.5 text-xs font-medium text-destructive">
+                      {formError}
+                    </div>
+                  )}
                   {/* Student Information */}
                   <div>
                     <h2 className="text-[13px] font-semibold tracking-tight">Student information</h2>
@@ -541,16 +560,21 @@ export default function StudentsPage() {
                         )
                       })()}
                       <Field>
-                        <FieldLabel htmlFor="branch">Branch</FieldLabel>
+                        <FieldLabel htmlFor="branch">
+                          Branch <span className="text-destructive">*</span>
+                        </FieldLabel>
                         <select
                           id="branch"
                           className={selectClassName}
                           value={form.branch}
-                          onChange={set("branch")}
+                          onChange={(e) => {
+                            setFormError("")
+                            set("branch")(e)
+                          }}
                           required
                         >
                           <option value="" disabled>
-                            Select
+                            Select Branch (Required)
                           </option>
                           {branches
                             .filter((b) => b.status === "Active")
@@ -561,9 +585,13 @@ export default function StudentsPage() {
                               </option>
                             ))}
                         </select>
-                        {branches.filter((b) => b.status === "Active").length === 0 && (
-                          <p className="text-xs text-muted-foreground">
-                            No branches yet — create one on the Branches page.
+                        {branches.filter((b) => b.status === "Active").length === 0 ? (
+                          <p className="text-xs text-destructive">
+                            No active branches found. You must create an active branch on the Branches page before adding students.
+                          </p>
+                        ) : (
+                          <p className="text-[11px] text-muted-foreground">
+                            Every student must be assigned to an active branch.
                           </p>
                         )}
                       </Field>
@@ -598,7 +626,10 @@ export default function StudentsPage() {
                   <Button type="button" variant="outline" onClick={onCancel}>
                     Cancel
                   </Button>
-                  <Button type="submit">
+                  <Button
+                    type="submit"
+                    disabled={branches.filter((b) => b.status === "Active").length === 0 || !form.branch.trim()}
+                  >
                     {editingIndex !== null ? "Save Changes" : "Save Student"}
                   </Button>
                 </DialogFooter>
@@ -698,6 +729,7 @@ export default function StudentsPage() {
                 <TableHead className="w-12">#</TableHead>
                 <TableHead>Student</TableHead>
                 <TableHead>Student ID</TableHead>
+                <TableHead>Branch</TableHead>
                 <TableHead>Group / Class</TableHead>
                 <TableHead>Course</TableHead>
                 <TableHead>Phone</TableHead>
@@ -709,7 +741,7 @@ export default function StudentsPage() {
             <TableBody>
               {students.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={10} className="p-0">
+                  <TableCell colSpan={11} className="p-0">
                     <EmptyState
                       icon={UsersIcon}
                       title="No students yet"
@@ -738,6 +770,15 @@ export default function StudentsPage() {
                     <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                     <TableCell className="font-medium text-foreground">{s.studentName}</TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">{s.studentId}</TableCell>
+                    <TableCell>
+                      {s.branch ? (
+                        <span className="inline-flex items-center rounded-md border bg-muted/40 px-2 py-0.5 text-xs font-medium">
+                          {s.branch}
+                        </span>
+                      ) : (
+                        <span className="text-xs font-medium text-destructive">Missing Branch</span>
+                      )}
+                    </TableCell>
                     <TableCell>{s.group}</TableCell>
                     <TableCell>{s.course}</TableCell>
                     <TableCell className="tabular-nums">{s.phone}</TableCell>

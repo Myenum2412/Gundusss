@@ -12,7 +12,7 @@ export interface StoredStudent {
   address: string;
   group: string;
   course: string;
-  branch?: string;
+  branch: string;
   joiningDate: string;
   status: string;
 }
