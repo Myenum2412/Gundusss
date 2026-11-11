@@ -4,6 +4,11 @@ import { useCallback, useEffect, useState } from "react"
 import { loadStudents, saveStudents } from "@/lib/students-store"
 import { loadGroups, saveGroups, type StoredGroup } from "@/lib/groups-store"
 import {
+  loadFeeStructures,
+  saveFeeStructures,
+  type StoredFeeStructure,
+} from "@/lib/fee-structures-store"
+import {
   loadDropdowns,
   type DropdownMap,
 } from "@/lib/dropdown-store"
@@ -61,8 +66,9 @@ const initialForm = {
   group: "",
   course: "",
   branch: "",
+  structureName: "",
   joiningDate: "",
-  status: "Unpaid",
+  status: "Active",
 }
 
 type Student = typeof initialForm & { studentId: string }
@@ -101,6 +107,7 @@ export default function StudentsPage() {
   const [nextId, setNextId] = useState(1)
   const [hydrated, setHydrated] = useState(false)
   const [groups, setGroups] = useState<StoredGroup[]>([])
+  const [feeStructures, setFeeStructures] = useState<StoredFeeStructure[]>([])
   const [receipts, setReceipts] = useState<StoredReceipt[]>([])
   const [dropdowns, setDropdowns] = useState<DropdownMap | null>(null)
   const [branches, setBranches] = useState<StoredBranch[]>([])
@@ -125,6 +132,9 @@ export default function StudentsPage() {
     loadGroups()
       .then(setGroups)
       .catch((error) => console.error("Failed to load student groups", error))
+    loadFeeStructures()
+      .then(setFeeStructures)
+      .catch((error) => console.error("Failed to load fee structures", error))
   }, [])
 
   useEffect(() => {
@@ -181,6 +191,18 @@ export default function StudentsPage() {
     }))
   }
 
+  function handleStructureChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const val = e.target.value
+    const matched = feeStructures.find(
+      (fs) => fs.structureName === val || fs.structureId === val
+    )
+    setForm((f) => ({
+      ...f,
+      structureName: val,
+      branch: !f.branch && matched?.branch ? matched.branch : f.branch,
+    }))
+  }
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     const trimmedBranch = (form.branch || "").trim()
@@ -227,6 +249,29 @@ export default function StudentsPage() {
       }).catch(console.error)
     }
 
+    // Bidirectional sync: keep studentIds updated in fee-structures-store
+    if (assignedId) {
+      loadFeeStructures().then((currStructures) => {
+        let changed = false
+        const next = currStructures.map((fs) => {
+          const isTarget =
+            form.structureName &&
+            (fs.structureName === form.structureName || fs.structureId === form.structureName)
+          const hasId = fs.studentIds && fs.studentIds.includes(assignedId)
+          if (isTarget && !hasId) {
+            changed = true
+            return { ...fs, studentIds: [...(fs.studentIds || []), assignedId] }
+          }
+          if (!isTarget && hasId && editingIndex !== null) {
+            changed = true
+            return { ...fs, studentIds: (fs.studentIds || []).filter((id) => id !== assignedId) }
+          }
+          return fs
+        })
+        if (changed) void saveFeeStructures(next)
+      }).catch(console.error)
+    }
+
     setForm(initialForm)
     setOpen(false)
   }
@@ -236,7 +281,11 @@ export default function StudentsPage() {
     if (!s) return
     const { studentId, ...rest } = s
     void studentId
-    setForm(rest)
+    setForm({
+      ...initialForm,
+      ...rest,
+      structureName: rest.structureName || "",
+    })
     setEditingIndex(index)
     setFormError("")
     setOpen(true)
@@ -258,6 +307,21 @@ export default function StudentsPage() {
           return g
         })
         if (changed) void saveGroups(next)
+      }).catch(console.error)
+
+      loadFeeStructures().then((currStructures) => {
+        let changed = false
+        const next = currStructures.map((fs) => {
+          if (fs.studentIds && fs.studentIds.includes(s.studentId)) {
+            changed = true
+            return {
+              ...fs,
+              studentIds: fs.studentIds.filter((id) => id !== s.studentId),
+            }
+          }
+          return fs
+        })
+        if (changed) void saveFeeStructures(next)
       }).catch(console.error)
     }
     const nextList = students.filter((_, i) => i !== index)
@@ -596,6 +660,40 @@ export default function StudentsPage() {
                         )}
                       </Field>
                       <Field>
+                        <FieldLabel htmlFor="structureName">Structure Name</FieldLabel>
+                        <select
+                          id="structureName"
+                          className={selectClassName}
+                          value={form.structureName}
+                          onChange={handleStructureChange}
+                        >
+                          <option value="">Select Structure Name (Optional)</option>
+                          {feeStructures
+                            .filter((fs) => !form.branch || !fs.branch || fs.branch === form.branch)
+                            .map((fs) => (
+                              <option key={fs.structureId} value={fs.structureName}>
+                                {fs.structureName} · ₹{fs.amount} ({fs.frequency || "Monthly"}{fs.branch ? ` · ${fs.branch}` : ""})
+                              </option>
+                            ))}
+                          {form.branch &&
+                            feeStructures.filter((fs) => fs.branch && fs.branch !== form.branch).length > 0 && (
+                              <optgroup label="Other Branches">
+                                {feeStructures
+                                  .filter((fs) => fs.branch && fs.branch !== form.branch)
+                                  .map((fs) => (
+                                    <option key={fs.structureId} value={fs.structureName}>
+                                      {fs.structureName} · ₹{fs.amount} ({fs.branch})
+                                    </option>
+                                  ))}
+                              </optgroup>
+                            )}
+                        </select>
+                        <p className="text-[11px] text-muted-foreground">
+                          Fee schedule and payment amount will be based on this Structure Name.
+                        </p>
+                      </Field>
+
+                      <Field>
                         <FieldLabel htmlFor="joiningDate">Joining Date</FieldLabel>
                         <Input
                           id="joiningDate"
@@ -605,19 +703,32 @@ export default function StudentsPage() {
                           required
                         />
                       </Field>
-                      <Field>
-                        <FieldLabel htmlFor="status">Fee Status</FieldLabel>
-                        <select
-                          id="status"
-                          className={selectClassName}
-                          value={form.status === "Active" ? "Paid" : form.status}
-                          onChange={set("status")}
-                          required
-                        >
-                          <option value="Paid">Paid</option>
-                          <option value="Unpaid">Unpaid</option>
-                        </select>
-                      </Field>
+
+                      {(() => {
+                        const matched = feeStructures.find(
+                          (fs) => fs.structureName === form.structureName || fs.structureId === form.structureName
+                        )
+                        if (!matched) return null
+                        return (
+                          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs md:col-span-2 flex flex-col gap-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                                Fees based on Structure Name: &quot;{matched.structureName}&quot;
+                              </span>
+                              <span className="font-bold text-foreground text-sm">₹{matched.amount}</span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground">
+                              <span><strong>Amount:</strong> ₹{matched.amount}</span>
+                              <span><strong>Frequency:</strong> {matched.frequency || "Monthly"}</span>
+                              <span><strong>Fee Type:</strong> {matched.feeType || "Tuition Fee"}</span>
+                              {matched.dueDate ? <span><strong>Due Day:</strong> Day {matched.dueDate} of cycle</span> : null}
+                              {matched.lateFee ? <span><strong>Late Fee:</strong> ₹{matched.lateFee}</span> : null}
+                              {matched.branch ? <span><strong>Branch:</strong> {matched.branch}</span> : null}
+                              {matched.courseGroup ? <span><strong>Course/Group:</strong> {matched.courseGroup}</span> : null}
+                            </div>
+                          </div>
+                        )
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -666,6 +777,18 @@ export default function StudentsPage() {
                     <DetailItem label="Group / Class">{viewStudent.group || "—"}</DetailItem>
                     <DetailItem label="Course">{viewStudent.course || "—"}</DetailItem>
                     <DetailItem label="Branch">{viewStudent.branch || "—"}</DetailItem>
+                    <DetailItem label="Structure Name">{viewStudent.structureName || "—"}</DetailItem>
+                    {(() => {
+                      const matchedFs = feeStructures.find(
+                        (fs) => fs.structureName === viewStudent.structureName || fs.structureId === viewStudent.structureName
+                      )
+                      if (!matchedFs) return null
+                      return (
+                        <DetailItem label="Structure Fees">
+                          ₹{matchedFs.amount} ({matchedFs.frequency || "Monthly"} · {matchedFs.feeType || "Tuition"})
+                        </DetailItem>
+                      )
+                    })()}
                     <DetailItem label="Joining Date">{viewStudent.joiningDate || "—"}</DetailItem>
                     <DetailItem label="Fee Status">
                       <StatusBadge value={getStudentFeeStatus(viewStudent, receipts)} />
@@ -730,6 +853,7 @@ export default function StudentsPage() {
                 <TableHead>Student</TableHead>
                 <TableHead>Student ID</TableHead>
                 <TableHead>Branch</TableHead>
+                <TableHead>Structure Name</TableHead>
                 <TableHead>Group / Class</TableHead>
                 <TableHead>Course</TableHead>
                 <TableHead>Phone</TableHead>
@@ -741,7 +865,7 @@ export default function StudentsPage() {
             <TableBody>
               {students.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={11} className="p-0">
+                  <TableCell colSpan={12} className="p-0">
                     <EmptyState
                       icon={UsersIcon}
                       title="No students yet"
@@ -777,6 +901,15 @@ export default function StudentsPage() {
                         </span>
                       ) : (
                         <span className="text-xs font-medium text-destructive">Missing Branch</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {s.structureName ? (
+                        <span className="inline-flex items-center rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                          {s.structureName}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
                     <TableCell>{s.group}</TableCell>

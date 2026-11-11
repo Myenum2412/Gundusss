@@ -73,6 +73,8 @@ function formatDueDate(dueDate: string): string | null {
 
 interface FeeStructureRow {
   data: {
+    structureId?: string;
+    structureName?: string;
     amount?: string | number;
     courseGroup?: string;
     studentIds?: string[];
@@ -88,10 +90,21 @@ interface FeeStructureRow {
  * 5. the historical last-resort default.
  */
 function resolveStudentFeeAmount(
-  student: { studentId?: string; course?: string; group?: string },
+  student: { studentId?: string; course?: string; group?: string; structureName?: string },
   feeStructures: FeeStructureRow[],
   feeMap: Map<string, string>
 ): string {
+  if (student.structureName) {
+    const sName = student.structureName.trim().toLowerCase();
+    const matched = feeStructures.find(
+      (f) =>
+        f.data.structureName?.trim().toLowerCase() === sName ||
+        f.data.structureId?.trim().toLowerCase() === sName
+    );
+    if (matched?.data?.amount) {
+      return String(matched.data.amount);
+    }
+  }
   for (const structure of feeStructures) {
     if (structure.data.studentIds?.includes(student.studentId ?? '') && structure.data.amount) {
       return String(structure.data.amount);

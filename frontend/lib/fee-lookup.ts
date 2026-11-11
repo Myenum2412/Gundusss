@@ -24,8 +24,26 @@ export function resolveStudentFee(
   const studentId = student.studentId?.trim().toLowerCase()
   const studentGroup = student.group?.trim().toLowerCase()
   const studentCourse = student.course?.trim().toLowerCase()
+  const structureName = student.structureName?.trim().toLowerCase()
 
-  // 1. Direct studentId match in Fee Structures
+  // 1. Direct structureName match in Fee Structures
+  if (structureName) {
+    const matched = feeStructures.find(
+      (f) =>
+        f.structureName?.trim().toLowerCase() === structureName ||
+        f.structureId?.trim().toLowerCase() === structureName
+    )
+    if (matched && matched.amount) {
+      return {
+        amount: matched.amount,
+        source: `Fee Structure: ${matched.structureName || matched.structureId}`,
+        frequency: matched.frequency,
+        feeType: matched.feeType,
+      }
+    }
+  }
+
+  // 2. Direct studentId match in Fee Structures
   if (studentId) {
     for (const f of feeStructures) {
       if (f.studentIds && f.studentIds.some((id) => id.trim().toLowerCase() === studentId)) {

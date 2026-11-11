@@ -203,3 +203,72 @@ describe('WhatsApp Message Delivery & E2EE Decrypt Lock Prevention', () => {
     );
   });
 });
+
+describe('Student Structure Name & Fee Resolution Integration', () => {
+  const baseStudent = {
+    studentId: 'STU-002',
+    studentName: 'Structure Test Student',
+    dob: '2006-03-15',
+    gender: 'Female',
+    guardian: 'Parent Name',
+    phone: '9876543211',
+    email: 'stu2@example.com',
+    address: '456 College Ave',
+    group: 'Class 12',
+    course: 'Science',
+    branch: 'Downtown Branch',
+    joiningDate: '2026-02-01',
+    status: 'Active',
+  };
+
+  it('StudentSchema accepts valid structureName', () => {
+    const result = StudentSchema.safeParse({
+      ...baseStudent,
+      structureName: 'Class 12 Science Annual',
+    });
+    assert.strictEqual(result.success, true);
+    if (result.success) {
+      assert.strictEqual(result.data.structureName, 'Class 12 Science Annual');
+    }
+  });
+
+  it('frontend students page removed Fee Status select and added Structure Name select with fees preview', () => {
+    const pagePath = path.resolve(REPO_ROOT, 'frontend/app/dashboard/students/page.tsx');
+    const content = fs.readFileSync(pagePath, 'utf8');
+
+    // Fee Status select must be removed from the dialog form
+    assert.strictEqual(
+      content.includes('<FieldLabel htmlFor="status">Fee Status</FieldLabel>'),
+      false,
+      'Add Student dialog form must not contain Fee Status selector'
+    );
+
+    // Structure Name select must be present in the form
+    assert.ok(
+      content.includes('<FieldLabel htmlFor="structureName">Structure Name</FieldLabel>'),
+      'Add Student form must render Structure Name selector'
+    );
+
+    // Dynamic fee preview based on Structure Name must be present
+    assert.ok(
+      content.includes('Fees based on Structure Name:'),
+      'Add Student form must render fee details based on Structure Name'
+    );
+
+    // Table must have Structure Name column
+    assert.ok(
+      content.includes('<TableHead>Structure Name</TableHead>'),
+      'Students table must render Structure Name column'
+    );
+  });
+
+  it('frontend students store interface includes structureName property', () => {
+    const storePath = path.resolve(REPO_ROOT, 'frontend/lib/students-store.ts');
+    const content = fs.readFileSync(storePath, 'utf8');
+
+    assert.ok(
+      content.includes('structureName?: string;'),
+      'StoredStudent interface must define structureName'
+    );
+  });
+});

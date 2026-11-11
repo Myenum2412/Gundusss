@@ -15,6 +15,7 @@ export interface StoredStudent {
   branch: string;
   joiningDate: string;
   status: string;
+  structureName?: string;
 }
 
 // Database (through the API) is the only source of truth. Nothing is cached in

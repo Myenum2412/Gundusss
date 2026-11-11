@@ -40,6 +40,7 @@ export const StudentSchema = z.object({
     .max(100),
   joiningDate: str(50),
   status: str(50),
+  structureName: str(200).optional(),
 }).passthrough();
 
 const GroupSchema = z.object({
