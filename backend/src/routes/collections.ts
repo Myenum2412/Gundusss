@@ -55,9 +55,14 @@ const GroupSchema = z.object({
   studentIds: strArray,
 }).passthrough();
 
-const FeeStructureSchema = z.object({
+export const FeeStructureSchema = z.object({
   structureId: z.string().min(1).max(50),
   structureName: z.string().min(1).max(200),
+  branch: z
+    .string({ required_error: 'Branch is required' })
+    .trim()
+    .min(1, 'Branch is required. A fee structure cannot be created without a branch.')
+    .max(100),
   courseGroup: str(200),
   feeType: str(100),
   amount: str(50),
@@ -591,7 +596,14 @@ export async function collectionsRoutes(app: FastifyInstance) {
 
   app.put('/api/fee-structures', async (req, reply) => {
     const parsed = itemsSchema(FeeStructureSchema).safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'Invalid body' });
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const errorMsg = issue?.message || 'Invalid body';
+      return reply.code(400).send({
+        error: errorMsg,
+        details: parsed.error.flatten(),
+      });
+    }
     const profileId = await resolveProfileId(req);
     await replaceScopedRecords(
       DB_TABLES.feeStructures,

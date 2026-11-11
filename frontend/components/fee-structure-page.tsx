@@ -34,6 +34,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { loadStudents, type StoredStudent } from "@/lib/students-store"
 import { loadGroups, type StoredGroup } from "@/lib/groups-store"
+import { loadBranches, type StoredBranch } from "@/lib/branches-store"
 import {
   loadFeeStructures,
   saveFeeStructures,
@@ -56,6 +57,7 @@ const textareaClassName =
 
 const initialForm = {
   structureName: "",
+  branch: "",
   courseGroup: "",
   feeType: "Tuition Fee",
   amount: "",
@@ -108,6 +110,8 @@ export function FeeStructurePage() {
   const [availableGroups, setAvailableGroups] = useState<StoredGroup[]>([])
   const [receipts, setReceipts] = useState<StoredReceipt[]>([])
   const [dropdowns, setDropdowns] = useState<DropdownMap | null>(null)
+  const [branches, setBranches] = useState<StoredBranch[]>([])
+  const [formError, setFormError] = useState("")
   const [viewStructure, setViewStructure] = useState<FeeStructure | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
@@ -142,6 +146,9 @@ export function FeeStructurePage() {
   useLiveReload(reloadStructures)
 
   const reloadDependencies = useCallback(() => {
+    loadBranches()
+      .then(setBranches)
+      .catch((error) => console.error("Failed to load branches", error))
     loadStudents()
       .then(setAvailableStudents)
       .catch((error) => console.error("Failed to load students", error))
@@ -219,20 +226,30 @@ export function FeeStructurePage() {
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
+    const trimmedBranch = (form.branch || "").trim()
+    if (!trimmedBranch) {
+      setFormError("Branch is required. A fee structure cannot be created without a branch.")
+      return
+    }
+    setFormError("")
+    let assignedId = ""
     if (editingIndex !== null) {
-      const id = structures[editingIndex]?.structureId ?? nextStructureId(nextId)
+      assignedId = structures[editingIndex]?.structureId ?? nextStructureId(nextId)
       const updated: FeeStructure = {
         ...form,
-        structureId: id,
+        branch: trimmedBranch,
+        structureId: assignedId,
       }
       const nextList = structures.map((s, i) => (i === editingIndex ? updated : s))
       setStructures(nextList)
       void saveFeeStructures(nextList)
       setEditingIndex(null)
     } else {
+      assignedId = nextStructureId(nextId)
       const structure: FeeStructure = {
         ...form,
-        structureId: nextStructureId(nextId),
+        branch: trimmedBranch,
+        structureId: assignedId,
       }
       const nextList = [...structures, structure]
       setStructures(nextList)
@@ -240,6 +257,7 @@ export function FeeStructurePage() {
       setNextId((n) => n + 1)
     }
     setForm(initialForm)
+    setFormError("")
     setOpen(false)
   }
 
@@ -248,8 +266,12 @@ export function FeeStructurePage() {
     if (!s) return
     const { structureId, ...rest } = s
     void structureId
-    setForm(rest)
+    setForm({
+      ...rest,
+      branch: rest.branch || "",
+    })
     setEditingIndex(index)
+    setFormError("")
     setOpen(true)
   }
 
@@ -356,6 +378,12 @@ export function FeeStructurePage() {
               if (!v) {
                 setForm(initialForm)
                 setEditingIndex(null)
+                setFormError("")
+              } else if (editingIndex === null) {
+                const activeBranches = branches.filter((b) => b.status === "Active")
+                if (activeBranches.length === 1 && !form.branch) {
+                  setForm((f) => ({ ...f, branch: activeBranches[0].branchName }))
+                }
               }
               setOpen(v)
             }}
@@ -378,6 +406,11 @@ export function FeeStructurePage() {
 
               <form onSubmit={onSubmit} className="flex flex-col">
                 <div className="grid gap-4 px-6 py-5 md:grid-cols-2">
+                  {formError && (
+                    <div className="rounded-[10px] border border-destructive/20 bg-destructive/5 px-3.5 py-2.5 text-xs font-medium text-destructive md:col-span-2">
+                      {formError}
+                    </div>
+                  )}
                   <Field className="md:col-span-2">
                     <FieldLabel htmlFor="structureName">Structure Name</FieldLabel>
                     <Input
@@ -387,6 +420,41 @@ export function FeeStructurePage() {
                       onChange={set("structureName")}
                       required
                     />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="branch">
+                      Branch <span className="text-destructive">*</span>
+                    </FieldLabel>
+                    <select
+                      id="branch"
+                      className={selectClassName}
+                      value={form.branch}
+                      onChange={(e) => {
+                        setFormError("")
+                        set("branch")(e)
+                      }}
+                      required
+                    >
+                      <option value="" disabled>
+                        Select Branch (Required)
+                      </option>
+                      {branches
+                        .filter((b) => b.status === "Active")
+                        .map((b) => (
+                          <option key={b.branchId} value={b.branchName}>
+                            {b.branchName}
+                          </option>
+                        ))}
+                    </select>
+                    {branches.filter((b) => b.status === "Active").length === 0 ? (
+                      <p className="text-xs text-destructive">
+                        No active branches found. You must create an active branch on the Branches page before adding fee structures.
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground">
+                        Every fee structure must be assigned to an active branch.
+                      </p>
+                    )}
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="courseGroup">Course / Group</FieldLabel>
@@ -575,6 +643,25 @@ export function FeeStructurePage() {
                       >
                         Select all ({availableStudents.length})
                       </Button>
+                      {form.branch && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const b = form.branch.toLowerCase().trim()
+                            const branchIds = availableStudents
+                              .filter((s) => s.branch && s.branch.toLowerCase().trim() === b)
+                              .map((s) => s.studentId)
+                            setForm((f) => ({
+                              ...f,
+                              studentIds: Array.from(new Set([...f.studentIds, ...branchIds])),
+                            }))
+                          }}
+                        >
+                          Select all {form.branch} students
+                        </Button>
+                      )}
                       {form.courseGroup && (
                         <Button
                           type="button"
@@ -625,6 +712,11 @@ export function FeeStructurePage() {
                               <span className="font-mono text-xs text-muted-foreground">{s.studentId}</span>
                             </div>
                             <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
+                              {s.branch ? (
+                                <span className="rounded border bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
+                                  {s.branch}
+                                </span>
+                              ) : null}
                               {s.course && <span>{s.course}</span>}
                               {s.group ? (
                                 <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">
@@ -643,7 +735,10 @@ export function FeeStructurePage() {
                   <Button type="button" variant="outline" onClick={onCancel}>
                     Cancel
                   </Button>
-                  <Button type="submit">
+                  <Button
+                    type="submit"
+                    disabled={branches.filter((b) => b.status === "Active").length === 0 || !form.branch.trim()}
+                  >
                     {editingIndex !== null ? "Save Changes" : "Save Fee Structure"}
                   </Button>
                 </DialogFooter>
@@ -671,6 +766,7 @@ export function FeeStructurePage() {
                   <DetailList>
                     <DetailItem label="Structure Name">{viewStructure.structureName}</DetailItem>
                     <DetailItem label="Structure ID">{viewStructure.structureId}</DetailItem>
+                    <DetailItem label="Branch">{viewStructure.branch || "—"}</DetailItem>
                     <DetailItem label="Course / Group">{viewStructure.courseGroup || "—"}</DetailItem>
                     <DetailItem label="Fee Type">{viewStructure.feeType || "—"}</DetailItem>
                     <DetailItem label="Amount">{viewStructure.amount ? `₹ ${viewStructure.amount}` : "—"}</DetailItem>
@@ -748,6 +844,7 @@ export function FeeStructurePage() {
                 <TableHead className="w-12">#</TableHead>
                 <TableHead>Structure ID</TableHead>
                 <TableHead>Structure Name</TableHead>
+                <TableHead>Branch</TableHead>
                 <TableHead>Course / Group</TableHead>
                 <TableHead>Fee Type</TableHead>
                 <TableHead>Amount (₹)</TableHead>
@@ -758,7 +855,7 @@ export function FeeStructurePage() {
             <TableBody>
               {structures.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={9} className="p-0">
+                  <TableCell colSpan={10} className="p-0">
                     <EmptyState
                       icon={ClipboardListIcon}
                       title="No fee structures yet"
@@ -787,6 +884,15 @@ export function FeeStructurePage() {
                     <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">{s.structureId}</TableCell>
                     <TableCell className="font-medium text-foreground">{s.structureName}</TableCell>
+                    <TableCell>
+                      {s.branch ? (
+                        <span className="inline-flex items-center rounded-md border bg-muted/40 px-2 py-0.5 text-xs font-medium">
+                          {s.branch}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                     <TableCell>{s.courseGroup}</TableCell>
                     <TableCell>{s.feeType}</TableCell>
                     <TableCell className="tabular-nums">₹ {s.amount}</TableCell>

@@ -4,6 +4,7 @@ import { trackSync } from "./live";
 export interface StoredFeeStructure {
   structureId: string;
   structureName: string;
+  branch: string;
   courseGroup: string;
   feeType: string;
   amount: string;
