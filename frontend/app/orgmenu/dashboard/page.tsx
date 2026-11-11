@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   ArrowRightIcon,
@@ -11,8 +11,8 @@ import {
   ExternalLinkIcon,
   LayoutDashboardIcon,
   Loader2Icon,
-  LogOutIcon,
-  ServerIcon,
+  RefreshCwIcon,
+  SearchIcon,
   ShieldAlertIcon,
   ShieldCheckIcon,
   StoreIcon,
@@ -20,9 +20,11 @@ import {
   UsersIcon,
 } from "lucide-react"
 
+import { DashboardShell, PageHeader } from "@/components/dashboard-shell"
 import { useAuth } from "@/components/auth-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { cn } from "cn"
 import {
   DropdownMenu,
@@ -40,11 +42,7 @@ import {
 } from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
 import { listProfiles, type ProfileSummary } from "@/lib/profiles"
-import {
-  clearActiveProfileId,
-  getToken,
-  setActiveProfileId,
-} from "@/lib/session"
+import { clearActiveProfileId, getToken, setActiveProfileId } from "@/lib/session"
 
 function formatDate(value: string) {
   if (!value) return "—"
@@ -57,7 +55,28 @@ function formatDate(value: string) {
   })
 }
 
+function timestamp(value: string) {
+  const time = new Date(value).getTime()
+  return Number.isNaN(time) ? 0 : time
+}
+
+function profileInitials(name: string) {
+  const words = name.trim().split(/\s+/).filter(Boolean)
+  if (words.length >= 2) {
+    return (words[0][0] + words[1][0]).toUpperCase()
+  }
+  return (words[0] ?? "?").slice(0, 2).toUpperCase()
+}
+
 type GatewaySection = "control-center" | "merchant-admin"
+
+type WorkspaceFilter = "all" | "system" | "regular"
+
+const WORKSPACE_FILTERS: { id: WorkspaceFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "system", label: "System" },
+  { id: "regular", label: "Regular" },
+]
 
 // The gateway console (Control Center & Logs / Merchant Admin Hub) is served privately under the fees API origin
 // (https://api.myenum.in/youpi-admin/) and is gated per-request by the fees
@@ -100,18 +119,22 @@ function CopyLinkButton({ value }: { value: string }) {
       onClick={() => void copy()}
       title={copied ? "Copied" : "Copy payment link"}
     >
-      {copied ? <CheckIcon /> : <CopyIcon />}
+      {copied ? <CheckIcon className="text-emerald-600" /> : <CopyIcon />}
     </Button>
   )
 }
 
 export default function OrgMenuDashboardPage() {
   const router = useRouter()
-  const { user, profile, activeProfile, isSuper, signOut } = useAuth()
+  const { profile, activeProfile, isSuper } = useAuth()
   const [profiles, setProfiles] = useState<ProfileSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [query, setQuery] = useState("")
+  const [filter, setFilter] = useState<WorkspaceFilter>("all")
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [copiedLinks, setCopiedLinks] = useState(false)
   // Session token (first-party cookie) — read safely.
   const [sessionToken, setSessionToken] = useState<string | null>(() => (typeof window !== "undefined" ? getToken() : null))
   const [gatewaySection, setGatewaySection] = useState<GatewaySection>("control-center")
@@ -119,8 +142,6 @@ export default function OrgMenuDashboardPage() {
     setSessionToken(getToken())
   }, [])
   const gatewayConsoleSrc = gatewayConsoleUrl(sessionToken, gatewaySection)
-
-  const viewingOther = activeProfile.profileId !== profile.profileId
 
   useEffect(() => {
     if (!isSuper) {
@@ -153,19 +174,80 @@ export default function OrgMenuDashboardPage() {
     return () => {
       active = false
     }
-  }, [isSuper, router])
+  }, [isSuper, router, refreshKey])
 
   function openWorkspace(profileId: string) {
     setActiveProfileId(profileId)
     router.push("/dashboard")
   }
 
-  function exitView() {
-    clearActiveProfileId()
-    if (typeof window !== "undefined") window.location.reload()
+  const totalUsers = profiles.reduce((sum, item) => sum + item.userCount, 0)
+  const totalPaymentLinks = profiles.filter((item) => Boolean(item.paymentUrl)).length
+
+  const filteredProfiles = useMemo(() => {
+    const term = query.trim().toLowerCase()
+    return profiles
+      .filter((item) => {
+        if (filter === "system" && !item.super) return false
+        if (filter === "regular" && item.super) return false
+        if (!term) return true
+        return [item.name, item.profileId, item.ownerName, item.ownerEmail, item.paymentUrl]
+          .filter(Boolean)
+          .some((value) => value.toLowerCase().includes(term))
+      })
+      .sort((a, b) => timestamp(b.createdAt) - timestamp(a.createdAt))
+  }, [profiles, query, filter])
+
+  const allFilteredSelected =
+    filteredProfiles.length > 0 &&
+    filteredProfiles.every((item) => selectedIds.has(item.profileId))
+
+  function toggleAllFiltered(checked: boolean) {
+    const next = new Set(selectedIds)
+    filteredProfiles.forEach((item) => {
+      if (checked) next.add(item.profileId)
+      else next.delete(item.profileId)
+    })
+    setSelectedIds(next)
   }
 
-  const totalUsers = profiles.reduce((sum, item) => sum + item.userCount, 0)
+  const selectedLinks = filteredProfiles
+    .filter((item) => selectedIds.has(item.profileId) && item.paymentUrl)
+    .map((item) => item.paymentUrl)
+
+  async function copySelectedLinks() {
+    if (selectedLinks.length === 0) return
+    try {
+      await navigator.clipboard.writeText(selectedLinks.join("\n"))
+      setCopiedLinks(true)
+      window.setTimeout(() => setCopiedLinks(false), 1600)
+    } catch {
+      // Clipboard access can be blocked; links stay visible in the table.
+    }
+  }
+
+  const viewingOwnWorkspace = activeProfile.profileId === profile.profileId
+
+  const stats = [
+    {
+      label: "Workspaces",
+      value: loading ? "—" : String(profiles.length),
+      hint: "Registered organizations",
+      icon: Building2Icon,
+    },
+    {
+      label: "User accounts",
+      value: loading ? "—" : String(totalUsers),
+      hint: "Across every workspace",
+      icon: UsersIcon,
+    },
+    {
+      label: "Payment links",
+      value: loading ? "—" : String(totalPaymentLinks),
+      hint: "Live public checkout pages",
+      icon: ExternalLinkIcon,
+    },
+  ]
 
   if (!isSuper) {
     return (
@@ -179,404 +261,469 @@ export default function OrgMenuDashboardPage() {
   }
 
   return (
-    <div className="min-h-svh bg-background">
-      <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur supports-backdrop-filter:bg-background/60">
-        <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 md:px-6">
-          <span className="flex size-8 items-center justify-center rounded-[10px] bg-primary text-primary-foreground shadow-sm">
-            <Building2Icon className="size-4" />
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-[13px] font-semibold tracking-tight">
-              Organization console
-            </p>
-            <p className="truncate text-[11px] text-muted-foreground">
-              {user.email}
-            </p>
-          </div>
-          <Badge variant="secondary" className="ml-1 hidden sm:inline-flex">
-            <ShieldCheckIcon className="size-3" />
+    <DashboardShell
+      trail={[
+        { label: "Dashboard", href: "/dashboard" },
+        { label: "Organizations" },
+      ]}
+      actions={
+        <>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setRefreshKey((key) => key + 1)}
+            disabled={loading}
+          >
+            <RefreshCwIcon className={cn(loading && "animate-spin")} />
+            Refresh
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              clearActiveProfileId()
+              router.push("/dashboard")
+            }}
+          >
+            <LayoutDashboardIcon />
+            My workspace
+          </Button>
+        </>
+      }
+    >
+      <PageHeader
+        title="Organization console"
+        description="Open any workspace to inspect its students, fees, receipts, and settings. Every workspace is isolated — regular accounts only ever see their own."
+        meta={
+          <Badge variant="secondary" className="gap-1">
+            <ShieldCheckIcon />
             Super admin
           </Badge>
-          <div className="ml-auto flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                clearActiveProfileId()
-                router.push("/dashboard")
-              }}
+        }
+        liveSlot={
+          <span className="hidden items-center gap-1.5 rounded-full border bg-muted/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex">
+            <span className="size-1.5 rounded-full bg-emerald-500" />
+            Live data
+          </span>
+        }
+      />
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {stats.map((stat) => {
+          const Icon = stat.icon
+          return (
+            <section
+              key={stat.label}
+              className="rounded-xl border bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
             >
-              <LayoutDashboardIcon />
-              My workspace
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => void signOut()}
-            >
-              <LogOutIcon />
-              Sign out
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto flex max-w-6xl flex-col gap-5 px-4 py-6 md:px-6 md:py-8">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">
-            Every workspace, one place
-          </h1>
-          <p className="mt-1 max-w-2xl text-[13px] text-muted-foreground">
-            Open any organization to inspect its students, fees, receipts, and
-            settings. Regular accounts only ever see their own workspace.
-          </p>
-        </div>
-
-        {viewingOther && (
-          <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-muted/40 px-4 py-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-medium">
-                You are viewing {activeProfile.name}{" "}
-                <span className="font-mono text-xs text-muted-foreground">
-                  ({activeProfile.profileId})
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                    {stat.label}
+                  </p>
+                  <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">
+                    {stat.value}
+                  </p>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                    {stat.hint}
+                  </p>
+                </div>
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <Icon className="size-4" />
                 </span>
-              </p>
-              <p className="text-xs text-muted-foreground">
-                That workspace&apos;s data is shown across the dashboard.
-              </p>
-            </div>
-            <Button variant="outline" size="sm" onClick={exitView}>
-              Exit view
-            </Button>
-          </div>
-        )}
-
-        <div className="grid gap-3 sm:grid-cols-3">
-          <section className="rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-            <div className="flex items-center gap-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-              <Building2Icon className="size-3.5" />
-              Workspaces
-            </div>
-            <p className="mt-2 text-2xl font-semibold tabular-nums">
-              {loading ? "—" : profiles.length}
-            </p>
-          </section>
-          <section className="rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-            <div className="flex items-center gap-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-              <UsersIcon className="size-3.5" />
-              User accounts
-            </div>
-            <p className="mt-2 text-2xl font-semibold tabular-nums">
-              {loading ? "—" : totalUsers}
-            </p>
-          </section>
-          <section className="rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-            <div className="flex items-center gap-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-              <ExternalLinkIcon className="size-3.5" />
-              Payment links
-            </div>
-            <p className="mt-2 text-2xl font-semibold tabular-nums">
-              {loading ? "—" : profiles.length}
-            </p>
-          </section>
-        </div>
-
-        {error && (
-          <p className="rounded-[10px] border border-destructive/20 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">
-            {error}
-          </p>
-        )}
-
-        <div className="overflow-hidden rounded-2xl border bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-          <div className="flex items-center justify-between border-b px-4 py-3">
-            <div>
-              <h2 className="text-[13px] font-semibold tracking-tight">
-                Organizations
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                Newest signups first · payment links follow the profile ID
-              </p>
-            </div>
-            {loading && (
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Loader2Icon className="size-3.5 animate-spin" />
-                Loading
               </div>
-            )}
-          </div>
+            </section>
+          )
+        })}
 
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-10 px-3">
-                    <Checkbox
-                      checked={profiles.length > 0 && profiles.every((p) => selectedIds.has(p.profileId))}
-                      onCheckedChange={(checked) => {
-                        if (checked) {
-                          setSelectedIds(new Set(profiles.map((p) => p.profileId)))
-                        } else {
-                          setSelectedIds(new Set())
-                        }
-                      }}
-                      aria-label="Select all workspaces"
-                    />
-                  </TableHead>
-                  <TableHead>Organization</TableHead>
-                  <TableHead>Profile ID</TableHead>
-                  <TableHead>Owner</TableHead>
-                  <TableHead className="text-right">Users</TableHead>
-                  <TableHead>Payment link</TableHead>
-                  <TableHead>Joined</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {!loading && profiles.length === 0 ? (
-                  <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={8} className="px-6 py-12 text-center">
-                      <p className="text-sm font-medium">No workspaces yet</p>
-                      <p className="mx-auto mt-1 max-w-sm text-[13px] text-muted-foreground">
-                        Workspaces appear here as soon as someone signs up.
-                      </p>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  profiles.map((item) => {
-                    const isViewing =
-                      activeProfile.profileId === item.profileId &&
-                      viewingOther
-                    return (
-                      <TableRow
-                        key={item.profileId}
-                        data-state={selectedIds.has(item.profileId) ? "selected" : undefined}
-                      >
-                        <TableCell className="w-10 px-3">
-                          <Checkbox
-                            checked={selectedIds.has(item.profileId)}
-                            onCheckedChange={(checked) => {
-                              const next = new Set(selectedIds)
-                              if (checked) next.add(item.profileId)
-                              else next.delete(item.profileId)
-                              setSelectedIds(next)
-                            }}
-                            aria-label={`Select ${item.name}`}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/60 text-muted-foreground">
-                              <Building2Icon className="size-3.5" />
-                            </span>
-                            <div className="min-w-0">
-                              <p className="truncate text-[13px] font-medium">
-                                {item.name}
-                              </p>
-                              {item.super && (
-                                <Badge variant="secondary" className="mt-0.5">
-                                  System
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <code className="rounded-md border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]">
-                            {item.profileId}
-                          </code>
-                        </TableCell>
-                        <TableCell>
-                          <p className="text-[13px] font-medium">
-                            {item.ownerName || "—"}
-                          </p>
-                          <p className="truncate text-xs text-muted-foreground">
-                            {item.ownerEmail}
-                          </p>
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {item.userCount}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            <a
-                              href={item.paymentUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="flex min-w-0 items-center gap-1 truncate text-[12px] font-medium underline underline-offset-4"
-                            >
-                              <span className="max-w-[220px] truncate">
-                                {item.paymentUrl}
-                              </span>
-                              <ExternalLinkIcon className="size-3 shrink-0" />
-                            </a>
-                            <CopyLinkButton value={item.paymentUrl} />
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground tabular-nums">
-                          {formatDate(item.createdAt)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger
-                                render={
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    aria-label={`Actions for ${item.name}`}
-                                    title="Actions"
-                                    className="size-8 text-muted-foreground hover:text-foreground"
-                                  />
-                                }
-                              >
-                                <EllipsisIcon className="size-4" />
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" side="bottom" className="w-48">
-                                <DropdownMenuItem onClick={() => openWorkspace(item.profileId)}>
-                                  <ArrowRightIcon className="size-4 text-primary" />
-                                  <span>{isViewing ? "Viewing Workspace" : "Open Workspace"}</span>
-                                </DropdownMenuItem>
-                                {item.paymentUrl && (
-                                  <>
-                                    <DropdownMenuItem onClick={() => window.open(item.paymentUrl, "_blank")}>
-                                      <ExternalLinkIcon className="size-4 text-muted-foreground" />
-                                      <span>Visit Payment Link</span>
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={() => void navigator.clipboard.writeText(item.paymentUrl)}
-                                    >
-                                      <CopyIcon className="size-4 text-muted-foreground" />
-                                      <span>Copy Payment Link</span>
-                                    </DropdownMenuItem>
-                                  </>
-                                )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })
-                )}
-              </TableBody>
-            </Table>
-            {profiles.length > 0 && (
-              <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
-                <span>
-                  {profiles.length} workspace{profiles.length === 1 ? "" : "s"}
-                  {selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
-                </span>
-                <span className="hidden sm:block">Multi-tenant institution hierarchy</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Payment Gateway Console (Control Center & Logs / Merchant Admin Hub) — private, session-gated super-admin console.
-            Keep this block in orgmenu ONLY: it must never reappear in
-            workspace settings. */}
-        <section className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-[14px] font-semibold tracking-tight">
-                  {gatewaySection === "control-center"
-                    ? "Payment Gateway Control Center (Logs)"
-                    : "Payment Gateway Merchant Admin Hub"}
-                </h2>
-                <Badge variant="secondary" className="text-[11px] font-medium">
-                  {gatewaySection === "control-center" ? "Host Processes & Logs" : "Operations, VPAs & Cashier"}
+        <section className="rounded-xl border bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                Viewing now
+              </p>
+              <p className="mt-2 truncate text-xl font-semibold tracking-tight">
+                {activeProfile.name}
+              </p>
+              <div className="mt-1.5 flex min-w-0 items-center gap-1.5">
+                <code className="truncate rounded-md border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                  {activeProfile.profileId}
+                </code>
+                <Badge variant={viewingOwnWorkspace ? "outline" : "secondary"}>
+                  {viewingOwnWorkspace ? "Own workspace" : "Inspecting"}
                 </Badge>
               </div>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {gatewaySection === "control-center"
-                  ? "Real-time process supervisor (ports 6100, 7000, 6001, 6003, etc.), service health, and aggregate live terminal logs."
-                  : "Receiving accounts (VPAs), slots, live payment observers, POS cashier till desk, and payment ledger."}
-              </p>
             </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center rounded-lg border bg-muted/50 p-0.5 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setGatewaySection("control-center")}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition",
-                    gatewaySection === "control-center"
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  )}
-                >
-                  <TerminalIcon className="size-3.5" />
-                  <span>Control Center (Logs)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setGatewaySection("merchant-admin")}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition",
-                    gatewaySection === "merchant-admin"
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  )}
-                >
-                  <StoreIcon className="size-3.5" />
-                  <span>Merchant Admin Hub</span>
-                </button>
-              </div>
-
-              {gatewayConsoleSrc && (
-                <a
-                  href={gatewayConsoleSrc}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
-                >
-                  <ShieldAlertIcon className="size-3.5" />
-                  <span>
-                    {gatewaySection === "control-center"
-                      ? "Open Control Center (Logs)"
-                      : "Open Merchant Admin Hub"}
-                  </span>
-                  <ExternalLinkIcon className="size-3" />
-                </a>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-400">
-            <span>
-              {gatewaySection === "control-center"
-                ? "The Control Center streams live logs via Server-Sent Events (SSE) and supervises local gateway daemons. Session is authenticated automatically."
-                : "The Merchant Admin Hub provides complete operational control over receiving accounts, slots, cashier counter desk, and payment verification."}
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <LayoutDashboardIcon className="size-4" />
             </span>
-            <span className="hidden font-mono text-[11px] opacity-75 sm:inline">
-              Super Admin Session Active
-            </span>
-          </div>
-
-          <div className="overflow-hidden rounded-2xl border bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-            {gatewayConsoleSrc ? (
-              <iframe
-                key={gatewaySection}
-                src={gatewayConsoleSrc}
-                title={
-                  gatewaySection === "control-center"
-                    ? "Payment Gateway Control Center (Logs)"
-                    : "Payment Gateway Merchant Admin Hub"
-                }
-                className="h-[750px] w-full border-0"
-                loading="lazy"
-              />
-            ) : (
-              <p className="p-6 text-sm text-muted-foreground">
-                Sign in as super admin to load the payment gateway console.
-              </p>
-            )}
           </div>
         </section>
-      </main>
-    </div>
+      </div>
+
+      {error && (
+        <p className="rounded-[10px] border border-destructive/20 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">
+          {error}
+        </p>
+      )}
+
+      <div className="data-table-surface min-h-[320px]">
+        <div className="flex shrink-0 flex-col gap-3 border-b px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <h2 className="text-[13px] font-semibold tracking-tight">
+              Organizations
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {loading
+                ? "Loading workspaces…"
+                : `${filteredProfiles.length} of ${profiles.length} workspace${profiles.length === 1 ? "" : "s"} shown`}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search organizations…"
+                aria-label="Search organizations"
+                className="h-8 w-full pl-8 text-[13px] sm:w-60"
+              />
+            </div>
+            <div className="flex items-center rounded-lg border bg-muted/40 p-0.5 text-xs">
+              {WORKSPACE_FILTERS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setFilter(option.id)}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-xs font-medium transition",
+                    filter === option.id
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="data-table-scroll">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-10 px-3">
+                  <Checkbox
+                    checked={allFilteredSelected}
+                    onCheckedChange={(checked) => toggleAllFiltered(Boolean(checked))}
+                    aria-label="Select all workspaces"
+                  />
+                </TableHead>
+                <TableHead>Organization</TableHead>
+                <TableHead>Profile ID</TableHead>
+                <TableHead>Owner</TableHead>
+                <TableHead className="text-right">Users</TableHead>
+                <TableHead>Payment link</TableHead>
+                <TableHead>Joined</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading && profiles.length === 0 ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={8} className="px-6 py-12 text-center">
+                    <div className="flex items-center justify-center gap-2 text-[13px] text-muted-foreground">
+                      <Loader2Icon className="size-4 animate-spin" />
+                      Loading workspaces…
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : filteredProfiles.length === 0 ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={8} className="px-6 py-12 text-center">
+                    <p className="text-sm font-medium">
+                      {profiles.length === 0 ? "No workspaces yet" : "No matching workspaces"}
+                    </p>
+                    <p className="mx-auto mt-1 max-w-sm text-[13px] text-muted-foreground">
+                      {profiles.length === 0
+                        ? "Workspaces appear here as soon as someone signs up."
+                        : "Try a different search term or filter."}
+                    </p>
+                    {profiles.length > 0 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-4"
+                        onClick={() => {
+                          setQuery("")
+                          setFilter("all")
+                        }}
+                      >
+                        Clear filters
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filteredProfiles.map((item) => (
+                  <TableRow
+                    key={item.profileId}
+                    data-state={selectedIds.has(item.profileId) ? "selected" : undefined}
+                  >
+                    <TableCell className="w-10 px-3">
+                      <Checkbox
+                        checked={selectedIds.has(item.profileId)}
+                        onCheckedChange={(checked) => {
+                          const next = new Set(selectedIds)
+                          if (checked) next.add(item.profileId)
+                          else next.delete(item.profileId)
+                          setSelectedIds(next)
+                        }}
+                        aria-label={`Select ${item.name}`}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2.5">
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-[11px] font-semibold text-primary">
+                          {profileInitials(item.name)}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-[13px] font-medium">
+                            {item.name}
+                          </p>
+                          <div className="mt-0.5 flex items-center gap-1.5">
+                            {item.super ? (
+                              <Badge variant="secondary">
+                                System
+                              </Badge>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground">
+                                Workspace
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <code className="rounded-md border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                        {item.profileId}
+                      </code>
+                    </TableCell>
+                    <TableCell>
+                      <p className="text-[13px] font-medium">
+                        {item.ownerName || "—"}
+                      </p>
+                      <p className="max-w-[220px] truncate text-xs text-muted-foreground">
+                        {item.ownerEmail || "—"}
+                      </p>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
+                        <UsersIcon className="size-3.5" />
+                        {item.userCount}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      {item.paymentUrl ? (
+                        <div className="flex items-center gap-1">
+                          <a
+                            href={item.paymentUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex min-w-0 items-center gap-1 truncate text-[12px] font-medium underline underline-offset-4"
+                          >
+                            <span className="max-w-[200px] truncate">
+                              {item.paymentUrl}
+                            </span>
+                            <ExternalLinkIcon className="size-3 shrink-0" />
+                          </a>
+                          <CopyLinkButton value={item.paymentUrl} />
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground tabular-nums">
+                      {formatDate(item.createdAt)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          onClick={() => openWorkspace(item.profileId)}
+                        >
+                          Open
+                          <ArrowRightIcon />
+                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            render={
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={`Actions for ${item.name}`}
+                                title="Actions"
+                                className="size-8 text-muted-foreground hover:text-foreground"
+                              />
+                            }
+                          >
+                            <EllipsisIcon className="size-4" />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" side="bottom" className="w-48">
+                            <DropdownMenuItem onClick={() => openWorkspace(item.profileId)}>
+                              <ArrowRightIcon className="size-4 text-primary" />
+                              <span>Open Workspace</span>
+                            </DropdownMenuItem>
+                            {item.paymentUrl && (
+                              <>
+                                <DropdownMenuItem onClick={() => window.open(item.paymentUrl, "_blank")}>
+                                  <ExternalLinkIcon className="size-4 text-muted-foreground" />
+                                  <span>Visit Payment Link</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => void navigator.clipboard.writeText(item.paymentUrl)}
+                                >
+                                  <CopyIcon className="size-4 text-muted-foreground" />
+                                  <span>Copy Payment Link</span>
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+
+        {profiles.length > 0 && (
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
+            <span>
+              {profiles.length} workspace{profiles.length === 1 ? "" : "s"}
+              {selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
+            </span>
+            <div className="flex items-center gap-2">
+              {selectedLinks.length > 0 && (
+                <Button variant="outline" size="xs" onClick={() => void copySelectedLinks()}>
+                  {copiedLinks ? <CheckIcon className="text-emerald-600" /> : <CopyIcon />}
+                  {copiedLinks
+                    ? "Copied"
+                    : `Copy ${selectedLinks.length} payment link${selectedLinks.length === 1 ? "" : "s"}`}
+                </Button>
+              )}
+              <span className="hidden sm:block">Multi-tenant institution hierarchy</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Payment Gateway Console (Control Center & Logs / Merchant Admin Hub) — private, session-gated super-admin console.
+          Keep this block in orgmenu ONLY: it must never reappear in
+          workspace settings. */}
+      <section className="overflow-hidden rounded-xl border bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="flex size-7 items-center justify-center rounded-lg bg-slate-700 text-white">
+                <TerminalIcon className="size-3.5" />
+              </span>
+              <h2 className="text-[13px] font-semibold tracking-tight">
+                {gatewaySection === "control-center"
+                  ? "Payment Gateway Control Center"
+                  : "Payment Gateway Merchant Admin Hub"}
+              </h2>
+              <Badge variant="outline" className="text-[10px] font-medium">
+                {gatewaySection === "control-center" ? "Logs & Processes" : "Operations & Cashier"}
+              </Badge>
+            </div>
+            <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
+              {gatewaySection === "control-center"
+                ? "Real-time process supervisor (ports 6100, 7000, 6001, 6003, etc.), service health, and aggregate live terminal logs."
+                : "Receiving accounts (VPAs), slots, live payment observers, POS cashier till desk, and payment ledger."}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center rounded-lg border bg-muted/50 p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setGatewaySection("control-center")}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition",
+                  gatewaySection === "control-center"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <TerminalIcon className="size-3.5" />
+                <span>Control Center</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setGatewaySection("merchant-admin")}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition",
+                  gatewaySection === "merchant-admin"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <StoreIcon className="size-3.5" />
+                <span>Merchant Admin</span>
+              </button>
+            </div>
+
+            {gatewayConsoleSrc && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(gatewayConsoleSrc, "_blank", "noreferrer")}
+              >
+                <ShieldAlertIcon />
+                Open in new tab
+                <ExternalLinkIcon />
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-b border-emerald-500/20 bg-emerald-500/5 px-4 py-2 text-xs text-emerald-700 dark:text-emerald-400">
+          <CheckIcon className="size-3.5 shrink-0" />
+          <span className="min-w-0 flex-1">
+            {gatewaySection === "control-center"
+              ? "The Control Center streams live logs via Server-Sent Events (SSE) and supervises local gateway daemons. Session is authenticated automatically."
+              : "The Merchant Admin Hub provides complete operational control over receiving accounts, slots, cashier counter desk, and payment verification."}
+          </span>
+          <span className="hidden font-mono text-[10px] opacity-75 sm:inline">
+            Super admin session active
+          </span>
+        </div>
+
+        {gatewayConsoleSrc ? (
+          <iframe
+            key={gatewaySection}
+            src={gatewayConsoleSrc}
+            title={
+              gatewaySection === "control-center"
+                ? "Payment Gateway Control Center (Logs)"
+                : "Payment Gateway Merchant Admin Hub"
+            }
+            className="h-[750px] w-full border-0"
+            loading="lazy"
+          />
+        ) : (
+          <p className="p-6 text-sm text-muted-foreground">
+            Sign in as super admin to load the payment gateway console.
+          </p>
+        )}
+      </section>
+    </DashboardShell>
   )
 }
