@@ -1,7 +1,17 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import path from 'node:path';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { getWaState, startWa, logoutWa, sendWaMessage, waSessionKeyFor, findAvailableWaSessionKey } from '../whatsapp.js';
+import {
+  getWaState,
+  startWa,
+  logoutWa,
+  sendWaMessage,
+  waSessionKeyFor,
+  findAvailableWaSessionKey,
+  hasWaCredentials,
+} from '../whatsapp.js';
 
 const AttachmentSchema = z
   .object({
@@ -68,6 +78,47 @@ export async function whatsappRoutes(app: FastifyInstance) {
       return { data: { ...state, status: 'starting' as const } };
     }
     return { data: state };
+  });
+
+  // GET /api/whatsapp/server-status — full inspection of on-disk WhatsApp state on the server
+  app.get('/api/whatsapp/server-status', async (req, reply) => {
+    if (req.auth?.super !== true) {
+      return reply.code(403).send({ error: 'Super-admin access required.' });
+    }
+    const authDir = process.env.WA_AUTH_DIR || path.resolve(process.cwd(), '.baileys_auth');
+    let dirEntries: any[] = [];
+    try {
+      if (existsSync(authDir)) {
+        dirEntries = readdirSync(authDir).map((e) => {
+          const sub = path.join(authDir, e);
+          let isDir = false;
+          let hasCreds = false;
+          try {
+            isDir = statSync(sub).isDirectory();
+            hasCreds = existsSync(path.join(sub, 'creds.json'));
+          } catch {}
+          return { name: e, isDir, hasCreds };
+        });
+      }
+    } catch (err: any) {
+      dirEntries = [{ error: err?.message }];
+    }
+
+    const availableKey = findAvailableWaSessionKey();
+    const developerKey = waSessionKeyFor('developer@myenum.in');
+    const developerHasCreds = hasWaCredentials(developerKey);
+    const developerState = getWaState('developer@myenum.in');
+
+    return {
+      data: {
+        serverTime: new Date().toISOString(),
+        authDir,
+        dirEntries,
+        availableKey,
+        developerHasCreds,
+        developerState,
+      },
+    };
   });
 
   // POST /api/whatsapp/start — starts the caller's own WhatsApp session.
