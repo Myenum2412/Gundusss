@@ -310,6 +310,66 @@ describe('Payment API End-to-End HTTP Integration Tests', () => {
     assert.ok(stateRes.body.upiUri.includes('customstore%40okhdfcbank') || stateRes.body.upiUri.includes('customstore@okhdfcbank'));
   });
 
+  test('Trusted workspace UPI override wins over the shared gateway VPA', async () => {
+    // The gateway-wide active account is shared by every workspace.
+    const sharedRes = await request('/api/v1/admin/upi-settings', {
+      method: 'POST',
+      body: { upiId: 'shared-gateway@okhdfcbank', payeeName: 'Shared Gateway' }
+    });
+    assert.equal(sharedRes.status, 200);
+
+    const payRes = await request('/api/v1/payments', {
+      method: 'POST',
+      headers: merchantHeaders(merchantSecret),
+      body: {
+        orderId: 'WORKSPACE-UPI-ORD-1',
+        amount: '125.00',
+        autoActivate: true,
+        metadata: { upiId: 'ss.workspace@oksbi', payeeName: 'SS Workspace' }
+      }
+    });
+    assert.equal(payRes.status, 201);
+
+    const stateRes = await request(`/api/v1/checkout/${payRes.body.paymentId}/state`);
+    assert.equal(stateRes.status, 200);
+    assert.equal(stateRes.body.payeeVpa, 'ss.workspace@oksbi');
+    assert.equal(stateRes.body.payeeName, 'SS Workspace');
+  });
+
+  test('Trusted workspace UPI override rejects a placeholder instead of falling back', async () => {
+    const res = await request('/api/v1/payments', {
+      method: 'POST',
+      headers: merchantHeaders(merchantSecret),
+      body: {
+        orderId: 'WORKSPACE-UPI-PLACEHOLDER-1',
+        amount: '10.00',
+        metadata: { upiId: 'merchant@upi' }
+      }
+    });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 'UPI_NOT_CONFIGURED');
+    assert.match(res.body.error, /will not substitute another one/);
+  });
+
+  test('Untrusted callers cannot redirect a checkout to their own UPI ID', async () => {
+    const payRes = await request('/api/v1/payments', {
+      method: 'POST',
+      headers: { Authorization: '' },
+      body: {
+        orderId: 'WORKSPACE-UPI-UNTRUSTED-1',
+        amount: '15.00',
+        metadata: { upiId: 'attacker@okhdfcbank', payeeName: 'Attacker' }
+      }
+    });
+    assert.equal(payRes.status, 201);
+
+    const stateRes = await request(`/api/v1/checkout/${payRes.body.paymentId}/state`);
+    assert.equal(stateRes.status, 200);
+    assert.equal(stateRes.body.payeeVpa, 'shared-gateway@okhdfcbank');
+    assert.notEqual(stateRes.body.payeeVpa, 'attacker@okhdfcbank');
+  });
+
   test('Payment method toggles and white-label branding persistence', async () => {
     // 1. Merchant disables CASH_COUNTER and customizes all white-label branding elements
     const settingsRes = await request('/api/v1/admin/merchant-settings', {
