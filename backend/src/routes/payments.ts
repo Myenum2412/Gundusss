@@ -872,6 +872,7 @@ export async function createGatewayCheckout(
 
   // UPI checkouts use only this workspace's own saved UPI ID.
   let effectiveUpiId = '';
+  let effectivePayeeName = '';
   if (method === 'UPI') {
     const upi = await getEffectiveCheckoutUpi(input.profileId);
     if (!upi.ready) {
@@ -883,6 +884,7 @@ export async function createGatewayCheckout(
       );
     }
     if (upi.upiId) effectiveUpiId = upi.upiId;
+    if (upi.payeeName) effectivePayeeName = upi.payeeName;
   }
 
   const orderId =
@@ -934,6 +936,7 @@ export async function createGatewayCheckout(
       feeId: input.feeId ?? null,
       source: input.source,
       upiId: effectiveUpiId || undefined,
+      payeeName: effectivePayeeName || undefined,
     },
   };
 
