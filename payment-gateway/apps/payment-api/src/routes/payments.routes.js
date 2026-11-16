@@ -1,5 +1,5 @@
 import { HttpServer } from '../server.js';
-import { toPaise, toRupeesString, resolveRuntimeUrls, PaymentStatus, safeEqual, verifyHmac } from '@youpi/common';
+import { toPaise, toRupeesString, resolveRuntimeUrls, PaymentStatus, safeEqual, verifyHmac, isValidVpa } from '@youpi/common';
 import { isTerminalStatus, toPublicOutcome, verifyRegisteredDeviceCredentials, detectIndianBank } from '@youpi/core';
 import { isAdminRequest, isPaymentOwner } from '../auth-guard.js';
 
@@ -74,6 +74,11 @@ export function registerPaymentRoutes(server, ctx) {
     const presentedMerchantKey = req.headers['x-merchant-key'] || body.merchantKey;
     const presentedOrderToken = req.headers['x-order-token'] || body.orderToken;
 
+    // Only a caller that proved it controls this merchant may choose the exact
+    // UPI handle a session collects to. The browser SDK path (default merchant,
+    // no credential) must never be able to redirect a payment to an arbitrary VPA.
+    let trustedPayeeOverride = false;
+
     if (presentedMerchantKey !== undefined && presentedMerchantKey !== null) {
       const keyValid = typeof ctx.merchantRepo.verifyApiKey === 'function'
         ? ctx.merchantRepo.verifyApiKey(merchant, String(presentedMerchantKey))
@@ -82,6 +87,7 @@ export function registerPaymentRoutes(server, ctx) {
         HttpServer.json(res, 401, { error: 'Invalid merchant key', code: 'INVALID_MERCHANT_KEY' });
         return;
       }
+      trustedPayeeOverride = true;
     } else if (presentedOrderToken) {
       let tokenAmountPaise;
       try {
@@ -96,6 +102,7 @@ export function registerPaymentRoutes(server, ctx) {
         HttpServer.json(res, 401, { error: 'Invalid order token', code: 'INVALID_ORDER_TOKEN' });
         return;
       }
+      trustedPayeeOverride = true;
     } else if (!isAdminRequest(req)) {
       // No credential was presented. The public one-script integration (the browser SDK)
       // cannot carry a merchant secret, so this path stays open - but only for the
@@ -112,6 +119,8 @@ export function registerPaymentRoutes(server, ctx) {
         });
         return;
       }
+    } else {
+      trustedPayeeOverride = true;
     }
 
     if (!body.orderId || !body.amount) {
@@ -275,6 +284,39 @@ export function registerPaymentRoutes(server, ctx) {
 
     const isCounterPayment = method === 'CASH_COUNTER' || method === 'CARD_COUNTER';
 
+    // A trusted workspace may pin a session to its own saved UPI handle. When it
+    // does, that handle is the only one the payer may see: an invalid value is a
+    // hard error instead of a silent fallback to the gateway's shared account.
+    const requestedMetadata = (body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata))
+      ? body.metadata
+      : {};
+    let requestedPayeeVpa = '';
+    let requestedPayeeName = '';
+    if (method === 'UPI' && trustedPayeeOverride) {
+      const rawPayee = requestedMetadata.upiId ?? requestedMetadata.payeeVpa;
+      if (rawPayee !== undefined && rawPayee !== null) {
+        if (typeof rawPayee !== 'string' || !rawPayee.trim()) {
+          HttpServer.json(res, 400, {
+            error: 'metadata.upiId must be a non-empty UPI ID in the format name@bank.',
+            code: 'UPI_NOT_CONFIGURED'
+          });
+          return;
+        }
+        const cleanPayee = rawPayee.trim();
+        if (!isValidVpa(cleanPayee) || PLACEHOLDER_VPAS.has(cleanPayee.toLowerCase())) {
+          HttpServer.json(res, 400, {
+            error: `Invalid or placeholder payee UPI ID: "${cleanPayee}". Use this workspace's own payable UPI ID; the gateway will not substitute another one.`,
+            code: 'UPI_NOT_CONFIGURED'
+          });
+          return;
+        }
+        requestedPayeeVpa = cleanPayee;
+        if (typeof requestedMetadata.payeeName === 'string' && requestedMetadata.payeeName.trim()) {
+          requestedPayeeName = requestedMetadata.payeeName.trim().slice(0, 120);
+        }
+      }
+    }
+
     let receivingAccountId = null;
     let receivingAccountSnapshot = null;
     if (!isCounterPayment) {
@@ -292,7 +334,7 @@ export function registerPaymentRoutes(server, ctx) {
       const rejectPlaceholder =
         process.env.NODE_ENV === 'production' ||
         process.env.YOUPI_REJECT_PLACEHOLDER_VPA === 'true';
-      if (rejectPlaceholder && PLACEHOLDER_VPAS.has(String(receivingAccount.upiId || '').trim().toLowerCase())) {
+      if (!requestedPayeeVpa && rejectPlaceholder && PLACEHOLDER_VPAS.has(String(receivingAccount.upiId || '').trim().toLowerCase())) {
         HttpServer.json(res, 500, {
           error: 'The active UPI receiving account is a placeholder. Configure the merchant UPI ID before collecting payments.',
           code: 'UPI_NOT_CONFIGURED'
@@ -302,8 +344,10 @@ export function registerPaymentRoutes(server, ctx) {
       receivingAccountId = receivingAccount.id;
       receivingAccountSnapshot = {
         id: receivingAccount.id,
-        upiId: receivingAccount.upiId,
-        payeeName: receivingAccount.payeeName,
+        upiId: requestedPayeeVpa || receivingAccount.upiId,
+        payeeName: requestedPayeeVpa
+          ? (requestedPayeeName || body.merchantName || merchant.businessName || receivingAccount.payeeName)
+          : receivingAccount.payeeName,
         isMerchantEnabled: receivingAccount.isMerchantEnabled
       };
     }
@@ -360,10 +404,20 @@ export function registerPaymentRoutes(server, ctx) {
     const initialStatus = isCounterPayment ? PaymentStatus.ACTIVE : PaymentStatus.INITIATED;
 
     const sessionMetadata = {
-      ...(body.metadata || {}),
+      ...requestedMetadata,
       ...(body.merchantName ? { merchantName: body.merchantName } : {}),
       ...(receivingAccountSnapshot ? { receivingAccountSnapshot } : {})
     };
+    // The validated snapshot is the sole authority for the payee VPA. Strip any
+    // caller-supplied handle so an unverified request can never shadow it later.
+    delete sessionMetadata.upiId;
+    delete sessionMetadata.payeeVpa;
+    delete sessionMetadata.payeeName;
+    if (requestedPayeeVpa) {
+      sessionMetadata.upiId = requestedPayeeVpa;
+      sessionMetadata.payeeVpa = requestedPayeeVpa;
+    }
+    if (requestedPayeeName) sessionMetadata.payeeName = requestedPayeeName;
 
     if (deviceId && customerId && ctx.deviceRepo) {
       try { ctx.deviceRepo.associateCustomer(deviceId, customerId); } catch {}
